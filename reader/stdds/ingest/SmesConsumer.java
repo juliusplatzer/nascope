@@ -36,12 +36,21 @@ import java.util.Locale;
  */
 public final class SmesConsumer extends AbstractVerticle {
 
+    private Thread consumerThread;
+
     @Override
     public void start(Promise<Void> startPromise) {
-        vertx.executeBlocking(() -> {
-            run(startPromise);
-            return null;
-        }, false);
+        // The JMS receive loop runs forever, so it doesn't belong on a Vert.x
+        // worker thread — the block detector would flag it at 60 s. A dedicated
+        // daemon thread is the idiomatic home for unbounded blocking I/O.
+        consumerThread = new Thread(() -> run(startPromise), "smes-consumer");
+        consumerThread.setDaemon(true);
+        consumerThread.start();
+    }
+
+    @Override
+    public void stop() {
+        if (consumerThread != null) consumerThread.interrupt();
     }
 
     private void run(Promise<Void> startPromise) {
