@@ -50,8 +50,8 @@
     </dependencies>
 
     <build>
-        <!-- Flat source layout: src/reader/stdds/{package}/{File}.java -->
-        <sourceDirectory>src/reader/stdds</sourceDirectory>
+        <!-- Flat source layout: reader/stdds/{package}/{File}.java -->
+        <sourceDirectory>reader/stdds</sourceDirectory>
 
         <plugins>
             <!-- Fat jar: java -jar target/faascope-stdds-1.0-SNAPSHOT.jar -->
