@@ -12,8 +12,10 @@ namespace asdex {
  * ASDE-X scope widget: teal surface background + an airport videomap rendered
  * to fit the widget, honoring Day/Night palette.
  *
- * Interaction: right-click-drag pans, wheel/trackpad scroll zooms around the
- * cursor.
+ * Viewport is stored in local NM (centerNm_ = scope center in NM, halfRangeNm_
+ * = half the visible extent on the limiting screen axis). Right-click-drag
+ * pans in NM; the wheel zooms in discrete 0.01 NM steps anchored at the scope
+ * center — matching VATSIM CRC behavior.
  */
 class Scope : public QWidget {
 public:
@@ -35,9 +37,10 @@ private:
     VideoMap map_;
     Mode     mode_ = Mode::Day;
 
-    // View transform: screen = pan_ + zoom_ * baseFit(geo).
-    double   zoom_ = 1.0;
-    QPointF  pan_  {0.0, 0.0};
+    // Viewport in local NM.
+    QPointF  centerNm_    {0.0, 0.0};
+    double   halfRangeNm_ = 1.0;
+    int      wheelRemainder_ = 0;  // unconsumed angleDelta units
 
     bool     panning_     = false;
     QPointF  lastPanPos_  {0.0, 0.0};

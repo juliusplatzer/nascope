@@ -2,6 +2,7 @@
 
 #include <QPainter>
 #include <QPainterPath>
+#include <QPointF>
 #include <QRectF>
 #include <QString>
 #include <QTransform>
@@ -13,11 +14,10 @@ enum class Mode { Day, Night };
 /**
  * ASDE-X surface videomap loaded from a gzipped GeoJSON FeatureCollection.
  *
- * Performance: at load time all features of the same kind are flattened into a
- * single `QPainterPath` stored in geo coordinates. Rendering applies the
- * caller-supplied geo→screen transform to the painter once and issues one
- * `drawPath` per kind (4 draw calls total), so pan/zoom only mutate the
- * transform — no vertex re-projection per frame.
+ * At load time every feature is flattened by kind into a single `QPainterPath`
+ * and projected from lon/lat into **local nautical miles** anchored at the
+ * map's bbox centroid, via `asdex::lonLatToNm`. Rendering takes a NM→screen
+ * transform and issues one `drawPath` per kind (4 calls total).
  *
  * Paint order back-to-front: structures → aprons → taxiways → runways.
  * Buildings share the structure palette.
@@ -29,15 +29,15 @@ public:
 
     static VideoMap load(const QString& icao);
 
-    bool    isValid()   const { return hasAny_; }
-    QRectF  geoBounds() const { return bounds_; }
+    bool    isValid()  const { return hasAny_; }
+    QRectF  boundsNm() const { return bounds_; }
 
-    /** `geoToScreen` maps lon/lat (x,y) to widget coords. */
-    void render(QPainter& p, const QTransform& geoToScreen, Mode mode) const;
+    /** `nmToScreen` maps local NM (x=east, y=north) to widget coords. */
+    void render(QPainter& p, const QTransform& nmToScreen, Mode mode) const;
 
 private:
     QPainterPath paths_[kKindCount];
-    QRectF       bounds_;
+    QRectF       bounds_;  // in local NM
     bool         hasAny_ = false;
 };
 

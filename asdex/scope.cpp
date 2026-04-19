@@ -1,5 +1,7 @@
 #include "scope.h"
 
+#include "maths.h"
+
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPalette>
@@ -12,38 +14,13 @@ namespace asdex {
 
 namespace {
 
-constexpr double kViewportMargin = 0.04;  // 4 % padding around the videomap
-constexpr double kMinZoom        = 0.2;
-constexpr double kMaxZoom        = 50.0;
-// One standard wheel notch = 120 angleDelta units = 1 step → 1.15× zoom.
-// Qt also feeds angleDelta for trackpads, so this scales linearly across both.
-constexpr double kZoomPerStep    = 1.15;
+constexpr double kMinHalfRangeNm = 0.01;
+constexpr double kMaxHalfRangeNm = 10.0;
+constexpr double kNmPerNotch     = 0.05;  // one wheel notch = 120 angleDelta units
 
 QColor backgroundFor(Mode m) {
     // sColorBackgroundDay / sColorBackgroundNight
     return (m == Mode::Day) ? QColor(0, 96, 120) : QColor(60, 60, 60);
-}
-
-/** Equirectangular projection with latitude cosine correction, fitted to size. */
-QTransform geoToScreen(const QRectF& geo, const QSize& view) {
-    if (geo.isEmpty() || view.isEmpty()) return {};
-
-    const double cx     = geo.center().x();
-    const double cy     = geo.center().y();
-    const double cosLat = std::cos(cy * M_PI / 180.0);
-
-    const double geoW = geo.width()  * cosLat;
-    const double geoH = geo.height();
-
-    const double availW = view.width()  * (1.0 - 2.0 * kViewportMargin);
-    const double availH = view.height() * (1.0 - 2.0 * kViewportMargin);
-    const double scale  = std::min(availW / geoW, availH / geoH);
-
-    QTransform t;
-    t.translate(view.width() / 2.0, view.height() / 2.0);
-    t.scale(scale * cosLat, -scale);  // flip y so higher latitudes paint upward
-    t.translate(-cx, -cy);
-    return t;
 }
 
 } // namespace
@@ -55,6 +32,13 @@ Scope::Scope(VideoMap map, QWidget* parent) : QWidget(parent), map_(std::move(ma
     setMouseTracking(false);
     setFocusPolicy(Qt::StrongFocus);
     applyBackground();
+
+    if (map_.isValid()) {
+        const QRectF b = map_.boundsNm();
+        centerNm_    = b.center();
+        halfRangeNm_ = std::clamp(0.5 * std::max(b.width(), b.height()),
+                                  kMinHalfRangeNm, kMaxHalfRangeNm);
+    }
 }
 
 void Scope::setMode(Mode m) {
@@ -75,20 +59,12 @@ void Scope::applyBackground() {
 void Scope::paintEvent(QPaintEvent*) {
     if (!map_.isValid()) return;
 
-    // Compose: screen = pan_ + zoom_ * baseFit(geo)
-    //   Qt post-multiplies with .translate/.scale, so the sequence below
-    //   builds (T_pan * S_zoom) in column-vector convention; the explicit
-    //   right-multiply by `base` then produces (T_pan * S_zoom) * base,
-    //   i.e. base is applied to the point first — correct.
-    QTransform user;
-    user.translate(pan_.x(), pan_.y());
-    user.scale(zoom_, zoom_);
-    const QTransform final = user * geoToScreen(map_.geoBounds(), size());
+    const QTransform t = nmToScreen(centerNm_, halfRangeNm_, size());
 
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     p.setClipRect(rect());  // belt-and-braces against off-screen path overflow
-    map_.render(p, final, mode_);
+    map_.render(p, t, mode_);
 }
 
 // ---- Pan (right-click drag) -------------------------------------------------
@@ -106,9 +82,23 @@ void Scope::mousePressEvent(QMouseEvent* ev) {
 
 void Scope::mouseMoveEvent(QMouseEvent* ev) {
     if (!panning_) { QWidget::mouseMoveEvent(ev); return; }
+
     const QPointF now = ev->position();
-    pan_       += (now - lastPanPos_);
-    lastPanPos_ = now;
+    const QPointF dPx = now - lastPanPos_;
+    lastPanPos_       = now;
+
+    // Convert pixel delta → NM delta using the active pxPerNm.
+    const double availW   = size().width()  * (1.0 - 2.0 * kViewportMargin);
+    const double availH   = size().height() * (1.0 - 2.0 * kViewportMargin);
+    const double radiusPx = 0.5 * std::min(availW, availH);
+    if (radiusPx <= 0.0) { ev->accept(); return; }
+    const double pxPerNm = radiusPx / halfRangeNm_;
+
+    // Dragging right moves the world right → scope center shifts west.
+    // Screen-y is flipped vs. NM-north, hence the sign flip on y.
+    centerNm_.rx() -= dPx.x() / pxPerNm;
+    centerNm_.ry() += dPx.y() / pxPerNm;
+
     ev->accept();
     update();
 }
@@ -130,18 +120,14 @@ void Scope::wheelEvent(QWheelEvent* ev) {
     // fingers have left the pad and otherwise keep zooming silently.
     if (ev->phase() == Qt::ScrollMomentum) { ev->ignore(); return; }
 
-    const int dy = ev->angleDelta().y();
-    if (dy == 0) { ev->ignore(); return; }
+    wheelRemainder_ += ev->angleDelta().y();
+    const int notches = wheelRemainder_ / 120;
+    if (notches == 0) { ev->accept(); return; }
+    wheelRemainder_ -= notches * 120;
 
-    const double steps   = static_cast<double>(dy) / 120.0;
-    const double newZoom = std::clamp(zoom_ * std::pow(kZoomPerStep, steps), kMinZoom, kMaxZoom);
-    const double ratio   = newZoom / zoom_;
-    if (std::abs(ratio - 1.0) < 1e-9) { ev->accept(); return; }
-
-    // Keep the geo point under the cursor fixed under the cursor after zoom.
-    const QPointF c = ev->position();
-    pan_  = c - (c - pan_) * ratio;
-    zoom_ = newZoom;
+    // Scroll up (positive) → zoom in → smaller halfRangeNm.
+    const double next = halfRangeNm_ - notches * kNmPerNotch;
+    halfRangeNm_ = std::clamp(next, kMinHalfRangeNm, kMaxHalfRangeNm);
 
     ev->accept();
     update();

@@ -1,5 +1,7 @@
 #include "videomaps.h"
 
+#include "maths.h"
+
 #include <QColor>
 #include <QDebug>
 #include <QFile>
@@ -143,10 +145,20 @@ VideoMap VideoMap::load(const QString& icao) {
         // LineStrings / Points: not part of the filled surface palette.
     }
 
+    if (m.hasAny_) {
+        // Reproject everything from lon/lat into local NM anchored at the map
+        // centroid. Downstream code (scope, targets) operates in NM only.
+        const QTransform t = lonLatToNm(m.bounds_.center());
+        for (auto& p : m.paths_) {
+            if (!p.isEmpty()) p = t.map(p);
+        }
+        m.bounds_ = t.mapRect(m.bounds_);
+    }
+
     return m;
 }
 
-void VideoMap::render(QPainter& p, const QTransform& geoToScreen, Mode mode) const {
+void VideoMap::render(QPainter& p, const QTransform& nmToScreen, Mode mode) const {
     if (!hasAny_) return;
 
     p.setPen(Qt::NoPen);
@@ -158,7 +170,7 @@ void VideoMap::render(QPainter& p, const QTransform& geoToScreen, Mode mode) con
     for (int i = 0; i < kKindCount; ++i) {
         if (paths_[i].isEmpty()) continue;
         p.setBrush(colorFor(static_cast<Kind>(i), mode));
-        p.drawPath(geoToScreen.map(paths_[i]));
+        p.drawPath(nmToScreen.map(paths_[i]));
     }
 }
 
