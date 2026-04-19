@@ -12,5 +12,6 @@ add_executable(scope
     main.cpp
     scope.cpp
     videomaps.cpp
+    maths.cpp
 )
 target_link_libraries(scope PRIVATE Qt6::Widgets ZLIB::ZLIB)
