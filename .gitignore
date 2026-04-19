@@ -1,0 +1,22 @@
+target/
+.env
+*.iml
+.idea/
+.DS_Store
+*.key.pub
+*.key
+.claude
+.claudeignore
+
+# Qt / CMake build output
+ui/build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.o
+*.obj
+*.moc
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
