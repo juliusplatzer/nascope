@@ -3,6 +3,8 @@ scope_autogen/timestamp: \
 	/Users/julius.platzer/nascope/asdex/build/CMakeFiles/4.0.2/CMakeCXXCompiler.cmake \
 	/Users/julius.platzer/nascope/asdex/build/CMakeFiles/4.0.2/CMakeSystem.cmake \
 	/Users/julius.platzer/nascope/asdex/main.cpp \
+	/Users/julius.platzer/nascope/asdex/maths.cpp \
+	/Users/julius.platzer/nascope/asdex/maths.h \
 	/Users/julius.platzer/nascope/asdex/scope.cpp \
 	/Users/julius.platzer/nascope/asdex/scope.h \
 	/Users/julius.platzer/nascope/asdex/videomaps.cpp \
