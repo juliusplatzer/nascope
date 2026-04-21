@@ -67,14 +67,19 @@ void Scope::applyBackground() {
 // ---- Paint ------------------------------------------------------------------
 
 void Scope::paintEvent(QPaintEvent*) {
-    if (!map_.isValid()) return;
-
-    const QTransform t = nmToScreen(centerNm_, halfRangeNm_, size());
-
     QPainter p(this);
-    p.setRenderHint(QPainter::Antialiasing);
     p.setClipRect(rect());  // belt-and-braces against off-screen path overflow
-    map_.render(p, t, mode_);
+
+    if (map_.isValid()) {
+        p.setRenderHint(QPainter::Antialiasing);
+        map_.render(p, nmToScreen(centerNm_, halfRangeNm_, size()), mode_);
+    }
+
+    // 1 px green scope boundary. Non-AA + integer-inset rect keeps it crisp.
+    p.setRenderHint(QPainter::Antialiasing, false);
+    p.setPen(QPen(QColor(0, 255, 0), 1));
+    p.setBrush(Qt::NoBrush);
+    p.drawRect(rect().adjusted(0, 0, -1, -1));
 }
 
 // ---- Pan (right-click drag) -------------------------------------------------
