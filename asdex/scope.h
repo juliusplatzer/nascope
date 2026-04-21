@@ -1,7 +1,10 @@
 #pragma once
 
+#include <QCursor>
+#include <QHash>
 #include <QPoint>
 #include <QPointF>
+#include <QString>
 #include <QWidget>
 
 #include "videomaps.h"
@@ -44,6 +47,9 @@ private:
 
     bool     panning_     = false;
     QPointF  lastPanPos_  {0.0, 0.0};
+
+    // Loaded once at startup; looked up by name for click/hover transitions.
+    QHash<QString, QCursor> cursors_;
 };
 
 } // namespace asdex

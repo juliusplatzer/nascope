@@ -1,7 +1,9 @@
 #include "scope.h"
 
+#include "cursors.h"
 #include "maths.h"
 
+#include <QDebug>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPalette>
@@ -39,6 +41,14 @@ Scope::Scope(VideoMap map, QWidget* parent) : QWidget(parent), map_(std::move(ma
         halfRangeNm_ = std::clamp(0.5 * std::max(b.width(), b.height()),
                                   kMinHalfRangeNm, kMaxHalfRangeNm);
     }
+
+    QString err;
+    cursors_ = loadCursors(QStringLiteral("asdex/cursors.bin"), &err);
+    if (!err.isEmpty()) qWarning().noquote() << "[scope] cursor load:" << err;
+    if (const auto it = cursors_.constFind(QStringLiteral("scope_cursor"));
+        it != cursors_.constEnd()) {
+        setCursor(*it);
+    }
 }
 
 void Scope::setMode(Mode m) {
@@ -73,7 +83,7 @@ void Scope::mousePressEvent(QMouseEvent* ev) {
     if (ev->button() == Qt::RightButton) {
         panning_    = true;
         lastPanPos_ = ev->position();
-        setCursor(Qt::ClosedHandCursor);
+        setCursor(Qt::BlankCursor);
         ev->accept();
         return;
     }
@@ -106,7 +116,10 @@ void Scope::mouseMoveEvent(QMouseEvent* ev) {
 void Scope::mouseReleaseEvent(QMouseEvent* ev) {
     if (panning_ && ev->button() == Qt::RightButton) {
         panning_ = false;
-        unsetCursor();
+        // Restore the ASDE-X scope cursor, not Qt's default arrow.
+        if (const auto it = cursors_.constFind(QStringLiteral("scope_cursor"));
+            it != cursors_.constEnd()) setCursor(*it);
+        else                           unsetCursor();
         ev->accept();
         return;
     }

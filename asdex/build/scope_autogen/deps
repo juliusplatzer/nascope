@@ -2,6 +2,8 @@ scope_autogen/timestamp: \
 	/Users/julius.platzer/nascope/asdex/CMakeLists.txt \
 	/Users/julius.platzer/nascope/asdex/build/CMakeFiles/4.0.2/CMakeCXXCompiler.cmake \
 	/Users/julius.platzer/nascope/asdex/build/CMakeFiles/4.0.2/CMakeSystem.cmake \
+	/Users/julius.platzer/nascope/asdex/cursors.cpp \
+	/Users/julius.platzer/nascope/asdex/cursors.h \
 	/Users/julius.platzer/nascope/asdex/main.cpp \
 	/Users/julius.platzer/nascope/asdex/maths.cpp \
 	/Users/julius.platzer/nascope/asdex/maths.h \
