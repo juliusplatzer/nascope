@@ -75,11 +75,14 @@ void Scope::paintEvent(QPaintEvent*) {
         map_.render(p, nmToScreen(centerNm_, halfRangeNm_, size()), mode_);
     }
 
-    // 1 px green scope boundary. Non-AA + integer-inset rect keeps it crisp.
+    // 4 px green scope boundary, drawn fully inside the widget so none of the
+    // stroke gets clipped at the window edge.
     p.setRenderHint(QPainter::Antialiasing, false);
-    p.setPen(QPen(QColor(0, 255, 0), 1));
+    QPen borderPen(QColor(0, 255, 0), 4);
+    borderPen.setJoinStyle(Qt::MiterJoin);
+    p.setPen(borderPen);
     p.setBrush(Qt::NoBrush);
-    p.drawRect(rect().adjusted(0, 0, -1, -1));
+    p.drawRect(QRectF(rect()).adjusted(2, 2, -2, -2));
 }
 
 // ---- Pan (right-click drag) -------------------------------------------------
