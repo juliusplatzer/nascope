@@ -18,7 +18,7 @@ namespace {
 
 constexpr double kMinHalfRangeNm = 0.06;  // level 6 (6 × 0.01 NM) is the tightest allowed zoom
 constexpr double kMaxHalfRangeNm = 10.0;
-constexpr double kNmPerNotch     = 0.05;  // one wheel notch = 120 angleDelta units
+constexpr double kNmPerNotch     = 0.025;  // one wheel notch = 120 angleDelta units
 
 QColor backgroundFor(Mode m) {
     // sColorBackgroundDay / sColorBackgroundNight
