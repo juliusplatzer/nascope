@@ -7,6 +7,8 @@
 #include <QString>
 #include <QWidget>
 
+#include "font.h"
+#include "lists.h"
 #include "videomaps.h"
 
 namespace asdex {
@@ -50,6 +52,10 @@ private:
 
     // Loaded once at startup; looked up by name for click/hover transitions.
     QHash<QString, QCursor> cursors_;
+
+    // Bitmap font atlas + UI lists (coast, dep, arr, …).
+    BitmapFontRenderer fontRenderer_;
+    Lists              lists_;
 };
 
 } // namespace asdex

@@ -7,6 +7,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPalette>
+#include <QTimer>
 #include <QWheelEvent>
 
 #include <algorithm>
@@ -49,6 +50,15 @@ Scope::Scope(VideoMap map, QWidget* parent) : QWidget(parent), map_(std::move(ma
         it != cursors_.constEnd()) {
         setCursor(*it);
     }
+
+    err.clear();
+    if (!fontRenderer_.load(QStringLiteral("asdex/font.bin"), &err))
+        qWarning().noquote() << "[scope] font load:" << err;
+
+    // Tick the coast-list clock at 1 Hz.
+    auto* clockTimer = new QTimer(this);
+    connect(clockTimer, &QTimer::timeout, this, QOverload<>::of(&QWidget::update));
+    clockTimer->start(1000);
 }
 
 void Scope::setMode(Mode m) {
@@ -83,6 +93,9 @@ void Scope::paintEvent(QPaintEvent*) {
     p.setPen(borderPen);
     p.setBrush(Qt::NoBrush);
     p.drawRect(QRectF(rect()).adjusted(2, 2, -2, -2));
+
+    if (fontRenderer_.isValid())
+        lists_.draw(p, size(), fontRenderer_);
 }
 
 // ---- Pan (right-click drag) -------------------------------------------------
