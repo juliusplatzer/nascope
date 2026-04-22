@@ -16,6 +16,7 @@ namespace {
 const QColor  kCoastListColor   (0, 248, 0);
 constexpr int kCoastListFontSize = 2;
 constexpr int kHeaderFieldWidth  = 12;  // chars — right-aligned date/time field
+constexpr int kLineSpacing       = 5;   // px between list rows (shared by all lists)
 // Future: aircraft rows live in a 15-char field starting at the same anchor.
 // constexpr int kListFieldWidth  = 15;
 
@@ -41,12 +42,12 @@ void Lists::drawCoastList(QPainter& p, const QSize& widgetSize,
     const QString timeLine = now.toString(QStringLiteral("HHmm/ss"))
                                 .rightJustified(kHeaderFieldWidth, QLatin1Char(' '));
 
-    const int x     = qRound(anchor.x());
-    const int y     = qRound(anchor.y());
-    const int lineH = fonts.lineHeight(kCoastListFontSize);
+    const int x          = qRound(anchor.x());
+    const int y          = qRound(anchor.y());
+    const int rowAdvance = fonts.lineHeight(kCoastListFontSize) + kLineSpacing;
 
-    fonts.drawTextTopLeft(p, x, y,         dateLine, kCoastListFontSize, kCoastListColor);
-    fonts.drawTextTopLeft(p, x, y + lineH, timeLine, kCoastListFontSize, kCoastListColor);
+    fonts.drawTextTopLeft(p, x, y,              dateLine, kCoastListFontSize, kCoastListColor);
+    fonts.drawTextTopLeft(p, x, y + rowAdvance, timeLine, kCoastListFontSize, kCoastListColor);
 }
 
 } // namespace asdex
