@@ -6,18 +6,20 @@
 
 namespace asdex {
 
-enum class AircraftType { Normal, Heavy };
+enum class TargetType { Normal, Heavy, Unknown };
 
 /**
- * Draws an aircraft target symbol centered at `posNm` (local NM, same frame as
- * the videomap), rotated so the nose points along `headingDeg` (compass,
- * degrees CW from north). The symbol outline is defined in NM-sized offsets
- * from the aircraft reference point with the nose at +Y at heading 0; we
- * rotate into the NM frame ourselves, then let `nmToScreen` do the pixel map.
- * Heavy aircraft are scaled ×1.5 and filled orange.
+ * Draws a target symbol centered at `posNm` (local NM, same frame as the
+ * videomap), rotated so the nose points along `headingDeg` (compass, degrees
+ * CW from north). The symbol outline is defined in NM-sized offsets from the
+ * target reference point with the nose at +Y at heading 0; we rotate into the
+ * NM frame ourselves, then let `nmToScreen` do the pixel map.
+ *   Normal   → white aircraft outline, ×1.0
+ *   Heavy    → orange aircraft outline, ×1.5
+ *   Unknown  → cyan kite (non-aircraft / unidentified), ×1.0
  */
-void drawAircraft(QPainter& p, const QTransform& nmToScreen,
+void drawTarget(QPainter& p, const QTransform& nmToScreen,
                   const QPointF& posNm, double headingDeg,
-                  AircraftType type = AircraftType::Normal);
+                  TargetType type = TargetType::Normal);
 
 } // namespace asdex

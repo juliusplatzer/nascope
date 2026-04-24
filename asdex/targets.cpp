@@ -43,20 +43,30 @@ constexpr std::array<GeoPoint, 23> kPolygonTgt = {{
     { -0.0000209625, -0.0001607125 },
 }};
 
+// Unknown / non-aircraft target — kite pointing at +Y (north) at heading 0.
+constexpr std::array<GeoPoint, 4> kPolygonUnkTgt = {{
+    {  0.000075, -0.000025 },
+    {  0.0,      -0.000125 },
+    { -0.000075, -0.000025 },
+    {  0.0,       0.000175 },
+}};
+
 constexpr double kHeavyScale = 1.5;
 
-QPolygonF rotatedPolygonNm(const QPointF& posNm, double headingDeg, double scale) {
+template <std::size_t N>
+QPolygonF rotatedPolygonNm(const std::array<GeoPoint, N>& pts,
+                           const QPointF& posNm, double headingDeg, double scale) {
     const double h = headingDeg * M_PI / 180.0;
     const double c = std::cos(h);
     const double s = std::sin(h);
     const double k = kDegToNm * scale;
-    // Heading is CW from north; for a point (x, y) in the aircraft's local NM
+    // Heading is CW from north; for a point (x, y) in the target's local NM
     // frame (nose at +Y), the world NM coords are:
     //   xw = xt + x*cos(h) + y*sin(h)
     //   yw = yt - x*sin(h) + y*cos(h)
     QPolygonF out;
-    out.reserve(kPolygonTgt.size());
-    for (const auto& pt : kPolygonTgt) {
+    out.reserve(pts.size());
+    for (const auto& pt : pts) {
         const double x = pt.x * k;
         const double y = pt.y * k;
         const double xw = posNm.x() + x * c + y * s;
@@ -68,13 +78,24 @@ QPolygonF rotatedPolygonNm(const QPointF& posNm, double headingDeg, double scale
 
 } // namespace
 
-void drawAircraft(QPainter& p, const QTransform& nmToScreen,
-                  const QPointF& posNm, double headingDeg, AircraftType type) {
-    const bool heavy = (type == AircraftType::Heavy);
-    const double scale  = heavy ? kHeavyScale : 1.0;
-    const QColor fill   = heavy ? QColor(248, 128, 0) : QColor(248, 248, 248);
-
-    const QPolygonF screen = nmToScreen.map(rotatedPolygonNm(posNm, headingDeg, scale));
+void drawTarget(QPainter& p, const QTransform& nmToScreen,
+                  const QPointF& posNm, double headingDeg, TargetType type) {
+    QPolygonF screen;
+    QColor    fill;
+    switch (type) {
+        case TargetType::Normal:
+            screen = nmToScreen.map(rotatedPolygonNm(kPolygonTgt, posNm, headingDeg, 1.0));
+            fill   = QColor(248, 248, 248);
+            break;
+        case TargetType::Heavy:
+            screen = nmToScreen.map(rotatedPolygonNm(kPolygonTgt, posNm, headingDeg, kHeavyScale));
+            fill   = QColor(248, 128, 0);
+            break;
+        case TargetType::Unknown:
+            screen = nmToScreen.map(rotatedPolygonNm(kPolygonUnkTgt, posNm, headingDeg, 1.0));
+            fill   = QColor(0, 255, 255);
+            break;
+    }
 
     p.save();
     p.setRenderHint(QPainter::Antialiasing, true);
