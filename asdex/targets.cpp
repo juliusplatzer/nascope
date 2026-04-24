@@ -43,10 +43,13 @@ constexpr std::array<GeoPoint, 23> kPolygonTgt = {{
     { -0.0000209625, -0.0001607125 },
 }};
 
-QPolygonF rotatedPolygonNm(const QPointF& posNm, double headingDeg) {
+constexpr double kHeavyScale = 1.5;
+
+QPolygonF rotatedPolygonNm(const QPointF& posNm, double headingDeg, double scale) {
     const double h = headingDeg * M_PI / 180.0;
     const double c = std::cos(h);
     const double s = std::sin(h);
+    const double k = kDegToNm * scale;
     // Heading is CW from north; for a point (x, y) in the aircraft's local NM
     // frame (nose at +Y), the world NM coords are:
     //   xw = xt + x*cos(h) + y*sin(h)
@@ -54,8 +57,8 @@ QPolygonF rotatedPolygonNm(const QPointF& posNm, double headingDeg) {
     QPolygonF out;
     out.reserve(kPolygonTgt.size());
     for (const auto& pt : kPolygonTgt) {
-        const double x = pt.x * kDegToNm;
-        const double y = pt.y * kDegToNm;
+        const double x = pt.x * k;
+        const double y = pt.y * k;
         const double xw = posNm.x() + x * c + y * s;
         const double yw = posNm.y() - x * s + y * c;
         out << QPointF(xw, yw);
@@ -66,13 +69,17 @@ QPolygonF rotatedPolygonNm(const QPointF& posNm, double headingDeg) {
 } // namespace
 
 void drawAircraft(QPainter& p, const QTransform& nmToScreen,
-                  const QPointF& posNm, double headingDeg) {
-    const QPolygonF screen = nmToScreen.map(rotatedPolygonNm(posNm, headingDeg));
+                  const QPointF& posNm, double headingDeg, AircraftType type) {
+    const bool heavy = (type == AircraftType::Heavy);
+    const double scale  = heavy ? kHeavyScale : 1.0;
+    const QColor fill   = heavy ? QColor(248, 128, 0) : QColor(248, 248, 248);
+
+    const QPolygonF screen = nmToScreen.map(rotatedPolygonNm(posNm, headingDeg, scale));
 
     p.save();
     p.setRenderHint(QPainter::Antialiasing, true);
     p.setPen(Qt::NoPen);
-    p.setBrush(QColor(248, 248, 248));
+    p.setBrush(fill);
     p.drawPolygon(screen);
     p.restore();
 }
