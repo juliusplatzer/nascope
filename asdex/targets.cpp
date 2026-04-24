@@ -1,6 +1,7 @@
 #include "targets.h"
 
 #include <QColor>
+#include <QDateTime>
 #include <QPolygonF>
 
 #include <array>
@@ -51,7 +52,15 @@ constexpr std::array<GeoPoint, 4> kPolygonUnkTgt = {{
     {  0.0,       0.000175 },
 }};
 
-constexpr double kHeavyScale = 1.5;
+constexpr double kHeavyScale     = 1.5;
+constexpr qint64 kAlertPeriodMs  = 1000;  // full flash cycle
+
+// Wall-clock derived so all alert targets rendered in the same frame (and
+// across widgets, in case we ever render more than one) see the same phase.
+bool alertRedPhase() {
+    const qint64 ms = QDateTime::currentMSecsSinceEpoch();
+    return (ms % kAlertPeriodMs) < (kAlertPeriodMs / 2);
+}
 
 template <std::size_t N>
 QPolygonF rotatedPolygonNm(const std::array<GeoPoint, N>& pts,
@@ -98,23 +107,25 @@ void drawHighlightRing(QPainter& p, const QTransform& nmToScreen,
 }
 
 void drawTarget(QPainter& p, const QTransform& nmToScreen,
-                const QPointF& posNm, double headingDeg, TargetType type) {
+                const QPointF& posNm, double headingDeg, TargetType type, bool alert) {
     QPolygonF screen;
-    QColor    fill;
+    QColor    typeFill;
     switch (type) {
         case TargetType::Normal:
-            screen = nmToScreen.map(rotatedPolygonNm(kPolygonTgt, posNm, headingDeg, 1.0));
-            fill   = QColor(248, 248, 248);
+            screen   = nmToScreen.map(rotatedPolygonNm(kPolygonTgt, posNm, headingDeg, 1.0));
+            typeFill = QColor(248, 248, 248);
             break;
         case TargetType::Heavy:
-            screen = nmToScreen.map(rotatedPolygonNm(kPolygonTgt, posNm, headingDeg, kHeavyScale));
-            fill   = QColor(248, 128, 0);
+            screen   = nmToScreen.map(rotatedPolygonNm(kPolygonTgt, posNm, headingDeg, kHeavyScale));
+            typeFill = QColor(248, 128, 0);
             break;
         case TargetType::Unknown:
-            screen = nmToScreen.map(rotatedPolygonNm(kPolygonUnkTgt, posNm, headingDeg, 1.0));
-            fill   = QColor(0, 255, 255);
+            screen   = nmToScreen.map(rotatedPolygonNm(kPolygonUnkTgt, posNm, headingDeg, 1.0));
+            typeFill = QColor(0, 255, 255);
             break;
     }
+
+    const QColor fill = (alert && alertRedPhase()) ? QColor(255, 0, 0) : typeFill;
 
     p.save();
     p.setRenderHint(QPainter::Antialiasing, true);
