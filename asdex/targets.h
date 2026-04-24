@@ -19,7 +19,14 @@ enum class TargetType { Normal, Heavy, Unknown };
  *   Unknown  → cyan kite (non-aircraft / unidentified), ×1.0
  */
 void drawTarget(QPainter& p, const QTransform& nmToScreen,
-                  const QPointF& posNm, double headingDeg,
-                  TargetType type = TargetType::Normal);
+                const QPointF& posNm, double headingDeg,
+                TargetType type = TargetType::Normal);
+
+/**
+ * Draws a 1 px white selection ring around `posNm`. The ring radius is fixed
+ * in world NM (0.012 NM ≈ 73 ft) so it scales consistently with zoom.
+ */
+void drawHighlightRing(QPainter& p, const QTransform& nmToScreen,
+                       const QPointF& posNm);
 
 } // namespace asdex

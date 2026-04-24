@@ -78,8 +78,27 @@ QPolygonF rotatedPolygonNm(const std::array<GeoPoint, N>& pts,
 
 } // namespace
 
+void drawHighlightRing(QPainter& p, const QTransform& nmToScreen,
+                       const QPointF& posNm) {
+    constexpr double kHighlightRadiusNm = 0.012;  // ~73 ft — matches the 150 ft pick radius
+
+    // Derive the on-screen radius from the transform itself so any future
+    // rotation / non-uniform scale in nmToScreen stays consistent.
+    const QPointF centerPx = nmToScreen.map(posNm);
+    const QPointF edgePx   = nmToScreen.map(posNm + QPointF(kHighlightRadiusNm, 0));
+    const double  radiusPx = std::hypot(edgePx.x() - centerPx.x(),
+                                        edgePx.y() - centerPx.y());
+
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QPen(QColor(255, 255, 255), 1));
+    p.setBrush(Qt::NoBrush);
+    p.drawEllipse(centerPx, radiusPx, radiusPx);
+    p.restore();
+}
+
 void drawTarget(QPainter& p, const QTransform& nmToScreen,
-                  const QPointF& posNm, double headingDeg, TargetType type) {
+                const QPointF& posNm, double headingDeg, TargetType type) {
     QPolygonF screen;
     QColor    fill;
     switch (type) {
