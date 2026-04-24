@@ -148,7 +148,8 @@ VideoMap VideoMap::load(const QString& icao) {
     if (m.hasAny_) {
         // Reproject everything from lon/lat into local NM anchored at the map
         // centroid. Downstream code (scope, targets) operates in NM only.
-        const QTransform t = lonLatToNm(m.bounds_.center());
+        m.anchor_ = m.bounds_.center();
+        const QTransform t = lonLatToNm(m.anchor_);
         for (auto& p : m.paths_) {
             if (!p.isEmpty()) p = t.map(p);
         }

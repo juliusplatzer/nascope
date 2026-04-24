@@ -13,6 +13,8 @@ scope_autogen/timestamp: \
 	/Users/julius.platzer/nascope/asdex/maths.h \
 	/Users/julius.platzer/nascope/asdex/scope.cpp \
 	/Users/julius.platzer/nascope/asdex/scope.h \
+	/Users/julius.platzer/nascope/asdex/targets.cpp \
+	/Users/julius.platzer/nascope/asdex/targets.h \
 	/Users/julius.platzer/nascope/asdex/videomaps.cpp \
 	/Users/julius.platzer/nascope/asdex/videomaps.h \
 	/opt/homebrew/lib/cmake/Qt6/FindWrapAtomic.cmake \

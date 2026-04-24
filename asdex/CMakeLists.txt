@@ -16,5 +16,6 @@ add_executable(scope
     cursors.cpp
     font.cpp
     lists.cpp
+    targets.cpp
 )
 target_link_libraries(scope PRIVATE Qt6::Widgets ZLIB::ZLIB)

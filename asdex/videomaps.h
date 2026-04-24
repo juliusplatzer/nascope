@@ -29,8 +29,11 @@ public:
 
     static VideoMap load(const QString& icao);
 
-    bool    isValid()  const { return hasAny_; }
-    QRectF  boundsNm() const { return bounds_; }
+    bool    isValid()      const { return hasAny_; }
+    QRectF  boundsNm()     const { return bounds_; }
+    /** lon/lat anchor used for the NM projection — reuse for any (lon, lat)
+     *  that needs to land in the same NM frame as this map's paths. */
+    QPointF anchorLonLat() const { return anchor_; }
 
     /** `nmToScreen` maps local NM (x=east, y=north) to widget coords. */
     void render(QPainter& p, const QTransform& nmToScreen, Mode mode) const;
@@ -38,6 +41,7 @@ public:
 private:
     QPainterPath paths_[kKindCount];
     QRectF       bounds_;  // in local NM
+    QPointF      anchor_;  // lon/lat anchor used for the NM projection
     bool         hasAny_ = false;
 };
 
