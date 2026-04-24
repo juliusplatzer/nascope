@@ -17,9 +17,15 @@ namespace asdex {
 
 namespace {
 
-constexpr double kMinHalfRangeNm = 0.06;  // level 6 (6 × 0.01 NM) is the tightest allowed zoom
+constexpr double kFtPerNm        = 6076.12;
+constexpr double kZoomStepNm     = 100.0 / kFtPerNm;   // 100 ft per discrete level
+constexpr double kMinHalfRangeNm = 6 * kZoomStepNm;    // 600 ft — tightest allowed zoom
 constexpr double kMaxHalfRangeNm = 10.0;
-constexpr double kNmPerNotch     = 0.025;  // one wheel notch = 120 angleDelta units
+
+double snapZoom(double nm) {
+    const double snapped = std::round(nm / kZoomStepNm) * kZoomStepNm;
+    return std::clamp(snapped, kMinHalfRangeNm, kMaxHalfRangeNm);
+}
 
 QColor backgroundFor(Mode m) {
     // sColorBackgroundDay / sColorBackgroundNight
@@ -39,8 +45,7 @@ Scope::Scope(VideoMap map, QWidget* parent) : QWidget(parent), map_(std::move(ma
     if (map_.isValid()) {
         const QRectF b = map_.boundsNm();
         centerNm_    = b.center();
-        halfRangeNm_ = std::clamp(0.5 * std::max(b.width(), b.height()),
-                                  kMinHalfRangeNm, kMaxHalfRangeNm);
+        halfRangeNm_ = snapZoom(0.5 * std::max(b.width(), b.height()));
     }
 
     QString err;
@@ -160,8 +165,7 @@ void Scope::wheelEvent(QWheelEvent* ev) {
     wheelRemainder_ -= notches * 120;
 
     // Scroll up (positive) → zoom in → smaller halfRangeNm.
-    const double next = halfRangeNm_ - notches * kNmPerNotch;
-    halfRangeNm_ = std::clamp(next, kMinHalfRangeNm, kMaxHalfRangeNm);
+    halfRangeNm_ = snapZoom(halfRangeNm_ - notches * kZoomStepNm);
 
     ev->accept();
     update();

@@ -19,7 +19,7 @@ namespace asdex {
  *
  * Viewport is stored in local NM (centerNm_ = scope center in NM, halfRangeNm_
  * = half the visible extent on the limiting screen axis). Right-click-drag
- * pans in NM; the wheel zooms in discrete 0.01 NM steps anchored at the scope
+ * pans in NM; the wheel zooms in discrete 100 ft steps anchored at the scope
  * center — matching VATSIM CRC behavior.
  */
 class Scope : public QWidget {
