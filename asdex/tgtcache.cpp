@@ -14,15 +14,18 @@ namespace {
 constexpr char kWsUrl[]            = "ws://localhost:8080/ws";
 constexpr int  kReconnectDelayMs   = 2000;
 
-// Apply a JSON value to a target field. For full reports an explicit JSON null
-// clears the field; for partial reports the server omits unchanged fields, so
-// null in `changed` shouldn't occur — guarded anyway.
-void setString(QString& dst, const QJsonValue& v, bool isFull) {
-    if (v.isNull()) { if (isFull) dst.clear(); return; }
+// Apply a JSON value to a target field. We deliberately treat JSON null as
+// "no update" (regardless of the server's full/partial flag): identity fields
+// like tgtType/callsign/wake aren't always re-asserted on every full report
+// (e.g. a position-only positionReport with full=true), and dropping them
+// would flip an aircraft to Unknown for a frame. Cache is cumulative —
+// removals come via the explicit `removed: true` frame.
+void setString(QString& dst, const QJsonValue& v) {
+    if (v.isNull()) return;
     dst = v.toString();
 }
-void setOptDouble(std::optional<double>& dst, const QJsonValue& v, bool isFull) {
-    if (v.isNull()) { if (isFull) dst.reset(); return; }
+void setOptDouble(std::optional<double>& dst, const QJsonValue& v) {
+    if (v.isNull()) return;
     dst = v.toDouble();
 }
 
@@ -81,7 +84,6 @@ void TgtCache::onTextMessage(const QString& text) {
     const QJsonObject changedObj = msg.value("changed").toObject();
     if (changedObj.isEmpty()) return;
 
-    const bool   isFull  = msg.value("isFull").toBool(false);
     const QString airport = msg.value("airport").toString();
 
     Target& t = targets_[key];
@@ -90,17 +92,17 @@ void TgtCache::onTextMessage(const QString& text) {
     for (auto it = changedObj.constBegin(); it != changedObj.constEnd(); ++it) {
         const QString& k = it.key();
         const QJsonValue& v = it.value();
-        if      (k == QLatin1String("tgtType"))  setString(t.tgtType,  v, isFull);
-        else if (k == QLatin1String("callsign")) setString(t.callsign, v, isFull);
-        else if (k == QLatin1String("acType"))   setString(t.acType,   v, isFull);
-        else if (k == QLatin1String("squawk"))   setString(t.squawk,   v, isFull);
-        else if (k == QLatin1String("exitFix"))  setString(t.exitFix,  v, isFull);
-        else if (k == QLatin1String("wake"))     setString(t.wake,     v, isFull);
-        else if (k == QLatin1String("lat"))      setOptDouble(t.lat,      v, isFull);
-        else if (k == QLatin1String("lon"))      setOptDouble(t.lon,      v, isFull);
-        else if (k == QLatin1String("altitude")) setOptDouble(t.altitude, v, isFull);
-        else if (k == QLatin1String("speed"))    setOptDouble(t.speed,    v, isFull);
-        else if (k == QLatin1String("heading"))  setOptDouble(t.heading,  v, isFull);
+        if      (k == QLatin1String("tgtType"))  setString(t.tgtType,  v);
+        else if (k == QLatin1String("callsign")) setString(t.callsign, v);
+        else if (k == QLatin1String("acType"))   setString(t.acType,   v);
+        else if (k == QLatin1String("squawk"))   setString(t.squawk,   v);
+        else if (k == QLatin1String("exitFix"))  setString(t.exitFix,  v);
+        else if (k == QLatin1String("wake"))     setString(t.wake,     v);
+        else if (k == QLatin1String("lat"))      setOptDouble(t.lat,      v);
+        else if (k == QLatin1String("lon"))      setOptDouble(t.lon,      v);
+        else if (k == QLatin1String("altitude")) setOptDouble(t.altitude, v);
+        else if (k == QLatin1String("speed"))    setOptDouble(t.speed,    v);
+        else if (k == QLatin1String("heading"))  setOptDouble(t.heading,  v);
     }
 
     emit changed();
