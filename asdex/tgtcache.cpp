@@ -1,6 +1,5 @@
 #include "tgtcache.h"
 
-#include <QDebug>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -27,6 +26,16 @@ void setString(QString& dst, const QJsonValue& v) {
 void setOptDouble(std::optional<double>& dst, const QJsonValue& v) {
     if (v.isNull()) return;
     dst = v.toDouble();
+}
+
+// SMES position-only positionReports default tgtType to "unknown" (the literal
+// string) when no flightInfo is present, even with full=true — so we'd lose a
+// previously-identified aircraft on every plain position update. Never
+// downgrade aircraft → unknown; only ever upgrade.
+void setTgtType(QString& dst, const QJsonValue& v) {
+    if (v.isNull()) return;
+    const QString next = v.toString();
+    if (next == QLatin1String("aircraft") || dst.isEmpty()) dst = next;
 }
 
 } // namespace
@@ -92,7 +101,7 @@ void TgtCache::onTextMessage(const QString& text) {
     for (auto it = changedObj.constBegin(); it != changedObj.constEnd(); ++it) {
         const QString& k = it.key();
         const QJsonValue& v = it.value();
-        if      (k == QLatin1String("tgtType"))  setString(t.tgtType,  v);
+        if      (k == QLatin1String("tgtType"))  setTgtType(t.tgtType, v);
         else if (k == QLatin1String("callsign")) setString(t.callsign, v);
         else if (k == QLatin1String("acType"))   setString(t.acType,   v);
         else if (k == QLatin1String("squawk"))   setString(t.squawk,   v);

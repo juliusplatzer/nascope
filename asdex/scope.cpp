@@ -56,7 +56,7 @@ Scope::Scope(VideoMap map, TgtCache* cache, QWidget* parent)
     setWindowTitle(QStringLiteral("nascope — ASDE-X"));
     resize(1280, 800);
     setAutoFillBackground(true);
-    setMouseTracking(false);
+    setMouseTracking(true);   // hover events drive the highlight-ring pick
     setFocusPolicy(Qt::StrongFocus);
     applyBackground();
 
@@ -116,6 +116,22 @@ void Scope::paintEvent(QPaintEvent*) {
 
         if (cache_ && !cache_->targets().isEmpty()) {
             const QTransform lonLatToNmT = lonLatToNm(map_.anchorLonLat());
+
+            // Pick state — track the closest target whose NM position falls
+            // within 150 ft of the cursor. Skip while panning (cursor is
+            // hidden + the world is dragging under the pointer).
+            constexpr double kPickRadiusNm   = 150.0 / kFtPerNm;
+            constexpr double kPickRadiusSq  = kPickRadiusNm * kPickRadiusNm;
+            std::optional<QPointF> cursorNm;
+            if (cursorPx_ && !panning_) {
+                bool ok = false;
+                const QTransform screenToNm = toScreen.inverted(&ok);
+                if (ok) cursorNm = screenToNm.map(*cursorPx_);
+            }
+            QPointF closestPosNm;
+            double  closestDistSq = kPickRadiusSq;
+            bool    haveClosest   = false;
+
             for (const auto& t : cache_->targets()) {
                 if (!t.lat || !t.lon) continue;
                 const QPointF posNm = lonLatToNmT.map(QPointF(*t.lon, *t.lat));
@@ -123,7 +139,20 @@ void Scope::paintEvent(QPaintEvent*) {
                            t.heading.value_or(0.0),
                            classifyTarget(t),
                            /*alert=*/false);
+
+                if (cursorNm) {
+                    const double dx = posNm.x() - cursorNm->x();
+                    const double dy = posNm.y() - cursorNm->y();
+                    const double d2 = dx*dx + dy*dy;
+                    if (d2 <= closestDistSq) {
+                        closestDistSq = d2;
+                        closestPosNm  = posNm;
+                        haveClosest   = true;
+                    }
+                }
             }
+
+            if (haveClosest) drawHighlightRing(p, toScreen, closestPosNm);
         }
     }
 
@@ -154,7 +183,12 @@ void Scope::mousePressEvent(QMouseEvent* ev) {
 }
 
 void Scope::mouseMoveEvent(QMouseEvent* ev) {
-    if (!panning_) { QWidget::mouseMoveEvent(ev); return; }
+    if (!panning_) {
+        cursorPx_ = ev->position();
+        update();
+        QWidget::mouseMoveEvent(ev);
+        return;
+    }
 
     const QPointF now = ev->position();
     const QPointF dPx = now - lastPanPos_;
@@ -187,6 +221,12 @@ void Scope::mouseReleaseEvent(QMouseEvent* ev) {
         return;
     }
     QWidget::mouseReleaseEvent(ev);
+}
+
+void Scope::leaveEvent(QEvent* ev) {
+    cursorPx_.reset();
+    update();
+    QWidget::leaveEvent(ev);
 }
 
 // ---- Zoom (wheel / trackpad scroll) ----------------------------------------

@@ -7,6 +7,8 @@
 #include <QString>
 #include <QWidget>
 
+#include <optional>
+
 #include "font.h"
 #include "lists.h"
 #include "videomaps.h"
@@ -37,6 +39,7 @@ protected:
     void mouseMoveEvent(QMouseEvent*)   override;
     void mouseReleaseEvent(QMouseEvent*) override;
     void wheelEvent(QWheelEvent*)       override;
+    void leaveEvent(QEvent*)            override;
 
 private:
     void applyBackground();
@@ -52,6 +55,10 @@ private:
 
     bool     panning_     = false;
     QPointF  lastPanPos_  {0.0, 0.0};
+
+    // Cursor in widget coords; nullopt while the pointer is outside the widget.
+    // Used to pick the closest target for the highlight ring.
+    std::optional<QPointF> cursorPx_;
 
     // Loaded once at startup; looked up by name for click/hover transitions.
     QHash<QString, QCursor> cursors_;
