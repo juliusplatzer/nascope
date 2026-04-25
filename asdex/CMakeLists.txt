@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets WebSockets)
 find_package(ZLIB REQUIRED)
 
 add_executable(scope
@@ -17,5 +17,6 @@ add_executable(scope
     font.cpp
     lists.cpp
     targets.cpp
+    tgtcache.cpp
 )
-target_link_libraries(scope PRIVATE Qt6::Widgets ZLIB::ZLIB)
+target_link_libraries(scope PRIVATE Qt6::Widgets Qt6::WebSockets ZLIB::ZLIB)

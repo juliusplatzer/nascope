@@ -13,6 +13,8 @@
 
 namespace asdex {
 
+class TgtCache;
+
 /**
  * ASDE-X scope widget: teal surface background + an airport videomap rendered
  * to fit the widget, honoring Day/Night palette.
@@ -24,7 +26,7 @@ namespace asdex {
  */
 class Scope : public QWidget {
 public:
-    explicit Scope(VideoMap map, QWidget* parent = nullptr);
+    explicit Scope(VideoMap map, TgtCache* cache, QWidget* parent = nullptr);
 
     void setMode(Mode m);
     Mode mode() const { return mode_; }
@@ -39,8 +41,9 @@ protected:
 private:
     void applyBackground();
 
-    VideoMap map_;
-    Mode     mode_ = Mode::Day;
+    VideoMap   map_;
+    TgtCache*  cache_ = nullptr;
+    Mode       mode_  = Mode::Day;
 
     // Viewport in local NM.
     QPointF  centerNm_    {0.0, 0.0};

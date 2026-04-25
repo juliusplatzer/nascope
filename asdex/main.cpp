@@ -3,6 +3,7 @@
 #include <QDebug>
 
 #include "scope.h"
+#include "tgtcache.h"
 #include "videomaps.h"
 
 int main(int argc, char** argv) {
@@ -20,13 +21,15 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    asdex::VideoMap map = asdex::VideoMap::load(pos.first());
+    const QString icao = pos.first();
+    asdex::VideoMap map = asdex::VideoMap::load(icao);
     if (!map.isValid()) {
-        qCritical().noquote() << "no videomap for" << pos.first();
+        qCritical().noquote() << "no videomap for" << icao;
         return 3;
     }
 
-    asdex::Scope scope(std::move(map));
+    asdex::TgtCache cache(icao);
+    asdex::Scope    scope(std::move(map), &cache);
     scope.show();
     return app.exec();
 }

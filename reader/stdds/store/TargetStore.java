@@ -50,6 +50,7 @@ public final class TargetStore extends AbstractVerticle {
         vertx.eventBus().<JsonObject>consumer(AirportFilter.ADDRESS, msg -> {
             Set<String> newActive = filter.update(msg.body());
             pruneToFilter(newActive);
+            snapshotTo(newActive);
             System.out.println("[Store] Airport filter → " + (newActive.isEmpty() ? "all" : newActive)
                     + " (" + store.size() + " targets retained)");
         });
@@ -64,6 +65,41 @@ public final class TargetStore extends AbstractVerticle {
 
         // Periodic stale-target eviction
         vertx.setPeriodic(EVICT_INTERVAL_MS, ignored -> evictStale());
+    }
+
+    /**
+     * Pushes a full-state diff for every target the new filter accepts, so a
+     * freshly-(re)connected client doesn't have to wait for AT-full reports
+     * to populate its local cache. The frame shape matches handleObservation's
+     * normal diff, so the client reuses its existing parser path.
+     */
+    private void snapshotTo(Set<String> active) {
+        Instant now = Instant.now();
+        for (Map.Entry<String, TargetState> e : store.entrySet()) {
+            TargetState s = e.getValue();
+            if (!active.isEmpty() && (s.airport == null || !active.contains(s.airport))) continue;
+
+            JsonObject changed = new JsonObject();
+            if (s.tgtType  != null) changed.put("tgtType",  s.tgtType);
+            if (s.callsign != null) changed.put("callsign", s.callsign);
+            if (s.acType   != null) changed.put("acType",   s.acType);
+            if (s.squawk   != null) changed.put("squawk",   s.squawk);
+            if (s.exitFix  != null) changed.put("exitFix",  s.exitFix);
+            if (s.wake     != null) changed.put("wake",     s.wake);
+            if (s.lat      != null) changed.put("lat",      s.lat);
+            if (s.lon      != null) changed.put("lon",      s.lon);
+            if (s.altitude != null) changed.put("altitude", s.altitude);
+            if (s.speed    != null) changed.put("speed",    s.speed);
+            if (s.heading  != null) changed.put("heading",  s.heading);
+            if (changed.isEmpty()) continue;
+
+            vertx.eventBus().publish(DIFF_ADDRESS, new JsonObject()
+                    .put("key",       e.getKey())
+                    .put("airport",   s.airport)
+                    .put("updatedAt", now.toString())
+                    .put("isFull",    true)
+                    .put("changed",   changed));
+        }
     }
 
     /**

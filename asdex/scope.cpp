@@ -2,6 +2,8 @@
 
 #include "cursors.h"
 #include "maths.h"
+#include "targets.h"
+#include "tgtcache.h"
 
 #include <QDebug>
 #include <QMouseEvent>
@@ -32,9 +34,25 @@ QColor backgroundFor(Mode m) {
     return (m == Mode::Day) ? QColor(0, 96, 120) : QColor(60, 60, 60);
 }
 
+// CWT A-E (and legacy H/J) is the heavy classification used by the videomap
+// rendering — anything else with tgtType == "aircraft" draws as a normal jet.
+bool isHeavyWake(QStringView wake) {
+    if (wake.size() != 1) return false;
+    const QChar c = wake.at(0).toUpper();
+    return c == 'A' || c == 'B' || c == 'C' || c == 'D' || c == 'E'
+        || c == 'H' || c == 'J';
+}
+
+TargetType classifyTarget(const TgtCache::Target& t) {
+    if (t.tgtType != QLatin1String("aircraft") || t.callsign.isEmpty())
+        return TargetType::Unknown;
+    return isHeavyWake(t.wake) ? TargetType::Heavy : TargetType::Normal;
+}
+
 } // namespace
 
-Scope::Scope(VideoMap map, QWidget* parent) : QWidget(parent), map_(std::move(map)) {
+Scope::Scope(VideoMap map, TgtCache* cache, QWidget* parent)
+    : QWidget(parent), map_(std::move(map)), cache_(cache) {
     setWindowTitle(QStringLiteral("nascope — ASDE-X"));
     resize(1280, 800);
     setAutoFillBackground(true);
@@ -64,6 +82,12 @@ Scope::Scope(VideoMap map, QWidget* parent) : QWidget(parent), map_(std::move(ma
     auto* clockTimer = new QTimer(this);
     connect(clockTimer, &QTimer::timeout, this, QOverload<>::of(&QWidget::update));
     clockTimer->start(1000);
+
+    // Repaint whenever the cache changes; Qt coalesces multiple updates into
+    // a single paint per event-loop pass.
+    if (cache_) {
+        connect(cache_, &TgtCache::changed, this, QOverload<>::of(&QWidget::update));
+    }
 }
 
 void Scope::setMode(Mode m) {
@@ -87,7 +111,20 @@ void Scope::paintEvent(QPaintEvent*) {
 
     if (map_.isValid()) {
         p.setRenderHint(QPainter::Antialiasing);
-        map_.render(p, nmToScreen(centerNm_, halfRangeNm_, size()), mode_);
+        const QTransform toScreen = nmToScreen(centerNm_, halfRangeNm_, size());
+        map_.render(p, toScreen, mode_);
+
+        if (cache_ && !cache_->targets().isEmpty()) {
+            const QTransform lonLatToNmT = lonLatToNm(map_.anchorLonLat());
+            for (const auto& t : cache_->targets()) {
+                if (!t.lat || !t.lon) continue;
+                const QPointF posNm = lonLatToNmT.map(QPointF(*t.lon, *t.lat));
+                drawTarget(p, toScreen, posNm,
+                           t.heading.value_or(0.0),
+                           classifyTarget(t),
+                           /*alert=*/false);
+            }
+        }
     }
 
     // 4 px green scope boundary, drawn fully inside the widget so none of the
