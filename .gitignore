@@ -9,7 +9,7 @@ target/
 .claudeignore
 
 # Qt / CMake build output
-ui/build/
+*/build/
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
