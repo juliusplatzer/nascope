@@ -3,11 +3,36 @@
 #include <QList>
 #include <QPainter>
 #include <QPointF>
+#include <QString>
 #include <QTransform>
+
+#include <optional>
+
+#include "font.h"
 
 namespace asdex {
 
-enum class TargetType { Normal, Heavy, Unknown };
+enum class TargetType    { Normal, Heavy, Unknown };
+enum class DatablockKind { Limited, Full };
+
+/**
+ * Per-target source data for the datablock — fully decoupled from the cache so
+ * `targets.{h,cpp}` doesn't depend on `tgtcache.h`. Field letters refer to the
+ * CRC datablock spec (fieldA = DUP BCN, fieldB = callsign, etc).
+ */
+struct DatablockFields {
+    bool    dupBeacon     = false;     // line 0: fieldA (DUP BCN warning)
+    QString callsign;                  // line 1: fieldB
+    QString beacon;                    // line 1: fieldC (used in place of B when !hasFlightPlan)
+    bool    hasFlightPlan = false;     // chooses fieldB vs fieldC
+    std::optional<int> altitudeFt;     // line 1: fieldD (rendered as 100s of ft, "XXX" if absent)
+    bool    coasted       = false;     // line 1: fieldE (CST if true, FUS otherwise)
+    QString acType;                    // line 2: fieldF
+    QString category;                  // line 2: fieldG (wake / CWT)
+    QString exitFix;                   // line 2: fieldH
+    std::optional<int> speedKt;        // line 2: fieldI (rendered as 10s of knots)
+    // fieldJ / fieldK (scratchpads) — not yet implemented.
+};
 
 /**
  * Draws a target symbol centered at `posNm` (local NM, same frame as the
@@ -73,5 +98,30 @@ QPointF drawLeaderLine(QPainter& p, const QTransform& nmToScreen,
                        const QPointF& targetPosNm,
                        double angleDeg = 45.0,
                        int lengthSteps = 2);
+
+/**
+ * Draws a 3-line datablock anchored at `anchorPx` (the leader-line endpoint
+ * returned by `drawLeaderLine`). Color matches the leader (rgb 0, 208, 0).
+ *
+ * Layout per CRC:
+ *   line 0: fieldA                                       (always reserved slot)
+ *   line 1: B|C [D] [E]      (Full)        B|C           (Limited)
+ *   line 2: F [G] H [I]      (Full)        F H           (Limited)
+ *
+ * Each visible field is appended with a single leading space and the line is
+ * trimmed at the end, so disabled / missing fields collapse cleanly without
+ * leaving placeholder gaps.
+ *
+ * Positioning depends on `leaderAngleDeg`:
+ *   - Left datablock for SW (225), W (270), NW (315) — anchored on right edge.
+ *   - Right datablock for everything else — anchored on left edge.
+ *
+ * Caller decides which targets get a datablock (e.g. skip Unknown).
+ */
+void drawDatablock(QPainter& p, BitmapFontRenderer& font,
+                   const QPointF& anchorPx, double leaderAngleDeg,
+                   const DatablockFields& fields,
+                   DatablockKind kind = DatablockKind::Limited,
+                   int fontSize = 2);
 
 } // namespace asdex

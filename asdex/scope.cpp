@@ -150,9 +150,24 @@ void Scope::paintEvent(QPaintEvent*) {
                            type,
                            /*alert=*/false);
 
-                // Leader lines sit above the symbol — only for identified targets.
+                // Leader line + datablock — only for identified targets.
+                // Leader sits above the symbol, datablock sits at the leader endpoint.
                 if (type != TargetType::Unknown) {
-                    drawLeaderLine(p, toScreen, posNm);
+                    constexpr double kLeaderAngleDeg = 45.0;  // NE default
+                    const QPointF anchorPx = drawLeaderLine(p, toScreen, posNm, kLeaderAngleDeg);
+
+                    DatablockFields f;
+                    f.callsign      = t.callsign;
+                    f.beacon        = t.squawk;
+                    f.hasFlightPlan = !t.exitFix.isEmpty();
+                    if (t.altitude) f.altitudeFt = static_cast<int>(*t.altitude);
+                    f.acType        = t.acType;
+                    f.category      = t.wake;
+                    f.exitFix       = t.exitFix;
+                    if (t.speed) f.speedKt = static_cast<int>(*t.speed);
+
+                    if (fontRenderer_.isValid())
+                        drawDatablock(p, fontRenderer_, anchorPx, kLeaderAngleDeg, f);
                 }
 
                 if (cursorNm) {

@@ -2,7 +2,9 @@
 
 #include <QColor>
 #include <QDateTime>
+#include <QLatin1Char>
 #include <QPolygonF>
+#include <QString>
 
 #include <array>
 #include <cmath>
@@ -196,6 +198,103 @@ void drawTarget(QPainter& p, const QTransform& nmToScreen,
     p.setBrush(fill);
     p.drawPolygon(screen);
     p.restore();
+}
+
+namespace {
+
+// CRC-style: append " <token>" only if `token` is non-empty.
+void appendField(QString& sb, const QString& token) {
+    if (!token.isEmpty()) sb += QLatin1Char(' ') + token;
+}
+
+QString formatHundreds(std::optional<int> ft) {
+    if (!ft) return QStringLiteral("XXX");
+    const int hund = std::clamp(*ft / 100, 0, 999);
+    return QStringLiteral("%1").arg(hund, 3, 10, QLatin1Char('0'));
+}
+
+QString formatTens(std::optional<int> kt) {
+    if (!kt) return QString();
+    const int tens = std::clamp(*kt / 10, 0, 99);
+    return QStringLiteral("%1").arg(tens, 2, 10, QLatin1Char('0'));
+}
+
+bool isLeftLeader(double angleDeg) {
+    // Round to the nearest 45 ° step and check against SW/W/NW.
+    const int rounded = ((static_cast<int>(std::round(angleDeg)) % 360) + 360) % 360;
+    return rounded == 225 || rounded == 270 || rounded == 315;
+}
+
+} // namespace
+
+void drawDatablock(QPainter& p, BitmapFontRenderer& font,
+                   const QPointF& anchorPx, double leaderAngleDeg,
+                   const DatablockFields& f,
+                   DatablockKind kind, int fontSize) {
+    if (!font.isValid()) return;
+
+    const bool full = (kind == DatablockKind::Full);
+
+    // ---- Build line strings ------------------------------------------------
+    // Each line builds a StringBuilder-style buffer with leading spaces between
+    // fields, then trims — disabled / missing fields collapse without leaving
+    // placeholder gaps.
+
+    QString line0;
+    if (f.dupBeacon) line0 = QStringLiteral("DUP BCN");
+
+    QString line1 = f.hasFlightPlan ? f.callsign : f.beacon;  // fieldB or fieldC
+    if (full) {
+        line1 += QLatin1Char(' ') + formatHundreds(f.altitudeFt);          // fieldD
+        line1 += f.coasted ? QStringLiteral(" CST") : QStringLiteral(" FUS");  // fieldE
+    }
+    line1 = line1.trimmed();
+
+    QString line2;
+    appendField(line2, f.acType);                              // fieldF (always)
+    if (full) appendField(line2, f.category);                  // fieldG (Full only)
+    appendField(line2, f.exitFix);                             // fieldH (always)
+    if (full) appendField(line2, formatTens(f.speedKt));       // fieldI (Full only)
+    line2 = line2.trimmed();
+
+    const QString lines[3] = { line0, line1, line2 };
+
+    // ---- Measure -----------------------------------------------------------
+    const int height = font.lineHeight(fontSize);
+    int widths[3] = {0, 0, 0};
+    int maxLineWidth   = 0;
+    int longestLineIdx = 0;  // ties keep the topmost (CRC's "longestHighest" path)
+    for (int i = 0; i < 3; ++i) {
+        widths[i] = font.measureText(lines[i], fontSize).width();
+        if (widths[i] > maxLineWidth) {
+            maxLineWidth   = widths[i];
+            longestLineIdx = i;
+        }
+    }
+    if (maxLineWidth == 0) return;  // nothing to draw
+
+    // ---- Position ----------------------------------------------------------
+    const bool isLeft = isLeftLeader(leaderAngleDeg);
+
+    // Right-default: leader endpoint sits ~ at the centre of line 1 (middle).
+    int x = static_cast<int>(std::round(anchorPx.x() + 2));
+    int y = static_cast<int>(std::round(anchorPx.y() - height * 3.0 / 2.0 - 2.0));
+
+    if (isLeft) {
+        x = static_cast<int>(std::round(anchorPx.x() - 2 - maxLineWidth));
+        // Vertical correction so the longest line aligns with the leader endpoint
+        // (CRC's `num4`). Only the != N branch is reachable here — we never
+        // produce a left datablock for a north-pointing leader.
+        const int verticalCorrection = (height + 2) * (-1 + longestLineIdx);
+        y -= verticalCorrection;
+    }
+
+    // ---- Render ------------------------------------------------------------
+    const QColor color(0, 208, 0);
+    for (int i = 0; i < 3; ++i) {
+        if (lines[i].isEmpty()) continue;
+        font.drawTextTopLeft(p, x, y + i * height, lines[i], fontSize, color);
+    }
 }
 
 } // namespace asdex
