@@ -1,5 +1,6 @@
 #include "tgtcache.h"
 
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -10,8 +11,10 @@ namespace asdex {
 
 namespace {
 
-constexpr char kWsUrl[]            = "ws://localhost:8080/ws";
-constexpr int  kReconnectDelayMs   = 2000;
+constexpr char   kWsUrl[]           = "ws://localhost:8080/ws";
+constexpr int    kReconnectDelayMs  = 2000;
+constexpr int    kHistMaxLen        = 7;
+constexpr qint64 kHistMinSpaceMs    = 5000;
 
 // Apply a JSON value to a target field. We deliberately treat JSON null as
 // "no update" (regardless of the server's full/partial flag): identity fields
@@ -97,6 +100,18 @@ void TgtCache::onTextMessage(const QString& text) {
 
     Target& t = targets_[key];
     if (t.airport.isEmpty()) t.airport = airport;
+
+    // Snapshot the pre-diff position into history (≥ 5 s spacing). Done
+    // before applying field updates so the trail captures *previous*
+    // positions and the live `lat`/`lon` always remain disjoint from history.
+    if (t.lat && t.lon) {
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        if (nowMs - t.historyMs >= kHistMinSpaceMs) {
+            t.posHistory.append(QPointF(*t.lon, *t.lat));
+            while (t.posHistory.size() > kHistMaxLen) t.posHistory.removeFirst();
+            t.historyMs = nowMs;
+        }
+    }
 
     for (auto it = changedObj.constBegin(); it != changedObj.constEnd(); ++it) {
         const QString& k = it.key();

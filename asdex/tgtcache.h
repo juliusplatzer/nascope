@@ -1,7 +1,9 @@
 #pragma once
 
 #include <QHash>
+#include <QList>
 #include <QObject>
+#include <QPointF>
 #include <QString>
 #include <QTimer>
 #include <QtWebSockets/QWebSocket>
@@ -34,6 +36,13 @@ public:
         QString exitFix;
         QString wake;        // CWT A-E (and legacy H/J) = heavy
         std::optional<double> lat, lon, altitude, speed, heading;
+
+        // Position trail — up to 7 past `(lon, lat)` snapshots, oldest first,
+        // each separated by ≥ 5 s wall-clock. Excludes the current position
+        // (which lives in `lat`/`lon` above), so a renderer can iterate this
+        // list directly to draw a fading tail behind the live symbol.
+        QList<QPointF> posHistory;
+        qint64         historyMs = 0;  // ms-since-epoch of the most recent push
     };
 
     explicit TgtCache(QString icao, QObject* parent = nullptr);
