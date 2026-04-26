@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QList>
 #include <QPainter>
 #include <QPointF>
 #include <QTransform>
@@ -35,5 +36,18 @@ void drawTarget(QPainter& p, const QTransform& nmToScreen,
  */
 void drawHighlightRing(QPainter& p, const QTransform& nmToScreen,
                        const QPointF& posNm);
+
+/**
+ * Draws the position-history dots for one target — small filled grey discs at
+ * each cached past position, fading from light (newest) to dark (oldest).
+ * `historyPosNm` is in local NM, ordered oldest-first / newest-last (matches
+ * the cache's posHistory layout once it's been projected through lonLatToNm).
+ *
+ * At most 7 dots are drawn — extras are ignored. Caller must invoke this
+ * *before* drawTarget for the same key so the dots sit behind the live symbol
+ * (logical z = target_z − 0.1).
+ */
+void drawHistoryDots(QPainter& p, const QTransform& nmToScreen,
+                     const QList<QPointF>& historyPosNm);
 
 } // namespace asdex

@@ -87,6 +87,35 @@ QPolygonF rotatedPolygonNm(const std::array<GeoPoint, N>& pts,
 
 } // namespace
 
+void drawHistoryDots(QPainter& p, const QTransform& nmToScreen,
+                     const QList<QPointF>& historyPosNm) {
+    constexpr double kHistRadiusNm = 0.003;   // ~18 ft — distinctly smaller than a target symbol
+    constexpr int    kMaxDots      = 7;
+    // Grey gradient indexed by *age*: kGrays[0] is the newest (lightest), kGrays[6]
+    // the oldest (dimmest). With fewer than 7 dots we use only the bright end.
+    static constexpr int kGrays[kMaxDots] = { 219, 187, 161, 138, 118, 101, 87 };
+
+    const int n = std::min(static_cast<int>(historyPosNm.size()), kMaxDots);
+    if (n == 0) return;
+
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(Qt::NoPen);
+    for (int i = 0; i < n; ++i) {
+        // historyPosNm[0] = oldest, [n-1] = newest. Color is by distance-from-newest
+        // so the just-dropped point gets kGrays[0] and the trail darkens going back.
+        const int g = kGrays[(n - 1) - i];
+        const QPointF& posNm = historyPosNm.at(i);
+        const QPointF centerPx = nmToScreen.map(posNm);
+        const QPointF edgePx   = nmToScreen.map(posNm + QPointF(kHistRadiusNm, 0));
+        const double  radiusPx = std::hypot(edgePx.x() - centerPx.x(),
+                                            edgePx.y() - centerPx.y());
+        p.setBrush(QColor(g, g, g));
+        p.drawEllipse(centerPx, radiusPx, radiusPx);
+    }
+    p.restore();
+}
+
 void drawHighlightRing(QPainter& p, const QTransform& nmToScreen,
                        const QPointF& posNm) {
     constexpr double kHighlightRadiusNm = 0.012;  // ~73 ft — matches the 150 ft pick radius

@@ -132,9 +132,18 @@ void Scope::paintEvent(QPaintEvent*) {
             double  closestDistSq = kPickRadiusSq;
             bool    haveClosest   = false;
 
+            QList<QPointF> historyNm;
+            historyNm.reserve(7);
             for (const auto& t : cache_->targets()) {
                 if (!t.lat || !t.lon) continue;
                 const QPointF posNm = lonLatToNmT.map(QPointF(*t.lon, *t.lat));
+
+                // History dots first → they sit behind the live symbol.
+                historyNm.clear();
+                for (const QPointF& lonLat : t.posHistory)
+                    historyNm.append(lonLatToNmT.map(lonLat));
+                drawHistoryDots(p, toScreen, historyNm);
+
                 drawTarget(p, toScreen, posNm,
                            t.heading.value_or(0.0),
                            classifyTarget(t),
