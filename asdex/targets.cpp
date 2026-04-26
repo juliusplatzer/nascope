@@ -116,6 +116,40 @@ void drawHistoryDots(QPainter& p, const QTransform& nmToScreen,
     p.restore();
 }
 
+QPointF drawLeaderLine(QPainter& p, const QTransform& nmToScreen,
+                       const QPointF& targetPosNm,
+                       double angleDeg, int lengthSteps) {
+    constexpr double kStartOffsetPx      = 7.0;
+    constexpr double kStepLengthPx       = 15.0;
+    constexpr double kZeroLengthAnchorPx = 10.0;
+
+    // Compass bearing → screen unit vector. Screen y grows downward, north is up.
+    const double rad = angleDeg * M_PI / 180.0;
+    const double dx  =  std::sin(rad);
+    const double dy  = -std::cos(rad);
+
+    const QPointF targetPx = nmToScreen.map(targetPosNm);
+
+    if (lengthSteps <= 0) {
+        return targetPx + QPointF(dx * kZeroLengthAnchorPx, dy * kZeroLengthAnchorPx);
+    }
+
+    const double endDist  = kStartOffsetPx + lengthSteps * kStepLengthPx;
+    const QPointF startPx = targetPx + QPointF(dx * kStartOffsetPx, dy * kStartOffsetPx);
+    const QPointF endPx   = targetPx + QPointF(dx * endDist,        dy * endDist);
+
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing, true);
+    QPen pen(QColor(0, 208, 0), 1.0);
+    pen.setStyle(Qt::SolidLine);
+    p.setPen(pen);
+    p.setBrush(Qt::NoBrush);
+    p.drawLine(startPx, endPx);
+    p.restore();
+
+    return endPx;
+}
+
 void drawHighlightRing(QPainter& p, const QTransform& nmToScreen,
                        const QPointF& posNm) {
     constexpr double kHighlightRadiusNm = 0.012;  // ~73 ft — matches the 150 ft pick radius

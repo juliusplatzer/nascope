@@ -144,10 +144,16 @@ void Scope::paintEvent(QPaintEvent*) {
                     historyNm.append(lonLatToNmT.map(lonLat));
                 drawHistoryDots(p, toScreen, historyNm);
 
+                const TargetType type = classifyTarget(t);
                 drawTarget(p, toScreen, posNm,
                            t.heading.value_or(0.0),
-                           classifyTarget(t),
+                           type,
                            /*alert=*/false);
+
+                // Leader lines sit above the symbol — only for identified targets.
+                if (type != TargetType::Unknown) {
+                    drawLeaderLine(p, toScreen, posNm);
+                }
 
                 if (cursorNm) {
                     const double dx = posNm.x() - cursorNm->x();

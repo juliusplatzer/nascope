@@ -50,4 +50,28 @@ void drawHighlightRing(QPainter& p, const QTransform& nmToScreen,
 void drawHistoryDots(QPainter& p, const QTransform& nmToScreen,
                      const QList<QPointF>& historyPosNm);
 
+/**
+ * Draws the leader line from a target out toward its datablock and returns
+ * the datablock anchor in screen pixels.
+ *
+ * `angleDeg` is a compass bearing (CW from north) — 45 = NE, 90 = E, 135 = SE,
+ * 180 = S, 225 = SW, 270 = W, 315 = NW, 360 = N. Default is NE.
+ * `lengthSteps` is how many 15 px segments the leader extends after the 7 px
+ * gap from the target. So:
+ *   - leader start  = target + 7 px in `angleDeg`
+ *   - leader end    = target + (7 + 15·lengthSteps) px in `angleDeg`
+ *
+ * If `lengthSteps == 0` the line is not drawn, but the datablock anchor is
+ * still placed 10 px away in the chosen direction so the datablock floats
+ * just clear of the target.
+ *
+ * Line style: solid, 1 px, rgb(0, 208, 0). Caller must invoke this *after*
+ * drawTarget so the leader sits above the symbol (logical z = target_z + 0.2).
+ * Leader lines are not drawn for Unknown targets — that's a caller decision.
+ */
+QPointF drawLeaderLine(QPainter& p, const QTransform& nmToScreen,
+                       const QPointF& targetPosNm,
+                       double angleDeg = 45.0,
+                       int lengthSteps = 2);
+
 } // namespace asdex
