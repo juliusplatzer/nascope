@@ -274,18 +274,21 @@ void drawDatablock(QPainter& p, BitmapFontRenderer& font,
     if (maxLineWidth == 0) return;  // nothing to draw
 
     // ---- Position ----------------------------------------------------------
+    constexpr int kLineSpacingPx = 2;     // gap between datablock lines (lists use 5)
+    const     int lineStep       = height + kLineSpacingPx;
+
     const bool isLeft = isLeftLeader(leaderAngleDeg);
 
-    // Right-default: leader endpoint sits ~ at the centre of line 1 (middle).
+    // Right-default: leader endpoint sits at the centre of line 1 (middle).
     int x = static_cast<int>(std::round(anchorPx.x() + 2));
-    int y = static_cast<int>(std::round(anchorPx.y() - height * 3.0 / 2.0 - 2.0));
+    int y = static_cast<int>(std::round(anchorPx.y() - height * 3.0 / 2.0 - kLineSpacingPx));
 
     if (isLeft) {
         x = static_cast<int>(std::round(anchorPx.x() - 2 - maxLineWidth));
         // Vertical correction so the longest line aligns with the leader endpoint
         // (CRC's `num4`). Only the != N branch is reachable here — we never
         // produce a left datablock for a north-pointing leader.
-        const int verticalCorrection = (height + 2) * (-1 + longestLineIdx);
+        const int verticalCorrection = lineStep * (-1 + longestLineIdx);
         y -= verticalCorrection;
     }
 
@@ -293,7 +296,7 @@ void drawDatablock(QPainter& p, BitmapFontRenderer& font,
     const QColor color(0, 208, 0);
     for (int i = 0; i < 3; ++i) {
         if (lines[i].isEmpty()) continue;
-        font.drawTextTopLeft(p, x, y + i * height, lines[i], fontSize, color);
+        font.drawTextTopLeft(p, x, y + i * lineStep, lines[i], fontSize, color);
     }
 }
 
