@@ -1,0 +1,79 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            ninja-build \
+            qt6-base-dev \
+            libqt6websockets6-dev \
+            zlib1g-dev
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build Java reader
+        run: mvn -B -q package -DskipTests
+
+      - name: Build asdex/scope (CMake)
+        run: |
+          cmake -S asdex -B asdex/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build asdex/build
+
+      - name: Build ui/menu (CMake)
+        run: |
+          cmake -S ui -B ui/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build ui/build
+
+      # Integration test runs only on push to main — pull_request from forks
+      # cannot access secrets anyway, so skipping there avoids a confusing
+      # failure mode for outside contributors.
+      - name: Integration test — SWIM connection
+        if: github.event_name == 'push'
+        env:
+          SMES_JMS_URL:           ${{ secrets.SMES_JMS_URL }}
+          SMES_VPN:               ${{ secrets.SMES_VPN }}
+          SCDS_USERNAME:          ${{ secrets.SCDS_USERNAME }}
+          SCDS_PASSWORD:          ${{ secrets.SCDS_PASSWORD }}
+          SMES_QUEUE:             ${{ secrets.SMES_QUEUE }}
+          SMES_PRINT_STATS:       "true"
+          SMES_STATS_INTERVAL_MS: "1000"
+          INITIAL_AIRPORT:        KSFO
+        run: |
+          set -euo pipefail
+          LOG=$(mktemp)
+          java -jar target/faascope-stdds-1.0-SNAPSHOT.jar >"$LOG" 2>&1 &
+          PID=$!
+          trap 'kill $PID 2>/dev/null || true; wait $PID 2>/dev/null || true; echo; echo "----- backend log (tail) -----"; tail -80 "$LOG"' EXIT
+
+          await () {
+            local pat="$1" desc="$2" tries="${3:-60}"  # 60 × 0.5 s = 30 s default
+            for _ in $(seq 1 "$tries"); do
+              kill -0 "$PID" 2>/dev/null || { echo "FAIL: backend died waiting for $desc"; exit 1; }
+              if grep -Eq "$pat" "$LOG"; then echo "OK: $desc"; return 0; fi
+              sleep 0.5
+            done
+            echo "FAIL: timeout waiting for $desc"
+            exit 1
+          }
+
+          await '\[SMES\] Connected'   'Solace connect'
+          await '\[SMES\] msgs=[1-9]'  'first SMES message'
