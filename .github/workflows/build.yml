@@ -46,17 +46,25 @@ jobs:
       # Integration test runs only on push to main — pull_request from forks
       # cannot access secrets anyway, so skipping there avoids a confusing
       # failure mode for outside contributors.
-      - name: Integration test — SWIM connection
+      - name: Set up Python (WebSocket smoke client)
+        if: github.event_name == 'push'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install websockets client
+        if: github.event_name == 'push'
+        run: pip install --quiet websockets
+
+      - name: Integration test — SWIM end-to-end
         if: github.event_name == 'push'
         env:
-          SMES_JMS_URL:           ${{ secrets.SMES_JMS_URL }}
-          SMES_VPN:               ${{ secrets.SMES_VPN }}
-          SCDS_USERNAME:          ${{ secrets.SCDS_USERNAME }}
-          SCDS_PASSWORD:          ${{ secrets.SCDS_PASSWORD }}
-          SMES_QUEUE:             ${{ secrets.SMES_QUEUE }}
-          SMES_PRINT_STATS:       "true"
-          SMES_STATS_INTERVAL_MS: "1000"
-          INITIAL_AIRPORT:        KSFO
+          SMES_JMS_URL:    ${{ secrets.SMES_JMS_URL }}
+          SMES_VPN:        ${{ secrets.SMES_VPN }}
+          SCDS_USERNAME:   ${{ secrets.SCDS_USERNAME }}
+          SCDS_PASSWORD:   ${{ secrets.SCDS_PASSWORD }}
+          SMES_QUEUE:      ${{ secrets.SMES_QUEUE }}
+          INITIAL_AIRPORT: KSFO
         run: |
           set -euo pipefail
           LOG=$(mktemp)
@@ -75,5 +83,46 @@ jobs:
             exit 1
           }
 
-          await '\[SMES\] Connected'   'Solace connect'
-          await '\[SMES\] msgs=[1-9]'  'first SMES message'
+          await '\[SMES\] Connected'  'Solace connect'
+          await '\[WS\] Listening'    'WebSocket listener'
+
+          # Connect a real WebSocket client and wait for a diff frame.
+          # SMES_PRINT_STATS only prints during poll-timeout gaps, which a busy
+          # KSFO feed rarely leaves — so a log grep on `msgs=` was unreliable.
+          # A diff frame on the wire end-to-end proves SMES → TargetStore →
+          # WebSocket fan-out is healthy.
+          python3 - <<'PY'
+          import asyncio, json, sys
+          import websockets
+
+          TIMEOUT_S = 30
+
+          async def main():
+              try:
+                  async with websockets.connect("ws://localhost:8080/ws") as ws:
+                      loop = asyncio.get_event_loop()
+                      deadline = loop.time() + TIMEOUT_S
+                      while True:
+                          remaining = deadline - loop.time()
+                          if remaining <= 0:
+                              print(f"FAIL: no diff frame within {TIMEOUT_S}s", flush=True)
+                              return 1
+                          try:
+                              raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
+                          except asyncio.TimeoutError:
+                              print(f"FAIL: no diff frame within {TIMEOUT_S}s", flush=True)
+                              return 1
+                          try:
+                              msg = json.loads(raw)
+                          except Exception:
+                              continue
+                          # Skip the hello frame; succeed on first diff or removal.
+                          if "changed" in msg or msg.get("removed"):
+                              print(f"OK: diff frame key={msg.get('key', '?')}", flush=True)
+                              return 0
+              except Exception as e:
+                  print(f"FAIL: WS error: {e}", flush=True)
+                  return 2
+
+          sys.exit(asyncio.run(main()))
+          PY
