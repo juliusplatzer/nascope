@@ -9,6 +9,7 @@
 
 #include <optional>
 
+#include "dcb.h"
 #include "font.h"
 #include "lists.h"
 #include "videomaps.h"
@@ -66,6 +67,10 @@ private:
     // Bitmap font atlas + UI lists (coast, dep, arr, …).
     BitmapFontRenderer fontRenderer_;
     Lists              lists_;
+
+    // Display Control Bar — top-of-screen toolbar by default. Rendered last so
+    // it sits above everything (scope content, lists, the green border).
+    dcb::Config        dcbCfg_;
 };
 
 } // namespace asdex

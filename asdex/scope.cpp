@@ -197,6 +197,9 @@ void Scope::paintEvent(QPaintEvent*) {
 
     if (fontRenderer_.isValid())
         lists_.draw(p, size(), fontRenderer_);
+
+    // Display Control Bar — last, so it sits above the scope, lists, and border.
+    dcb::render(p, fontRenderer_, size(), dcbCfg_);
 }
 
 // ---- Pan (right-click drag) -------------------------------------------------

@@ -18,5 +18,6 @@ add_executable(scope
     lists.cpp
     targets.cpp
     tgtcache.cpp
+    dcb.cpp
 )
 target_link_libraries(scope PRIVATE Qt6::Widgets Qt6::WebSockets ZLIB::ZLIB)
