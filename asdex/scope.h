@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QPoint>
 #include <QPointF>
+#include <QSet>
 #include <QString>
 #include <QWidget>
 
@@ -45,6 +46,11 @@ protected:
 private:
     void applyBackground();
 
+    // Returns the cache key of the non-Unknown target whose center in NM is
+    // closest to `pxPos` (widget coords) within the 150 ft pick radius, or
+    // nullopt if no target qualifies. Used by the left-click toggle.
+    std::optional<QString> pickClosestTargetKey(QPointF pxPos) const;
+
     VideoMap   map_;
     TgtCache*  cache_ = nullptr;
     Mode       mode_  = Mode::Day;
@@ -71,6 +77,11 @@ private:
     // Display Control Bar — top-of-screen toolbar by default. Rendered last so
     // it sits above everything (scope content, lists, the green border).
     dcb::Config        dcbCfg_;
+
+    // Per-target leader-line + datablock visibility — keys with the symbol
+    // suppressed via a left-click toggle. Default for every non-Unknown
+    // target is "shown".
+    QSet<QString>      hiddenDatablocks_;
 };
 
 } // namespace asdex

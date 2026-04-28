@@ -134,7 +134,9 @@ void Scope::paintEvent(QPaintEvent*) {
 
             QList<QPointF> historyNm;
             historyNm.reserve(7);
-            for (const auto& t : cache_->targets()) {
+            for (auto it = cache_->targets().constBegin(); it != cache_->targets().constEnd(); ++it) {
+                const QString&         key = it.key();
+                const TgtCache::Target& t  = it.value();
                 if (!t.lat || !t.lon) continue;
                 const QPointF posNm = lonLatToNmT.map(QPointF(*t.lon, *t.lat));
 
@@ -150,9 +152,10 @@ void Scope::paintEvent(QPaintEvent*) {
                            type,
                            /*alert=*/false);
 
-                // Leader line + datablock — only for identified targets.
-                // Leader sits above the symbol, datablock sits at the leader endpoint.
-                if (type != TargetType::Unknown) {
+                // Leader line + datablock — only for identified targets, and
+                // only when the user hasn't toggled them off via left-click.
+                // Leader sits above the symbol, datablock at the leader endpoint.
+                if (type != TargetType::Unknown && !hiddenDatablocks_.contains(key)) {
                     constexpr double kLeaderAngleDeg = 45.0;  // NE default
                     const QPointF anchorPx = drawLeaderLine(p, toScreen, posNm, kLeaderAngleDeg);
 
@@ -202,6 +205,41 @@ void Scope::paintEvent(QPaintEvent*) {
     dcb::render(p, fontRenderer_, size(), dcbCfg_);
 }
 
+// ---- Click pick + datablock toggle -----------------------------------------
+
+std::optional<QString> Scope::pickClosestTargetKey(QPointF pxPos) const {
+    if (!cache_ || cache_->targets().isEmpty()) return std::nullopt;
+
+    const QTransform toScreen = nmToScreen(centerNm_, halfRangeNm_, size());
+    bool ok = false;
+    const QTransform screenToNm = toScreen.inverted(&ok);
+    if (!ok) return std::nullopt;
+
+    const QPointF cursorNm = screenToNm.map(pxPos);
+    const QTransform lonLatToNmT = lonLatToNm(map_.anchorLonLat());
+
+    constexpr double kPickRadiusNm = 150.0 / kFtPerNm;
+    constexpr double kPickRadiusSq = kPickRadiusNm * kPickRadiusNm;
+
+    std::optional<QString> bestKey;
+    double bestDistSq = kPickRadiusSq;
+
+    for (auto it = cache_->targets().constBegin(); it != cache_->targets().constEnd(); ++it) {
+        const TgtCache::Target& t = it.value();
+        if (!t.lat || !t.lon) continue;
+        if (classifyTarget(t) == TargetType::Unknown) continue;
+        const QPointF posNm = lonLatToNmT.map(QPointF(*t.lon, *t.lat));
+        const double dx = posNm.x() - cursorNm.x();
+        const double dy = posNm.y() - cursorNm.y();
+        const double d2 = dx*dx + dy*dy;
+        if (d2 <= bestDistSq) {
+            bestDistSq = d2;
+            bestKey    = it.key();
+        }
+    }
+    return bestKey;
+}
+
 // ---- Pan (right-click drag) -------------------------------------------------
 
 void Scope::mousePressEvent(QMouseEvent* ev) {
@@ -211,6 +249,16 @@ void Scope::mousePressEvent(QMouseEvent* ev) {
         setCursor(Qt::BlankCursor);
         ev->accept();
         return;
+    }
+    if (ev->button() == Qt::LeftButton) {
+        // Left-click within 150 ft of a non-Unknown target → toggle that
+        // target's leader line + datablock visibility.
+        if (auto key = pickClosestTargetKey(ev->position())) {
+            if (!hiddenDatablocks_.remove(*key)) hiddenDatablocks_.insert(*key);
+            update();
+            ev->accept();
+            return;
+        }
     }
     QWidget::mousePressEvent(ev);
 }
