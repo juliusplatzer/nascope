@@ -6,6 +6,8 @@
 
 #include <algorithm>
 
+#include "brightness.h"
+
 namespace asdex::dcb {
 
 namespace {
@@ -117,12 +119,15 @@ void render(QPainter& p, BitmapFontRenderer& font,
     p.setRenderHint(QPainter::Antialiasing, false);
     p.setPen(Qt::NoPen);
 
+    const QColor bgColor    = applyBrightness(kBgColor,    cfg.brightness);
+    const QColor panelColor = applyBrightness(kPanelColor, cfg.brightness);
+
     // Off mode: skip the long stripe — just paint the small top-right box.
     if (cfg.position != Position::Off) {
-        p.fillRect(stripeRect(cfg.position, widget, L), kBgColor);
+        p.fillRect(stripeRect(cfg.position, widget, L), bgColor);
     }
     const QPoint origin = panelOrigin(cfg.position, widget, L, cfg.scrollOffset);
-    p.fillRect(QRect(origin.x(), origin.y(), L.menuWidth, L.menuHeight), kPanelColor);
+    p.fillRect(QRect(origin.x(), origin.y(), L.menuWidth, L.menuHeight), panelColor);
 
     // (Buttons live at z = -0.99 — they'll be rendered here in a follow-up.)
 

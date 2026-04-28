@@ -1,5 +1,6 @@
 #include "scope.h"
 
+#include "brightness.h"
 #include "cursors.h"
 #include "maths.h"
 #include "targets.h"
@@ -31,7 +32,8 @@ double snapZoom(double nm) {
 
 QColor backgroundFor(Mode m) {
     // sColorBackgroundDay / sColorBackgroundNight
-    return (m == Mode::Day) ? QColor(0, 96, 120) : QColor(60, 60, 60);
+    const QColor base = (m == Mode::Day) ? QColor(0, 96, 120) : QColor(60, 60, 60);
+    return applyBrightness(base, defaultBrightness());
 }
 
 // CWT A-E (and legacy H/J) is the heavy classification used by the videomap

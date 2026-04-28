@@ -9,6 +9,8 @@
 #include <array>
 #include <cmath>
 
+#include "brightness.h"
+
 namespace asdex {
 
 namespace {
@@ -112,7 +114,7 @@ void drawHistoryDots(QPainter& p, const QTransform& nmToScreen,
         const QPointF edgePx   = nmToScreen.map(posNm + QPointF(kHistRadiusNm, 0));
         const double  radiusPx = std::hypot(edgePx.x() - centerPx.x(),
                                             edgePx.y() - centerPx.y());
-        p.setBrush(QColor(g, g, g));
+        p.setBrush(applyBrightness(QColor(g, g, g), defaultBrightness()));
         p.drawEllipse(centerPx, radiusPx, radiusPx);
     }
     p.restore();
@@ -142,7 +144,7 @@ QPointF drawLeaderLine(QPainter& p, const QTransform& nmToScreen,
 
     p.save();
     p.setRenderHint(QPainter::Antialiasing, true);
-    QPen pen(QColor(0, 208, 0), 1.0);
+    QPen pen(applyBrightness(QColor(0, 208, 0), defaultBrightness()), 1.0);
     pen.setStyle(Qt::SolidLine);
     p.setPen(pen);
     p.setBrush(Qt::NoBrush);
@@ -165,7 +167,7 @@ void drawHighlightRing(QPainter& p, const QTransform& nmToScreen,
 
     p.save();
     p.setRenderHint(QPainter::Antialiasing, true);
-    p.setPen(QPen(QColor(255, 255, 255), 1));
+    p.setPen(QPen(applyBrightness(QColor(255, 255, 255), defaultBrightness()), 1));
     p.setBrush(Qt::NoBrush);
     p.drawEllipse(centerPx, radiusPx, radiusPx);
     p.restore();
@@ -195,7 +197,7 @@ void drawTarget(QPainter& p, const QTransform& nmToScreen,
     p.save();
     p.setRenderHint(QPainter::Antialiasing, true);
     p.setPen(Qt::NoPen);
-    p.setBrush(fill);
+    p.setBrush(applyBrightness(fill, defaultBrightness()));
     p.drawPolygon(screen);
     p.restore();
 }
@@ -293,7 +295,7 @@ void drawDatablock(QPainter& p, BitmapFontRenderer& font,
     }
 
     // ---- Render ------------------------------------------------------------
-    const QColor color(0, 208, 0);
+    const QColor color = applyBrightness(QColor(0, 208, 0), defaultBrightness());
     for (int i = 0; i < 3; ++i) {
         if (lines[i].isEmpty()) continue;
         font.drawTextTopLeft(p, x, y + i * lineStep, lines[i], fontSize, color);

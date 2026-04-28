@@ -1,5 +1,6 @@
 #include "videomaps.h"
 
+#include "brightness.h"
 #include "maths.h"
 
 #include <QColor>
@@ -21,13 +22,14 @@ namespace {
 
 QColor colorFor(VideoMap::Kind k, Mode m) {
     const bool day = (m == Mode::Day);
+    QColor base;
     switch (k) {
-        case VideoMap::Kind::Runway:    return QColor(0, 0, 0);
-        case VideoMap::Kind::Taxiway:   return day ? QColor(47, 47, 47)   : QColor(17, 39, 80);
-        case VideoMap::Kind::Apron:     return day ? QColor(73, 73, 73)   : QColor(18, 55, 97);
-        case VideoMap::Kind::Structure: return day ? QColor(100, 100, 100): QColor(34, 63, 103);
+        case VideoMap::Kind::Runway:    base = QColor(0, 0, 0); break;
+        case VideoMap::Kind::Taxiway:   base = day ? QColor(47, 47, 47)   : QColor(17, 39, 80);  break;
+        case VideoMap::Kind::Apron:     base = day ? QColor(73, 73, 73)   : QColor(18, 55, 97);  break;
+        case VideoMap::Kind::Structure: base = day ? QColor(100, 100, 100): QColor(34, 63, 103); break;
     }
-    return Qt::transparent;
+    return applyBrightness(base, defaultBrightness());
 }
 
 std::optional<VideoMap::Kind> classify(const QString& asdex) {
