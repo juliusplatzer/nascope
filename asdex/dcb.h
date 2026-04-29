@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QPainter>
+#include <QRect>
 #include <QSize>
 
 #include "font.h"
@@ -38,5 +39,14 @@ struct Config {
  */
 void render(QPainter& p, BitmapFontRenderer& font,
             const QSize& widget, const Config& cfg);
+
+/**
+ * Returns the dark background-stripe rect that the DCB occupies for the given
+ * widget size and config — useful for hit-testing (e.g. swap the cursor when
+ * the pointer is over the DCB). Returns an empty rect when the DCB is hidden
+ * or in Off mode (no long stripe is drawn there).
+ */
+QRect stripeRect(BitmapFontRenderer& font,
+                 const QSize& widget, const Config& cfg);
 
 } // namespace asdex::dcb

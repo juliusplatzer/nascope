@@ -51,6 +51,10 @@ private:
     // nullopt if no target qualifies. Used by the left-click toggle.
     std::optional<QString> pickClosestTargetKey(QPointF pxPos) const;
 
+    // Picks the appropriate cursor for the current hover position — dcb_cursor
+    // when over the DCB stripe, scope_cursor otherwise.
+    void updateHoverCursor();
+
     VideoMap   map_;
     TgtCache*  cache_ = nullptr;
     Mode       mode_  = Mode::Day;

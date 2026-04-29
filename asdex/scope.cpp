@@ -207,6 +207,19 @@ void Scope::paintEvent(QPaintEvent*) {
     dcb::render(p, fontRenderer_, size(), dcbCfg_);
 }
 
+// ---- Hover cursor ----------------------------------------------------------
+
+void Scope::updateHoverCursor() {
+    if (!cursorPx_) return;
+    const QRect dcbStripe = dcb::stripeRect(fontRenderer_, size(), dcbCfg_);
+    const bool overDcb = !dcbStripe.isEmpty() && dcbStripe.contains(cursorPx_->toPoint());
+    const QString want = overDcb ? QStringLiteral("dcb_cursor")
+                                 : QStringLiteral("scope_cursor");
+    if (const auto it = cursors_.constFind(want); it != cursors_.constEnd()) {
+        setCursor(*it);
+    }
+}
+
 // ---- Click pick + datablock toggle -----------------------------------------
 
 std::optional<QString> Scope::pickClosestTargetKey(QPointF pxPos) const {
@@ -268,6 +281,7 @@ void Scope::mousePressEvent(QMouseEvent* ev) {
 void Scope::mouseMoveEvent(QMouseEvent* ev) {
     if (!panning_) {
         cursorPx_ = ev->position();
+        updateHoverCursor();
         update();
         QWidget::mouseMoveEvent(ev);
         return;
@@ -295,11 +309,11 @@ void Scope::mouseMoveEvent(QMouseEvent* ev) {
 
 void Scope::mouseReleaseEvent(QMouseEvent* ev) {
     if (panning_ && ev->button() == Qt::RightButton) {
-        panning_ = false;
-        // Restore the ASDE-X scope cursor, not Qt's default arrow.
-        if (const auto it = cursors_.constFind(QStringLiteral("scope_cursor"));
-            it != cursors_.constEnd()) setCursor(*it);
-        else                           unsetCursor();
+        panning_  = false;
+        cursorPx_ = ev->position();
+        // Re-evaluate hover so we land on dcb_cursor / scope_cursor as appropriate
+        // instead of leaving the BlankCursor from the pan in place.
+        updateHoverCursor();
         ev->accept();
         return;
     }

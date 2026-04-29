@@ -63,7 +63,7 @@ int chooseCharSize(const BitmapFontRenderer& font, Position pos,
     return std::clamp(std::min(num, prefSize), 1, 3);
 }
 
-QRect stripeRect(Position pos, QSize widget, const Layout& L) {
+QRect stripeRectFor(Position pos, QSize widget, const Layout& L) {
     switch (pos) {
         case Position::Top:    return { 0, 0,                          widget.width(),  L.menuHeight  };
         case Position::Bottom: return { 0, widget.height() - L.menuHeight, widget.width(),  L.menuHeight  };
@@ -124,7 +124,7 @@ void render(QPainter& p, BitmapFontRenderer& font,
 
     // Off mode: skip the long stripe — just paint the small top-right box.
     if (cfg.position != Position::Off) {
-        p.fillRect(stripeRect(cfg.position, widget, L), bgColor);
+        p.fillRect(stripeRectFor(cfg.position, widget, L), bgColor);
     }
     const QPoint origin = panelOrigin(cfg.position, widget, L, cfg.scrollOffset);
     p.fillRect(QRect(origin.x(), origin.y(), L.menuWidth, L.menuHeight), panelColor);
@@ -132,6 +132,17 @@ void render(QPainter& p, BitmapFontRenderer& font,
     // (Buttons live at z = -0.99 — they'll be rendered here in a follow-up.)
 
     p.restore();
+}
+
+QRect stripeRect(BitmapFontRenderer& font,
+                 const QSize& widget, const Config& cfg) {
+    if (!cfg.show || widget.isEmpty() || !font.isValid()) return {};
+    if (cfg.position == Position::Off)                   return {};
+
+    const int    size = chooseCharSize(font, cfg.position, widget, cfg.prefSize);
+    const Layout L    = layoutFor(font, size, cfg.position);
+    if (L.buttonHeight <= 0) return {};
+    return stripeRectFor(cfg.position, widget, L);
 }
 
 } // namespace asdex::dcb
