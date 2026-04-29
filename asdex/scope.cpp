@@ -130,9 +130,10 @@ void Scope::paintEvent(QPaintEvent*) {
                 const QTransform screenToNm = toScreen.inverted(&ok);
                 if (ok) cursorNm = screenToNm.map(*cursorPx_);
             }
-            QPointF closestPosNm;
-            double  closestDistSq = kPickRadiusSq;
-            bool    haveClosest   = false;
+            QPointF    closestPosNm;
+            TargetType closestType  = TargetType::Normal;
+            double     closestDistSq = kPickRadiusSq;
+            bool       haveClosest  = false;
 
             QList<QPointF> historyNm;
             historyNm.reserve(7);
@@ -182,12 +183,15 @@ void Scope::paintEvent(QPaintEvent*) {
                     if (d2 <= closestDistSq) {
                         closestDistSq = d2;
                         closestPosNm  = posNm;
+                        closestType   = type;
                         haveClosest   = true;
                     }
                 }
             }
 
-            if (haveClosest) drawHighlightRing(p, toScreen, closestPosNm);
+            if (haveClosest)
+                drawHighlightRing(p, toScreen, closestPosNm,
+                                  /*heavy=*/closestType == TargetType::Heavy);
         }
     }
 

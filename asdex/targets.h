@@ -56,11 +56,13 @@ void drawTarget(QPainter& p, const QTransform& nmToScreen,
                 bool alert = false);
 
 /**
- * Draws a 1 px white selection ring around `posNm`. The ring radius is fixed
- * in world NM (0.012 NM ≈ 73 ft) so it scales consistently with zoom.
+ * Draws a 1 px white selection ring around `posNm`. Base radius is fixed in
+ * world NM (0.012 NM ≈ 73 ft) so it scales consistently with zoom; when
+ * `heavy` is true the ring is enlarged by ×1.5 to match a heavy aircraft's
+ * outline scale.
  */
 void drawHighlightRing(QPainter& p, const QTransform& nmToScreen,
-                       const QPointF& posNm);
+                       const QPointF& posNm, bool heavy = false);
 
 /**
  * Draws the position-history dots for one target — small filled grey discs at

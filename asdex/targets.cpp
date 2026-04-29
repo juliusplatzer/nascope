@@ -155,13 +155,14 @@ QPointF drawLeaderLine(QPainter& p, const QTransform& nmToScreen,
 }
 
 void drawHighlightRing(QPainter& p, const QTransform& nmToScreen,
-                       const QPointF& posNm) {
+                       const QPointF& posNm, bool heavy) {
     constexpr double kHighlightRadiusNm = 0.012;  // ~73 ft — matches the 150 ft pick radius
+    const double radiusNm = heavy ? kHighlightRadiusNm * kHeavyScale : kHighlightRadiusNm;
 
     // Derive the on-screen radius from the transform itself so any future
     // rotation / non-uniform scale in nmToScreen stays consistent.
     const QPointF centerPx = nmToScreen.map(posNm);
-    const QPointF edgePx   = nmToScreen.map(posNm + QPointF(kHighlightRadiusNm, 0));
+    const QPointF edgePx   = nmToScreen.map(posNm + QPointF(radiusNm, 0));
     const double  radiusPx = std::hypot(edgePx.x() - centerPx.x(),
                                         edgePx.y() - centerPx.y());
 
