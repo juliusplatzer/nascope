@@ -16,7 +16,7 @@ class QPainter;
 namespace asdex {
 
 /**
- * Loads the ASDE-X bitmap font atlas (asdex/font.bin) and draws text at any
+ * Loads the ASDE-X bitmap font atlas (asdex/assets/font.bin) and draws text at any
  * available size in any QColor. Each font ships a grayscale (8-bit coverage)
  * atlas; drawing with a specific color tints that atlas on first use and
  * caches the tinted QPixmap per (size, color).

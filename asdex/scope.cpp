@@ -69,7 +69,7 @@ Scope::Scope(VideoMap map, TgtCache* cache, QWidget* parent)
     }
 
     QString err;
-    cursors_ = loadCursors(QStringLiteral("asdex/cursors.bin"), &err);
+    cursors_ = loadCursors(QStringLiteral("asdex/assets"), &err);
     if (!err.isEmpty()) qWarning().noquote() << "[scope] cursor load:" << err;
     if (const auto it = cursors_.constFind(QStringLiteral("scope_cursor"));
         it != cursors_.constEnd()) {
@@ -77,7 +77,7 @@ Scope::Scope(VideoMap map, TgtCache* cache, QWidget* parent)
     }
 
     err.clear();
-    if (!fontRenderer_.load(QStringLiteral("asdex/font.bin"), &err))
+    if (!fontRenderer_.load(QStringLiteral("asdex/assets/font.bin"), &err))
         qWarning().noquote() << "[scope] font load:" << err;
 
     // Tick the coast-list clock at 1 Hz.
