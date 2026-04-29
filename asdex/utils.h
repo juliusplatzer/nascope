@@ -1,11 +1,19 @@
 #pragma once
 
+// Small shared helpers used across the asdex/ scope renderer. Currently only
+// brightness scaling — drop other lightweight utilities here as needed (avoid
+// pulling in heavy headers; consumers include this from many translation units).
+
 #include <QColor>
 
 #include <algorithm>
 #include <cmath>
 
 namespace asdex {
+
+// =============================================================================
+// Brightness scaling — mirrors CRC RenderUtils.ApplyColorBrightness
+// =============================================================================
 
 // CRC ASDEX brightness range and floor.
 inline constexpr int kBrightnessMin      = 1;

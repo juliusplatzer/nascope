@@ -1,10 +1,10 @@
 #include "scope.h"
 
-#include "brightness.h"
 #include "cursors.h"
 #include "maths.h"
 #include "targets.h"
 #include "tgtcache.h"
+#include "utils.h"
 
 #include <QDebug>
 #include <QMouseEvent>

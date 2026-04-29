@@ -1,7 +1,7 @@
 #include "videomaps.h"
 
-#include "brightness.h"
 #include "maths.h"
+#include "utils.h"
 
 #include <QColor>
 #include <QDebug>

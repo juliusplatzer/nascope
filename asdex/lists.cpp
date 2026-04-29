@@ -1,6 +1,7 @@
 #include "lists.h"
 
 #include "font.h"
+#include "utils.h"
 
 #include <QColor>
 #include <QDateTime>
@@ -46,8 +47,9 @@ void Lists::drawCoastList(QPainter& p, const QSize& widgetSize,
     const int y          = qRound(anchor.y());
     const int rowAdvance = fonts.lineHeight(kCoastListFontSize) + kLineSpacing;
 
-    fonts.drawTextTopLeft(p, x, y,              dateLine, kCoastListFontSize, kCoastListColor);
-    fonts.drawTextTopLeft(p, x, y + rowAdvance, timeLine, kCoastListFontSize, kCoastListColor);
+    const QColor color = applyBrightness(kCoastListColor, defaultBrightness());
+    fonts.drawTextTopLeft(p, x, y,              dateLine, kCoastListFontSize, color);
+    fonts.drawTextTopLeft(p, x, y + rowAdvance, timeLine, kCoastListFontSize, color);
 }
 
 } // namespace asdex

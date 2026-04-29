@@ -9,7 +9,7 @@
 #include <array>
 #include <cmath>
 
-#include "brightness.h"
+#include "utils.h"
 
 namespace asdex {
 
