@@ -132,4 +132,19 @@ void TgtCache::onTextMessage(const QString& text) {
     emit changed();
 }
 
+void TgtCache::applyDatablockEdit(const QString& key,
+                                  const QString& callsign, const QString& squawk,
+                                  const QString& wake,     const QString& acType,
+                                  const QString& exitFix) {
+    auto it = targets_.find(key);
+    if (it == targets_.end()) return;
+    Target& t = it.value();
+    t.callsign = callsign;
+    t.squawk   = squawk;
+    t.wake     = wake;
+    t.acType   = acType;
+    t.exitFix  = exitFix;
+    emit changed();
+}
+
 } // namespace asdex

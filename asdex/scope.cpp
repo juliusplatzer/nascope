@@ -7,6 +7,7 @@
 #include "utils.h"
 
 #include <QDebug>
+#include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPalette>
@@ -263,6 +264,13 @@ std::optional<QString> Scope::pickClosestTargetKey(QPointF pxPos) const {
 
 void Scope::mousePressEvent(QMouseEvent* ev) {
     if (ev->button() == Qt::RightButton) {
+        // Right-click within 150 ft of a non-Unknown target → open the
+        // datablock editor for it. Otherwise fall through to pan-drag.
+        if (auto key = pickClosestTargetKey(ev->position())) {
+            enterEditMode(*key);
+            ev->accept();
+            return;
+        }
         panning_    = true;
         lastPanPos_ = ev->position();
         setCursor(Qt::BlankCursor);
@@ -342,10 +350,159 @@ void Scope::wheelEvent(QWheelEvent* ev) {
     if (notches == 0) { ev->accept(); return; }
     wheelRemainder_ -= notches * 120;
 
+    // While the datablock editor is open the wheel cycles the active field
+    // (CRC: scroll up → previous field, scroll down → next field).
+    if (edit_.active) {
+        cycleEditField(-notches);
+        ev->accept();
+        return;
+    }
+
     // Scroll up (positive) → zoom in → smaller halfRangeNm.
     halfRangeNm_ = snapZoom(halfRangeNm_ - notches * kZoomStepNm);
 
     ev->accept();
+    update();
+}
+
+// ---- Datablock editor ------------------------------------------------------
+
+void Scope::keyPressEvent(QKeyEvent* ev) {
+    if (!edit_.active) { QWidget::keyPressEvent(ev); return; }
+
+    const int key = ev->key();
+    if (key == Qt::Key_Up) {
+        cycleEditField(-1);
+        ev->accept();
+        return;
+    }
+    if (key == Qt::Key_Down || key == Qt::Key_Tab) {
+        cycleEditField(+1);
+        ev->accept();
+        return;
+    }
+    if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+        // Enter on the last field (SP2) saves and exits — see CRC docs:
+        // "Press Enter after scratchpad 2 to save."
+        if (edit_.field == EditField::Sp2) commitEdit();
+        else                               cycleEditField(+1);
+        ev->accept();
+        return;
+    }
+    if (key == Qt::Key_Backspace) {
+        clearCurrentEditField();
+        ev->accept();
+        return;
+    }
+    if (key == Qt::Key_Escape) {
+        // Not in CRC's docs but useful: cancel without saving.
+        exitEditMode();
+        ev->accept();
+        return;
+    }
+
+    const QString text = ev->text();
+    if (!text.isEmpty()) {
+        for (const QChar c : text) {
+            if (c.isPrint()) appendToCurrentEditField(c);
+        }
+        ev->accept();
+        return;
+    }
+    QWidget::keyPressEvent(ev);
+}
+
+void Scope::enterEditMode(const QString& key) {
+    if (!cache_) return;
+    const auto it = cache_->targets().constFind(key);
+    if (it == cache_->targets().constEnd()) return;
+
+    edit_.active = true;
+    edit_.key    = key;
+    edit_.field  = EditField::Aircraft;
+
+    // Seed buffers from the cache; uppercase to match ATC convention.
+    const TgtCache::Target& t = it.value();
+    edit_.values[int(EditField::Aircraft)] = t.callsign.toUpper();
+    edit_.values[int(EditField::Beacon)]   = t.squawk;
+    edit_.values[int(EditField::Category)] = t.wake.toUpper();
+    edit_.values[int(EditField::Type)]     = t.acType.toUpper();
+    edit_.values[int(EditField::Fix)]      = t.exitFix.toUpper();
+    edit_.values[int(EditField::Sp1)].clear();   // scratchpads not tracked yet
+    edit_.values[int(EditField::Sp2)].clear();
+
+    refreshPreviewFromEdit();
+}
+
+void Scope::commitEdit() {
+    if (!edit_.active) return;
+    if (cache_) {
+        cache_->applyDatablockEdit(edit_.key,
+                                   edit_.values[int(EditField::Aircraft)],
+                                   edit_.values[int(EditField::Beacon)],
+                                   edit_.values[int(EditField::Category)],
+                                   edit_.values[int(EditField::Type)],
+                                   edit_.values[int(EditField::Fix)]);
+    }
+    exitEditMode();
+}
+
+void Scope::exitEditMode() {
+    if (!edit_.active) return;
+    edit_ = {};
+    auto& pa = lists_.preview();
+    pa.commandLines.clear();
+    pa.showCursor = false;
+    update();
+}
+
+void Scope::cycleEditField(int delta) {
+    if (!edit_.active || delta == 0) return;
+    const int next = std::clamp(int(edit_.field) + delta, 0, kEditFieldCount - 1);
+    edit_.field = static_cast<EditField>(next);
+    refreshPreviewFromEdit();
+}
+
+void Scope::clearCurrentEditField() {
+    if (!edit_.active) return;
+    edit_.values[int(edit_.field)].clear();
+    refreshPreviewFromEdit();
+}
+
+void Scope::appendToCurrentEditField(QChar c) {
+    if (!edit_.active) return;
+    // Scratchpads (SP1/SP2) accept up to 7 chars per the doc but the cache
+    // doesn't carry them yet — leave read-only until we wire scratchpad state.
+    if (edit_.field == EditField::Sp1 || edit_.field == EditField::Sp2) return;
+    edit_.values[int(edit_.field)] += c.toUpper();
+    refreshPreviewFromEdit();
+}
+
+void Scope::refreshPreviewFromEdit() {
+    auto& pa = lists_.preview();
+    if (!edit_.active) {
+        pa.commandLines.clear();
+        pa.showCursor = false;
+        update();
+        return;
+    }
+
+    static constexpr const char* kLabels[kEditFieldCount] = {
+        "A/C", "BCN", "CAT", "TYP", "FIX", "SP1", "SP2",
+    };
+    constexpr int kLabelColumns = 5;  // "XYZ: " — label + colon + space, fixed cursor offset
+
+    pa.commandLines.clear();
+    pa.commandLines.reserve(kEditFieldCount);
+    for (int i = 0; i < kEditFieldCount; ++i) {
+        pa.commandLines << QStringLiteral("%1: %2")
+                               .arg(QString::fromLatin1(kLabels[i]),
+                                    edit_.values[i]);
+    }
+
+    pa.showCursor   = true;
+    pa.cursorLine   = int(edit_.field);   // index within commandLines
+    pa.cursorColumn = kLabelColumns + edit_.values[int(edit_.field)].size();
     update();
 }
 

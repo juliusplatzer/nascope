@@ -42,6 +42,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent*) override;
     void wheelEvent(QWheelEvent*)       override;
     void leaveEvent(QEvent*)            override;
+    void keyPressEvent(QKeyEvent*)      override;
 
 private:
     void applyBackground();
@@ -86,6 +87,31 @@ private:
     // suppressed via a left-click toggle. Default for every non-Unknown
     // target is "shown".
     QSet<QString>      hiddenDatablocks_;
+
+    // ---- Datablock editor ---------------------------------------------------
+    // Right-click on a non-Unknown target opens a 7-line edit form in the
+    // preview area (A/C, BCN, CAT, TYP, FIX, SP1, SP2). Cursor cycles with
+    // wheel / arrow keys / Enter. Backspace clears, printable keys append.
+    // Enter on the last field exits edit mode. SP1/SP2 are visible but
+    // currently read-only — the cache doesn't carry scratchpad fields yet.
+    enum class EditField { Aircraft = 0, Beacon, Category, Type, Fix, Sp1, Sp2 };
+    static constexpr int kEditFieldCount = 7;
+
+    struct EditState {
+        bool       active = false;
+        QString    key;                     // target cache key being edited
+        EditField  field = EditField::Aircraft;
+        QString    values[kEditFieldCount]; // current edit buffers, indexed by EditField
+    };
+    EditState edit_;
+
+    void enterEditMode(const QString& key);
+    void commitEdit();                           // writes edit_ buffers → cache and exits (Enter on SP2)
+    void exitEditMode();                         // cleanup only — no commit (Esc, target gone, etc.)
+    void cycleEditField(int delta);              // +1 = next, -1 = prev; clamps at boundaries
+    void clearCurrentEditField();                // Backspace handler
+    void appendToCurrentEditField(QChar c);      // printable-key handler (no-op for read-only fields)
+    void refreshPreviewFromEdit();               // pushes edit_ → lists_.preview() so the next paint reflects state
 };
 
 } // namespace asdex

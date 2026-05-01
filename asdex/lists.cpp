@@ -92,7 +92,9 @@ void Lists::drawPreviewArea(QPainter& p, const QSize& widgetSize,
 
         const int cursorX = x + charWidth * pa.cursorColumn
                               + kFontSpacing * (pa.cursorColumn - 1);
-        const int cursorY = y0 + lineStep * (pa.cursorLine + statusLineCount);
+        // Bumped down one line vs. CRC's literal formula — lands at the top
+        // of the next line so the underline visually sits beneath the text.
+        const int cursorY = y0 + lineStep * (pa.cursorLine + statusLineCount + 1);
 
         QPen pen(color, 1.0);
         pen.setStyle(Qt::SolidLine);

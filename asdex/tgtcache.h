@@ -49,6 +49,18 @@ public:
 
     const QHash<QString, Target>& targets() const { return targets_; }
 
+    /**
+     * Writes the editable subset of fields (the ones surfaced by the
+     * datablock editor) back into the cache for `key`. No-op if the key is
+     * absent. Emits `changed()` so the scope repaints with the new values
+     * on the next event-loop pass. Not persisted — the next server diff
+     * for this target may overwrite these fields.
+     */
+    void applyDatablockEdit(const QString& key,
+                            const QString& callsign, const QString& squawk,
+                            const QString& wake,     const QString& acType,
+                            const QString& exitFix);
+
 signals:
     void changed();
 
