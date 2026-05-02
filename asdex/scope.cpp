@@ -164,10 +164,12 @@ void Scope::paintEvent(QPaintEvent*) {
                     drawVectorLine(p, toScreen, posNm, *t.heading, *t.speed);
                 }
 
-                // Leader line + datablock — only for identified targets, and
-                // only when the user hasn't toggled them off via left-click.
-                // Leader sits above the symbol, datablock at the leader endpoint.
-                if (type != TargetType::Unknown && !hiddenDatablocks_.contains(key)) {
+                // Leader line + datablock — only for identified targets, when
+                // the global F6 toggle is on, and the user hasn't toggled
+                // this specific target off via left-click. Leader sits above
+                // the symbol; datablock at the leader endpoint.
+                if (type != TargetType::Unknown && showAllDatablocks_
+                                                && !hiddenDatablocks_.contains(key)) {
                     constexpr double kLeaderAngleDeg = 45.0;  // NE default
                     const QPointF anchorPx = drawLeaderLine(p, toScreen, posNm, kLeaderAngleDeg);
 
@@ -376,6 +378,13 @@ void Scope::wheelEvent(QWheelEvent* ev) {
 // ---- Datablock editor ------------------------------------------------------
 
 void Scope::keyPressEvent(QKeyEvent* ev) {
+    // F6 — global datablock toggle. Handled regardless of edit-mode state.
+    if (ev->key() == Qt::Key_F6) {
+        showAllDatablocks_ = !showAllDatablocks_;
+        update();
+        ev->accept();
+        return;
+    }
     if (!edit_.active) { QWidget::keyPressEvent(ev); return; }
 
     const int key = ev->key();

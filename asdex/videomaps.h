@@ -19,12 +19,13 @@ enum class Mode { Day, Night };
  * map's bbox centroid, via `asdex::lonLatToNm`. Rendering takes a NM→screen
  * transform and issues one `drawPath` per kind (4 calls total).
  *
- * Paint order back-to-front: structures → aprons → taxiways → runways.
- * Buildings share the structure palette.
+ * Paint order back-to-front: aprons → structures → taxiways → runways.
+ * Structures sit *over* the apron so terminal buildings reaching into the
+ * apron stay visible. Buildings share the structure palette.
  */
 class VideoMap {
 public:
-    enum class Kind { Structure = 0, Apron = 1, Taxiway = 2, Runway = 3 };
+    enum class Kind { Apron = 0, Structure = 1, Taxiway = 2, Runway = 3 };
     static constexpr int kKindCount = 4;
 
     static VideoMap load(const QString& icao);

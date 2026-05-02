@@ -119,8 +119,14 @@ VideoMap VideoMap::load(const QString& icao) {
         return m;
     }
 
-    // OddEvenFill handles GeoJSON holes correctly regardless of ring winding.
+    // OddEvenFill handles GeoJSON holes correctly regardless of ring winding,
+    // but it cancels overlap between separate features — runways drawn as
+    // independent polygons would punch holes at their crossings (visible as
+    // background teal at e.g. KJFK). Runway outers are simple convex
+    // rectangles with no holes, so use WindingFill there: overlapping CCW
+    // outers wind to ≥ 1 and stay filled.
     for (auto& p : m.paths_) p.setFillRule(Qt::OddEvenFill);
+    m.paths_[int(VideoMap::Kind::Runway)].setFillRule(Qt::WindingFill);
 
     const QJsonArray features = doc.object().value("features").toArray();
     bool firstRing = true;

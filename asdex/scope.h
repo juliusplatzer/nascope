@@ -88,6 +88,11 @@ private:
     // target is "shown".
     QSet<QString>      hiddenDatablocks_;
 
+    // Global datablock visibility (toggled by F6). When false, no leader/
+    // datablock is drawn regardless of `hiddenDatablocks_`. Per-target
+    // overrides are preserved across F6 presses.
+    bool               showAllDatablocks_ = true;
+
     // ---- Datablock editor ---------------------------------------------------
     // Right-click on a non-Unknown target opens a 7-line edit form in the
     // preview area (A/C, BCN, CAT, TYP, FIX, SP1, SP2). Cursor cycles with
