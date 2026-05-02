@@ -78,6 +78,24 @@ void drawHistoryDots(QPainter& p, const QTransform& nmToScreen,
                      const QList<QPointF>& historyPosNm);
 
 /**
+ * Draws a target's velocity vector line — a 1 px solid segment from the
+ * target outward along its current track. Length is `gs * seconds / 3600`
+ * in NM, so a 200 kt aircraft with the default 5 s horizon projects ~0.28 NM.
+ *
+ * `headingDeg` is a compass bearing (CW from north), `speedKts` ground speed,
+ * `vectorSeconds` the projection horizon (clamped to 1..20). Color is
+ * rgb(140, 140, 140) brightness-scaled with the standard 20% floor.
+ *
+ * Caller draws this *after* drawTarget so the line lands on top of the symbol
+ * (CRC's WindowElementTargets queues DrawAircraftModel then DrawVectorLine
+ * at the same z). Skip for Unknown targets — caller's responsibility.
+ */
+void drawVectorLine(QPainter& p, const QTransform& nmToScreen,
+                    const QPointF& targetPosNm,
+                    double headingDeg, double speedKts,
+                    int vectorSeconds = 5);
+
+/**
  * Draws the leader line from a target out toward its datablock and returns
  * the datablock anchor in screen pixels.
  *

@@ -120,6 +120,31 @@ void drawHistoryDots(QPainter& p, const QTransform& nmToScreen,
     p.restore();
 }
 
+void drawVectorLine(QPainter& p, const QTransform& nmToScreen,
+                    const QPointF& targetPosNm,
+                    double headingDeg, double speedKts, int vectorSeconds) {
+    if (speedKts <= 0.0) return;
+    vectorSeconds = std::clamp(vectorSeconds, 1, 20);
+
+    const double lengthNm = speedKts * vectorSeconds / 3600.0;
+
+    // Compass heading θ (CW from north) → NM unit vector (sin θ, cos θ),
+    // since +y in NM is north (cf. nmToScreen's `scale(pxPerNm, -pxPerNm)`).
+    const double rad = headingDeg * M_PI / 180.0;
+    const double dx  = std::sin(rad);
+    const double dy  = std::cos(rad);
+    const QPointF endNm = targetPosNm + QPointF(dx * lengthNm, dy * lengthNm);
+
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing, true);
+    QPen pen(applyBrightness(QColor(140, 140, 140), defaultBrightness()), 1.0);
+    pen.setStyle(Qt::SolidLine);
+    p.setPen(pen);
+    p.setBrush(Qt::NoBrush);
+    p.drawLine(nmToScreen.map(targetPosNm), nmToScreen.map(endNm));
+    p.restore();
+}
+
 QPointF drawLeaderLine(QPainter& p, const QTransform& nmToScreen,
                        const QPointF& targetPosNm,
                        double angleDeg, int lengthSteps) {

@@ -156,6 +156,14 @@ void Scope::paintEvent(QPaintEvent*) {
                            type,
                            /*alert=*/false);
 
+                // Velocity vector — drawn right after the symbol so it lands
+                // on top of it, matching CRC's queue order. Skip for Unknown
+                // targets, and skip when track or speed is unknown (drawing
+                // a north-pointing zero-length line would be misleading).
+                if (type != TargetType::Unknown && t.heading && t.speed && *t.speed > 0.0) {
+                    drawVectorLine(p, toScreen, posNm, *t.heading, *t.speed);
+                }
+
                 // Leader line + datablock — only for identified targets, and
                 // only when the user hasn't toggled them off via left-click.
                 // Leader sits above the symbol, datablock at the leader endpoint.
