@@ -7,8 +7,11 @@
 #include <QPen>
 #include <QPointF>
 #include <QRectF>
+#include <QtMath>
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace asdex {
 
@@ -87,6 +90,89 @@ void drawRestrictionArea(QPainter& p, const QPolygonF& polyNm, const QTransform&
              << QPointF(base + kHatchWidth  + kHatchYScale * yBottom, yBottom)
              << QPointF(base                + kHatchYScale * yBottom, yBottom);
         p.drawPolygon(band);
+    }
+
+    p.restore();
+}
+
+void drawRunwayClosure(QPainter& p,
+                       const QPolygonF& polyNm,
+                       double headingMagDeg,
+                       const QTransform& nmToScreen) {
+    if (polyNm.size() < 4) return;
+
+    constexpr double kClosureAngleDeg = 15.0;
+
+    // Runway axis in NM (y = north). Heading θ rotates from N toward E so the
+    // axis vector is (sinθ, cosθ); the transverse vector 90° to the right of
+    // it is (cosθ, −sinθ). Magnetic heading is treated as true here — see the
+    // header for why.
+    const double thRad = qDegreesToRadians(headingMagDeg);
+    const QPointF axis(std::sin(thRad),  std::cos(thRad));
+    const QPointF perp(std::cos(thRad), -std::sin(thRad));
+
+    // Pick the four "outermost" polygon vertices in (axis, perp) coords.
+    // For a runway-shaped quadrilateral aligned with the heading, these are
+    // the four actual corners; for a polygon with extra vertices they are
+    // still the convex extremes in each runway-local quadrant.
+    auto findCorner = [&](double axisSign, double perpSign) {
+        QPointF best;
+        double  bestScore = -std::numeric_limits<double>::infinity();
+        for (const QPointF& v : polyNm) {
+            const double score = axisSign * QPointF::dotProduct(v, axis)
+                               + perpSign * QPointF::dotProduct(v, perp);
+            if (score > bestScore) { bestScore = score; best = v; }
+        }
+        return best;
+    };
+    const QPointF cornerFL = findCorner(+1, -1);  // front, left of axis
+    const QPointF cornerFR = findCorner(+1, +1);  // front, right
+    const QPointF cornerBL = findCorner(-1, -1);  // back,  left
+    const QPointF cornerBR = findCorner(-1, +1);  // back,  right
+
+    // Runway width (perpendicular extent) — also the perp distance each X arm
+    // has to cover from its corner to the opposite long edge.
+    double perpMin =  std::numeric_limits<double>::infinity();
+    double perpMax = -std::numeric_limits<double>::infinity();
+    for (const QPointF& v : polyNm) {
+        const double pp = QPointF::dotProduct(v, perp);
+        perpMin = std::min(perpMin, pp);
+        perpMax = std::max(perpMax, pp);
+    }
+    const double width = perpMax - perpMin;
+    if (width <= 0.0) return;
+
+    // Each arm leaves its corner at ±15° to axis, going inward, and stops
+    // when it crosses the opposite long edge. With angle 15° to axis the
+    // segment length is `width / sin(15°)` — that's the total path length
+    // needed to traverse the full perpendicular extent at that slant.
+    const double aRad   = qDegreesToRadians(kClosureAngleDeg);
+    const double cosA   = std::cos(aRad);
+    const double sinA   = std::sin(aRad);
+    const double segLen = width / sinA;
+
+    auto inward = [&](double signAxis, double signPerp) {
+        return signAxis * cosA * axis + signPerp * sinA * perp;
+    };
+
+    struct Seg { QPointF start; QPointF dir; };
+    const Seg segs[4] = {
+        { cornerFL, inward(-1, +1) },  // FL → toward back-right
+        { cornerFR, inward(-1, -1) },  // FR → toward back-left   (crosses FL's arm at front-end midline)
+        { cornerBL, inward(+1, +1) },  // BL → toward front-right
+        { cornerBR, inward(+1, -1) },  // BR → toward front-left  (crosses BL's arm at back-end midline)
+    };
+
+    p.save();
+    QPen pen(QColor(255, 255, 255));
+    pen.setCosmetic(true);
+    pen.setWidthF(1.0);
+    p.setPen(pen);
+    p.setBrush(Qt::NoBrush);
+
+    for (const Seg& s : segs) {
+        const QPointF endNm = s.start + s.dir * segLen;
+        p.drawLine(nmToScreen.map(s.start), nmToScreen.map(endNm));
     }
 
     p.restore();
