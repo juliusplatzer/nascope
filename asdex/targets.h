@@ -31,7 +31,12 @@ struct DatablockFields {
     QString category;                  // line 2: fieldG (wake / CWT)
     QString exitFix;                   // line 2: fieldH
     std::optional<int> speedKt;        // line 2: fieldI (rendered as 10s of knots)
-    // fieldJ / fieldK (scratchpads) — not yet implemented.
+    // Scratchpads (CRC fieldJ / fieldK). When at least one is non-empty,
+    // line 2 time-shares between the F/G/H/I field set and "SP1 SP2" on a
+    // shared wall-clock cycle. An empty side collapses (a lone SP shows on
+    // its own with no leading space).
+    QString sp1;
+    QString sp2;
 };
 
 /**
@@ -127,10 +132,14 @@ QPointF drawLeaderLine(QPainter& p, const QTransform& nmToScreen,
  *   line 0: fieldA                                       (always reserved slot)
  *   line 1: B|C [D] [E]      (Full)        B|C           (Limited)
  *   line 2: F [G] H [I]      (Full)        F H           (Limited)
+ *           ↕ time-shared with "SP1 SP2" when either scratchpad is set
  *
  * Each visible field is appended with a single leading space and the line is
  * trimmed at the end, so disabled / missing fields collapse cleanly without
- * leaving placeholder gaps.
+ * leaving placeholder gaps. Line 2 alternates between the F/G/H/I set and the
+ * scratchpad pair on a wall-clock-derived 8 s cycle (4 s each phase) — caller
+ * must drive periodic repaints (≥ 1 Hz) while any visible datablock carries
+ * a scratchpad, the same way alerts require ≥ 2 Hz updates.
  *
  * Positioning depends on `leaderAngleDeg`:
  *   - Left datablock for SW (225), W (270), NW (315) — anchored on right edge.

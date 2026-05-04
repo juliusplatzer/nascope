@@ -182,6 +182,8 @@ void Scope::paintEvent(QPaintEvent*) {
                     f.category      = t.wake;
                     f.exitFix       = t.exitFix;
                     if (t.speed) f.speedKt = static_cast<int>(*t.speed);
+                    f.sp1           = t.sp1;
+                    f.sp2           = t.sp2;
 
                     if (fontRenderer_.isValid())
                         drawDatablock(p, fontRenderer_, anchorPx, kLeaderAngleDeg, f);
@@ -445,8 +447,8 @@ void Scope::enterEditMode(const QString& key) {
     edit_.values[int(EditField::Category)] = t.wake.toUpper();
     edit_.values[int(EditField::Type)]     = t.acType.toUpper();
     edit_.values[int(EditField::Fix)]      = t.exitFix.toUpper();
-    edit_.values[int(EditField::Sp1)].clear();   // scratchpads not tracked yet
-    edit_.values[int(EditField::Sp2)].clear();
+    edit_.values[int(EditField::Sp1)]      = t.sp1.toUpper();
+    edit_.values[int(EditField::Sp2)]      = t.sp2.toUpper();
 
     refreshPreviewFromEdit();
 }
@@ -459,7 +461,9 @@ void Scope::commitEdit() {
                                    edit_.values[int(EditField::Beacon)],
                                    edit_.values[int(EditField::Category)],
                                    edit_.values[int(EditField::Type)],
-                                   edit_.values[int(EditField::Fix)]);
+                                   edit_.values[int(EditField::Fix)],
+                                   edit_.values[int(EditField::Sp1)],
+                                   edit_.values[int(EditField::Sp2)]);
     }
     exitEditMode();
 }
@@ -488,10 +492,20 @@ void Scope::clearCurrentEditField() {
 
 void Scope::appendToCurrentEditField(QChar c) {
     if (!edit_.active) return;
-    // Scratchpads (SP1/SP2) accept up to 7 chars per the doc but the cache
-    // doesn't carry them yet — leave read-only until we wire scratchpad state.
-    if (edit_.field == EditField::Sp1 || edit_.field == EditField::Sp2) return;
-    edit_.values[int(edit_.field)] += c.toUpper();
+
+    QString& buf = edit_.values[int(edit_.field)];
+    const bool isScratchpad = (edit_.field == EditField::Sp1 || edit_.field == EditField::Sp2);
+
+    if (isScratchpad) {
+        // Free-form alphanumeric, 7 chars max — silently drop punctuation,
+        // whitespace, and any keystroke past the cap so the user sees the
+        // cursor stop advancing.
+        constexpr int kScratchpadMaxLen = 7;
+        if (!c.isLetterOrNumber()) return;
+        if (buf.size() >= kScratchpadMaxLen) return;
+    }
+
+    buf += c.toUpper();
     refreshPreviewFromEdit();
 }
 

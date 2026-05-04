@@ -135,7 +135,8 @@ void TgtCache::onTextMessage(const QString& text) {
 void TgtCache::applyDatablockEdit(const QString& key,
                                   const QString& callsign, const QString& squawk,
                                   const QString& wake,     const QString& acType,
-                                  const QString& exitFix) {
+                                  const QString& exitFix,
+                                  const QString& sp1,      const QString& sp2) {
     auto it = targets_.find(key);
     if (it == targets_.end()) return;
     Target& t = it.value();
@@ -144,6 +145,8 @@ void TgtCache::applyDatablockEdit(const QString& key,
     t.wake     = wake;
     t.acType   = acType;
     t.exitFix  = exitFix;
+    t.sp1      = sp1;
+    t.sp2      = sp2;
     emit changed();
 }
 

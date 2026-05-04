@@ -35,6 +35,12 @@ public:
         QString squawk;
         QString exitFix;
         QString wake;        // CWT A-E (and legacy H/J) = heavy
+        // Scratchpads — client-only free-form alphanumeric strings (≤ 7 chars
+        // each). Set by the user via the right-click datablock editor; not
+        // sent over the WebSocket today, so they survive server diffs but
+        // are dropped along with the target on `removed: true` frames.
+        QString sp1;
+        QString sp2;
         std::optional<double> lat, lon, altitude, speed, heading;
 
         // Position trail — up to 7 past `(lon, lat)` snapshots, oldest first,
@@ -59,7 +65,8 @@ public:
     void applyDatablockEdit(const QString& key,
                             const QString& callsign, const QString& squawk,
                             const QString& wake,     const QString& acType,
-                            const QString& exitFix);
+                            const QString& exitFix,
+                            const QString& sp1,      const QString& sp2);
 
 signals:
     void changed();

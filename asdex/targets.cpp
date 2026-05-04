@@ -56,14 +56,22 @@ constexpr std::array<GeoPoint, 4> kPolygonUnkTgt = {{
     {  0.0,       0.000175 },
 }};
 
-constexpr double kHeavyScale     = 1.5;
-constexpr qint64 kAlertPeriodMs  = 1000;  // full flash cycle
+constexpr double kHeavyScale       = 1.5;
+constexpr qint64 kAlertPeriodMs    = 1000;  // full flash cycle
+constexpr qint64 kTimeShareCycleMs = 8000;  // line-2 SP ↕ F/G/H/I cycle (4 s each phase)
 
 // Wall-clock derived so all alert targets rendered in the same frame (and
 // across widgets, in case we ever render more than one) see the same phase.
 bool alertRedPhase() {
     const qint64 ms = QDateTime::currentMSecsSinceEpoch();
     return (ms % kAlertPeriodMs) < (kAlertPeriodMs / 2);
+}
+
+// True during the "scratchpad" half of the line-2 cycle. Same wall-clock
+// trick as alertRedPhase so every datablock on screen flips in unison.
+bool scratchpadPhase() {
+    const qint64 ms = QDateTime::currentMSecsSinceEpoch();
+    return (ms % kTimeShareCycleMs) >= (kTimeShareCycleMs / 2);
 }
 
 template <std::size_t N>
@@ -278,12 +286,27 @@ void drawDatablock(QPainter& p, BitmapFontRenderer& font,
     }
     line1 = line1.trimmed();
 
+    // Build both candidates for line 2 (F/G/H/I set vs. SP1 SP2). When both
+    // halves are populated, the wall-clock phase picks which one this frame
+    // shows; when only one side has content, that side wins unconditionally
+    // (no "blink to blank" if the user has set scratchpads on a target with
+    // no aircraft type / wake / fix / speed).
+    QString line2Fields;
+    appendField(line2Fields, f.acType);                              // fieldF (always)
+    if (full) appendField(line2Fields, f.category);                  // fieldG (Full only)
+    appendField(line2Fields, f.exitFix);                             // fieldH (always)
+    if (full) appendField(line2Fields, formatTens(f.speedKt));       // fieldI (Full only)
+    line2Fields = line2Fields.trimmed();
+
+    QString line2Sp;
+    appendField(line2Sp, f.sp1);                                     // fieldJ (scratchpad 1)
+    appendField(line2Sp, f.sp2);                                     // fieldK (scratchpad 2)
+    line2Sp = line2Sp.trimmed();
+
     QString line2;
-    appendField(line2, f.acType);                              // fieldF (always)
-    if (full) appendField(line2, f.category);                  // fieldG (Full only)
-    appendField(line2, f.exitFix);                             // fieldH (always)
-    if (full) appendField(line2, formatTens(f.speedKt));       // fieldI (Full only)
-    line2 = line2.trimmed();
+    if (line2Sp.isEmpty())          line2 = line2Fields;
+    else if (line2Fields.isEmpty()) line2 = line2Sp;
+    else                            line2 = scratchpadPhase() ? line2Sp : line2Fields;
 
     const QString lines[3] = { line0, line1, line2 };
 
