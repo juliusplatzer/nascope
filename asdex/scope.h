@@ -35,6 +35,15 @@ public:
     void setMode(Mode m);
     Mode mode() const { return mode_; }
 
+    /**
+     * Switches the displayed facility at runtime. Loads the new videomap,
+     * retargets the cache, resets the viewport to fit the new bounds, and
+     * drops any per-target UI state (hidden datablocks, hover, edit mode)
+     * tied to the previous airport. No-op when `icao` matches the current
+     * airport or when no videomap exists for it.
+     */
+    void setFacility(const QString& icao);
+
 protected:
     void paintEvent(QPaintEvent*) override;
     void mousePressEvent(QMouseEvent*)  override;
@@ -55,6 +64,12 @@ private:
     // Picks the appropriate cursor for the current hover position — dcb_cursor
     // when over the DCB stripe, scope_cursor otherwise.
     void updateHoverCursor();
+
+    // F1 handler — spawns ui/build/menu as a child process, waits for the
+    // user to confirm or cancel, and on confirm calls setFacility() with
+    // the chosen ICAO. Blocks the scope's event loop while the dialog is
+    // up (matching the modal feel of the startup menu).
+    void showFacilityMenu();
 
     VideoMap   map_;
     TgtCache*  cache_ = nullptr;

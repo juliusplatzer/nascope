@@ -11,6 +11,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPalette>
+#include <QProcess>
 #include <QTimer>
 #include <QWheelEvent>
 
@@ -104,6 +105,51 @@ void Scope::applyBackground() {
     QPalette pal = palette();
     pal.setColor(QPalette::Window, backgroundFor(mode_));
     setPalette(pal);
+}
+
+void Scope::setFacility(const QString& icao) {
+    if (!cache_ || icao.isEmpty() || icao == cache_->airport()) return;
+
+    // Load the new videomap before mutating any other state — if the asset
+    // is missing we want the scope to stay on the current facility.
+    VideoMap nextMap = VideoMap::load(icao);
+    if (!nextMap.isValid()) {
+        qWarning().noquote() << "[scope] no videomap for" << icao;
+        return;
+    }
+
+    map_ = std::move(nextMap);
+    cache_->setAirport(icao);
+
+    // Re-fit the viewport to the new airport's bounds and reset transient UI
+    // state that's tied to the previous facility's targets.
+    const QRectF b = map_.boundsNm();
+    centerNm_       = b.center();
+    halfRangeNm_    = snapZoom(0.5 * std::max(b.width(), b.height()));
+    wheelRemainder_ = 0;
+    panning_        = false;
+    hiddenDatablocks_.clear();
+    cursorPx_.reset();
+    if (edit_.active) exitEditMode();
+
+    update();
+}
+
+void Scope::showFacilityMenu() {
+    // Reuses the standalone menu binary — same dialog the user saw at
+    // startup, no in-process duplication. Working directory is the project
+    // root when launched via run.sh, so the relative path resolves there.
+    QProcess proc;
+    proc.start(QStringLiteral("ui/build/menu"), QStringList());
+    if (!proc.waitForStarted(2000)) {
+        qWarning().noquote() << "[scope] menu launch failed:" << proc.errorString();
+        return;
+    }
+    proc.waitForFinished(-1);
+    if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0)
+        return;  // user cancelled or the process aborted
+    const QString icao = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+    if (!icao.isEmpty()) setFacility(icao);
 }
 
 // ---- Paint ------------------------------------------------------------------
@@ -380,6 +426,13 @@ void Scope::wheelEvent(QWheelEvent* ev) {
 // ---- Datablock editor ------------------------------------------------------
 
 void Scope::keyPressEvent(QKeyEvent* ev) {
+    // F1 — open the facility selection menu. Handled regardless of edit-mode
+    // state so the user can always reach it.
+    if (ev->key() == Qt::Key_F1) {
+        showFacilityMenu();
+        ev->accept();
+        return;
+    }
     // F6 — global datablock toggle. Handled regardless of edit-mode state.
     if (ev->key() == Qt::Key_F6) {
         showAllDatablocks_ = !showAllDatablocks_;

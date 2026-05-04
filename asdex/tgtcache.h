@@ -55,6 +55,19 @@ public:
 
     const QHash<QString, Target>& targets() const { return targets_; }
 
+    /** ICAO the cache is currently scoped to (the last setAirport sent). */
+    QString airport() const { return icao_; }
+
+    /**
+     * Re-targets the cache at a different airport. Drops every target we
+     * know about (so the scope doesn't briefly render stale aircraft from
+     * the previous facility) and, if the socket is connected, sends a fresh
+     * setAirports — the server replies with the snapshot for the new ICAO.
+     * If we're disconnected, the next reconnect's onConnected uses the new
+     * `icao_` automatically. No-op when `icao` matches the current airport.
+     */
+    void setAirport(const QString& icao);
+
     /**
      * Writes the editable subset of fields (the ones surfaced by the
      * datablock editor) back into the cache for `key`. No-op if the key is

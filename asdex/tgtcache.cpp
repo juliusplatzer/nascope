@@ -132,6 +132,26 @@ void TgtCache::onTextMessage(const QString& text) {
     emit changed();
 }
 
+void TgtCache::setAirport(const QString& icao) {
+    if (icao.isEmpty() || icao == icao_) return;
+    icao_ = icao;
+
+    // Wipe local state — the previous facility's targets are about to be
+    // pruned server-side anyway, but clearing now avoids a flicker where the
+    // scope still draws them until the removal frames arrive.
+    if (!targets_.isEmpty()) {
+        targets_.clear();
+        emit changed();
+    }
+
+    // If the socket is up, push a fresh setAirports immediately. The server
+    // (TargetStore) will pruneToFilter + snapshotTo on receipt, so we get a
+    // full snapshot of the new airport without a reconnect cycle.
+    if (ws_.state() == QAbstractSocket::ConnectedState) {
+        onConnected();
+    }
+}
+
 void TgtCache::applyDatablockEdit(const QString& key,
                                   const QString& callsign, const QString& squawk,
                                   const QString& wake,     const QString& acType,
