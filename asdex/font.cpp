@@ -149,14 +149,36 @@ const QPixmap* BitmapFontRenderer::ensureAtlas(int size, const QColor& color) {
     const int ca = color.alpha();
     const auto* rawBase = reinterpret_cast<const uchar*>(font->bitmap.constData());
 
+    // CRC's text shader is `mix(bg, vec4(color.rgb, t), t)` with a transparent
+    // background, then GL blends with (SrcAlpha, OneMinusSrcAlpha). With t =
+    // atlas coverage that produces an effective fragment of (color·t, t²) and
+    // a final visible contribution of color·t³ — the cube is what suppresses
+    // gray edge pixels and gives CRC its thinner, sharper, pixel-like look.
+    // We bake that into Format_ARGB32_Premultiplied here:
+    //   src.a   = t² / 255
+    //   src.rgb = color · t³ / 255³        (already premultiplied)
+    // ca scales the whole result so a translucent QColor still works (callers
+    // normally pass opaque colors, in which case ca == 255 is a no-op).
+    constexpr qint64 D3 = qint64(255) * 255 * 255;
     for (int y = 0; y < h; ++y) {
         const uchar* src = rawBase + qsizetype(y) * qsizetype(w);
         QRgb* dst = reinterpret_cast<QRgb*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
-            // Combine glyph coverage with the target color's alpha, then
-            // premultiply RGB — required by Format_ARGB32_Premultiplied.
-            const int a = int(src[x]) * ca / 255;
-            dst[x] = qRgba(cr * a / 255, cg * a / 255, cb * a / 255, a);
+            const int    t  = int(src[x]);
+            const qint64 t2 = qint64(t) * t;
+            const qint64 t3 = t2 * t;
+
+            const int aBase = int((t2 + 127) / 255);
+            const int rBase = int((qint64(cr) * t3 + D3 / 2) / D3);
+            const int gBase = int((qint64(cg) * t3 + D3 / 2) / D3);
+            const int bBase = int((qint64(cb) * t3 + D3 / 2) / D3);
+
+            const int a = (aBase * ca + 127) / 255;
+            const int r = (rBase * ca + 127) / 255;
+            const int g = (gBase * ca + 127) / 255;
+            const int b = (bBase * ca + 127) / 255;
+
+            dst[x] = qRgba(r, g, b, a);
         }
     }
 
