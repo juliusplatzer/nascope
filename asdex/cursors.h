@@ -8,9 +8,15 @@ namespace asdex {
 
 /**
  * Loads the ASDE-X .cur cursor files from `assetsDir` (e.g. "asdex/assets").
- * Mirrors CRC's AsdexWindowManager.CreateCursor: parses the .cur header for
- * the hotspot (UInt16 x at offset 10, UInt16 y at offset 12, both LE) and
- * decodes the embedded image via Qt's ICO image plugin.
+ * Mirrors CRC's AsdexWindowManager.CreateCursor end-to-end: reads the
+ * UInt16-LE hotspot at offsets 10 & 12, then decodes the DIB payload by
+ * hand — XOR color bitmap on top, AND transparency mask on bottom (so the
+ * DIB header's height = visual height × 2), RGBQUAD reserved byte ignored.
+ *
+ * Decoding manually instead of going through Qt's generic ICO plugin keeps
+ * the .cur semantics (especially the AND-mask transparency) identical to
+ * Avalonia's, which is what CRC ships — the plugin path occasionally
+ * softens edges that should stay binary-transparent.
  *
  * Returned hash keys (paired with the file they're loaded from):
  *   "scope_cursor"      ← Asdex.cur
