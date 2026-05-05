@@ -1,0 +1,98 @@
+{
+  "airport": "SEA",
+  "runwayConfigurations": [
+    {
+      "number": 1,
+      "name": "34L/34R",
+      "arrivalRunwayIds": [
+        "34L",
+        "34R"
+      ],
+      "departureRunwayIds": [
+        "34C",
+        "34R"
+      ]
+    },
+    {
+      "number": 2,
+      "name": "16L/16R",
+      "arrivalRunwayIds": [
+        "16L",
+        "16R"
+      ],
+      "departureRunwayIds": [
+        "16C",
+        "16L"
+      ]
+    },
+    {
+      "number": 3,
+      "name": "16L/16C",
+      "arrivalRunwayIds": [
+        "16C",
+        "16L"
+      ],
+      "departureRunwayIds": [
+        "16C",
+        "16R"
+      ]
+    },
+    {
+      "number": 4,
+      "name": "34R/34C",
+      "arrivalRunwayIds": [
+        "34C",
+        "34R"
+      ],
+      "departureRunwayIds": [
+        "34C",
+        "34R"
+      ]
+    },
+    {
+      "number": 5,
+      "name": "16R",
+      "arrivalRunwayIds": [
+        "16R"
+      ],
+      "departureRunwayIds": [
+        "16C",
+        "16L"
+      ]
+    },
+    {
+      "number": 6,
+      "name": "34L",
+      "arrivalRunwayIds": [
+        "34L"
+      ],
+      "departureRunwayIds": [
+        "34C",
+        "34R"
+      ]
+    },
+    {
+      "number": 7,
+      "name": "LIMITED",
+      "arrivalRunwayIds": [],
+      "departureRunwayIds": [],
+      "default": true
+    }
+  ],
+  "towerPositions": [
+    {
+      "name": "LCE",
+      "runwayIds": [
+        "16C-34C",
+        "16L-34R"
+      ],
+      "default": true
+    },
+    {
+      "name": "LCW",
+      "runwayIds": [
+        "16R-34L"
+      ]
+    }
+  ]
+}

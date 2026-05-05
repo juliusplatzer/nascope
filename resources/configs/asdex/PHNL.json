@@ -1,0 +1,78 @@
+{
+  "airport": "HNL",
+  "runwayConfigurations": [
+    {
+      "number": 1,
+      "name": "EAST",
+      "arrivalRunwayIds": [
+        "4L",
+        "4R",
+        "8L",
+        "8R"
+      ],
+      "departureRunwayIds": [
+        "4L",
+        "4R",
+        "8L",
+        "8R"
+      ],
+      "holdShortRunwayPairs": [
+        {
+          "id": "01HA3PAY97HA130Q59GT2G73RV",
+          "arrivalRunwayId": "8L",
+          "holdShortId": "4L"
+        },
+        {
+          "id": "01HA3PB9N3NMPNEPPR95BXWNWM",
+          "arrivalRunwayId": "4L",
+          "holdShortId": "8L"
+        },
+        {
+          "id": "01HA3PBJWRTKZPKFSP0TJNMJ36",
+          "arrivalRunwayId": "4R",
+          "holdShortId": "8L"
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "name": "WEST",
+      "arrivalRunwayIds": [
+        "22L",
+        "22R",
+        "26L",
+        "26R"
+      ],
+      "departureRunwayIds": [
+        "22L",
+        "22R",
+        "26L",
+        "26R"
+      ]
+    },
+    {
+      "number": 3,
+      "name": "LIMITED",
+      "arrivalRunwayIds": [],
+      "departureRunwayIds": [],
+      "default": true
+    }
+  ],
+  "towerPositions": [
+    {
+      "name": "LC1",
+      "runwayIds": [
+        "4L-22R",
+        "4R-22L",
+        "8L-26R"
+      ],
+      "default": true
+    },
+    {
+      "name": "LC2",
+      "runwayIds": [
+        "8R-26L"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+{
+  "airport": "DFW",
+  "runwayConfigurations": [
+    {
+      "number": 1,
+      "name": "S TRIPS",
+      "arrivalRunwayIds": [
+        "13R",
+        "17C",
+        "17L",
+        "18R"
+      ],
+      "departureRunwayIds": [
+        "13L",
+        "17C",
+        "18L"
+      ]
+    },
+    {
+      "number": 2,
+      "name": "S DUALS",
+      "arrivalRunwayIds": [
+        "17C",
+        "18R"
+      ],
+      "departureRunwayIds": [
+        "17C",
+        "18L"
+      ]
+    },
+    {
+      "number": 3,
+      "name": "S MID",
+      "arrivalRunwayIds": [
+        "17R",
+        "18L"
+      ],
+      "departureRunwayIds": [
+        "17C",
+        "18L"
+      ]
+    },
+    {
+      "number": 4,
+      "name": "N TRIPS",
+      "arrivalRunwayIds": [
+        "31R",
+        "35C",
+        "35R",
+        "36L"
+      ],
+      "departureRunwayIds": [
+        "31L",
+        "35C",
+        "36R"
+      ]
+    },
+    {
+      "number": 5,
+      "name": "N DUALS",
+      "arrivalRunwayIds": [
+        "35C",
+        "36L"
+      ],
+      "departureRunwayIds": [
+        "35C",
+        "36R"
+      ]
+    },
+    {
+      "number": 6,
+      "name": "N MID",
+      "arrivalRunwayIds": [
+        "35L",
+        "36R"
+      ],
+      "departureRunwayIds": [
+        "35C",
+        "36R"
+      ]
+    },
+    {
+      "number": 7,
+      "name": "LIMITED",
+      "arrivalRunwayIds": [],
+      "departureRunwayIds": [],
+      "default": true
+    }
+  ],
+  "towerPositions": [
+    {
+      "name": "LC",
+      "runwayIds": [
+        "13L-31R",
+        "13R-31L",
+        "17C-35C",
+        "17L-35R",
+        "17R-35L",
+        "18L-36R",
+        "18R-36L"
+      ],
+      "default": true
+    },
+    {
+      "name": "GC",
+      "runwayIds": [
+        "13L-31R",
+        "13R-31L",
+        "17C-35C",
+        "17L-35R",
+        "17R-35L",
+        "18L-36R",
+        "18R-36L"
+      ]
+    }
+  ]
+}

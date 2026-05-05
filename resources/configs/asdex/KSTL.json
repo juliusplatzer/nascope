@@ -1,0 +1,67 @@
+{
+  "airport": "STL",
+  "runwayConfigurations": [
+    {
+      "number": 1,
+      "name": "NW",
+      "arrivalRunwayIds": [
+        "29",
+        "30L",
+        "30R"
+      ],
+      "departureRunwayIds": [
+        "29",
+        "30L",
+        "30R"
+      ]
+    },
+    {
+      "number": 2,
+      "name": "SE",
+      "arrivalRunwayIds": [
+        "11",
+        "12L"
+      ],
+      "departureRunwayIds": [
+        "12R"
+      ]
+    },
+    {
+      "number": 3,
+      "name": "LIMITED",
+      "arrivalRunwayIds": [],
+      "departureRunwayIds": [],
+      "default": true
+    }
+  ],
+  "towerPositions": [
+    {
+      "name": "GC",
+      "runwayIds": [
+        "11-29",
+        "12L-30R",
+        "12R-30L",
+        "6-24"
+      ]
+    },
+    {
+      "name": "LCS",
+      "runwayIds": [
+        "11-29",
+        "12L-30R",
+        "12R-30L",
+        "6-24"
+      ],
+      "default": true
+    },
+    {
+      "name": "LCN",
+      "runwayIds": [
+        "11-29",
+        "12L-30R",
+        "12R-30L",
+        "6-24"
+      ]
+    }
+  ]
+}

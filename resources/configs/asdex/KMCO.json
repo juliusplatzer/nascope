@@ -1,0 +1,56 @@
+{
+  "airport": "MCO",
+  "runwayConfigurations": [
+    {
+      "number": 1,
+      "name": "NORTH",
+      "arrivalRunwayIds": [
+        "35L",
+        "35R",
+        "36L"
+      ],
+      "departureRunwayIds": [
+        "35L",
+        "36L",
+        "36R"
+      ]
+    },
+    {
+      "number": 2,
+      "name": "SOUTH",
+      "arrivalRunwayIds": [
+        "17L",
+        "17R",
+        "18R"
+      ],
+      "departureRunwayIds": [
+        "17R",
+        "18L",
+        "18R"
+      ]
+    },
+    {
+      "number": 3,
+      "name": "LIMITED",
+      "arrivalRunwayIds": [],
+      "departureRunwayIds": [],
+      "default": true
+    }
+  ],
+  "towerPositions": [
+    {
+      "name": "GC",
+      "runwayIds": []
+    },
+    {
+      "name": "LC",
+      "runwayIds": [
+        "17L-35R",
+        "17R-35L",
+        "18L-36R",
+        "18R-36L"
+      ],
+      "default": true
+    }
+  ]
+}

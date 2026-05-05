@@ -1,0 +1,83 @@
+{
+  "airport": "PHX",
+  "runwayConfigurations": [
+    {
+      "number": 1,
+      "name": "EAST",
+      "arrivalRunwayIds": [
+        "7R",
+        "8"
+      ],
+      "departureRunwayIds": [
+        "7L"
+      ]
+    },
+    {
+      "number": 2,
+      "name": "WEST",
+      "arrivalRunwayIds": [
+        "25L",
+        "26"
+      ],
+      "departureRunwayIds": [
+        "25R"
+      ]
+    },
+    {
+      "number": 3,
+      "name": "LIMITED",
+      "arrivalRunwayIds": [],
+      "departureRunwayIds": [],
+      "default": true
+    }
+  ],
+  "towerPositions": [
+    {
+      "name": "GC",
+      "runwayIds": [],
+      "default": true
+    },
+    {
+      "name": "LCS",
+      "runwayIds": [
+        "7L-25R",
+        "7R-25L"
+      ]
+    },
+    {
+      "name": "LCN",
+      "runwayIds": [
+        "8-26"
+      ]
+    },
+    {
+      "name": "LCC",
+      "runwayIds": [
+        "7L-25R",
+        "7R-25L",
+        "8-26"
+      ]
+    },
+    {
+      "name": "GCS",
+      "runwayIds": [
+        "7L-25R",
+        "7R-25L"
+      ]
+    },
+    {
+      "name": "GCN",
+      "runwayIds": [
+        "8-26"
+      ]
+    },
+    {
+      "name": "GCC",
+      "runwayIds": [
+        "7L-25R",
+        "7R-25L",
+        "8-26"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "airport": "SLC",
+  "runwayConfigurations": [
+    {
+      "number": 1,
+      "name": "SOUTH",
+      "arrivalRunwayIds": [
+        "16L",
+        "16R",
+        "17"
+      ],
+      "departureRunwayIds": [
+        "16L",
+        "16R",
+        "17"
+      ]
+    },
+    {
+      "number": 2,
+      "name": "NORTH",
+      "arrivalRunwayIds": [
+        "34L",
+        "34R",
+        "35"
+      ],
+      "departureRunwayIds": [
+        "34L",
+        "34R",
+        "35"
+      ]
+    },
+    {
+      "number": 3,
+      "name": "LIMITED",
+      "arrivalRunwayIds": [],
+      "departureRunwayIds": [],
+      "default": true
+    }
+  ],
+  "towerPositions": [
+    {
+      "name": "GC-W",
+      "runwayIds": [
+        "16L-34R",
+        "16R-34L"
+      ]
+    },
+    {
+      "name": "GC-E",
+      "runwayIds": [
+        "17-35"
+      ]
+    },
+    {
+      "name": "LC-W",
+      "runwayIds": [
+        "16R-34L"
+      ]
+    },
+    {
+      "name": "LC-C",
+      "runwayIds": [
+        "16L-34R"
+      ],
+      "default": true
+    },
+    {
+      "name": "LC-E",
+      "runwayIds": [
+        "14-32",
+        "17-35"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "airport": "SDF",
+  "runwayConfigurations": [
+    {
+      "number": 1,
+      "name": "NORTH",
+      "arrivalRunwayIds": [
+        "35L",
+        "35R"
+      ],
+      "departureRunwayIds": [
+        "35L",
+        "35R"
+      ]
+    },
+    {
+      "number": 2,
+      "name": "SOUTH",
+      "arrivalRunwayIds": [
+        "17L",
+        "17R"
+      ],
+      "departureRunwayIds": [
+        "17L",
+        "17R"
+      ]
+    },
+    {
+      "number": 3,
+      "name": "RWY 29",
+      "arrivalRunwayIds": [
+        "29"
+      ],
+      "departureRunwayIds": [
+        "29"
+      ]
+    },
+    {
+      "number": 4,
+      "name": "RWY 11",
+      "arrivalRunwayIds": [
+        "11"
+      ],
+      "departureRunwayIds": [
+        "11"
+      ]
+    },
+    {
+      "number": 5,
+      "name": "LIMITED",
+      "arrivalRunwayIds": [],
+      "departureRunwayIds": [],
+      "default": true
+    }
+  ],
+  "towerPositions": [
+    {
+      "name": "MONITOR",
+      "runwayIds": [
+        "11-29",
+        "17L-35R",
+        "17R-35L"
+      ],
+      "default": true
+    },
+    {
+      "name": "TOWER",
+      "runwayIds": [
+        "11-29",
+        "17L-35R",
+        "17R-35L"
+      ]
+    }
+  ]
+}

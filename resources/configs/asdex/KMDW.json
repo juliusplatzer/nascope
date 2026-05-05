@@ -1,0 +1,76 @@
+{
+  "airport": "MDW",
+  "runwayConfigurations": [
+    {
+      "number": 1,
+      "name": "31S",
+      "arrivalRunwayIds": [
+        "31L",
+        "31R"
+      ],
+      "departureRunwayIds": [
+        "31L",
+        "31R"
+      ]
+    },
+    {
+      "number": 2,
+      "name": "22S",
+      "arrivalRunwayIds": [
+        "22L",
+        "22R"
+      ],
+      "departureRunwayIds": [
+        "22L",
+        "22R"
+      ]
+    },
+    {
+      "number": 3,
+      "name": "4S",
+      "arrivalRunwayIds": [
+        "4L",
+        "4R"
+      ],
+      "departureRunwayIds": [
+        "4L",
+        "4R"
+      ]
+    },
+    {
+      "number": 4,
+      "name": "13S",
+      "arrivalRunwayIds": [
+        "13L",
+        "13R"
+      ],
+      "departureRunwayIds": [
+        "13L",
+        "13R"
+      ]
+    },
+    {
+      "number": 5,
+      "name": "LIMITED",
+      "arrivalRunwayIds": [],
+      "departureRunwayIds": [],
+      "default": true
+    }
+  ],
+  "towerPositions": [
+    {
+      "name": "GC",
+      "runwayIds": [],
+      "default": true
+    },
+    {
+      "name": "LC",
+      "runwayIds": [
+        "13L-31R",
+        "13R-31L",
+        "4L-22R",
+        "4R-22L"
+      ]
+    }
+  ]
+}

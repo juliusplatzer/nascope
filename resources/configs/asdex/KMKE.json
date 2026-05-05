@@ -1,0 +1,69 @@
+{
+  "airport": "MKE",
+  "runwayConfigurations": [
+    {
+      "number": 1,
+      "name": "7R",
+      "arrivalRunwayIds": [
+        "7R"
+      ],
+      "departureRunwayIds": [
+        "19R"
+      ]
+    },
+    {
+      "number": 2,
+      "name": "25L",
+      "arrivalRunwayIds": [
+        "25L"
+      ],
+      "departureRunwayIds": [
+        "19R"
+      ]
+    },
+    {
+      "number": 3,
+      "name": "19R",
+      "arrivalRunwayIds": [
+        "19R"
+      ],
+      "departureRunwayIds": [
+        "19R"
+      ]
+    },
+    {
+      "number": 4,
+      "name": "1L",
+      "arrivalRunwayIds": [
+        "1L"
+      ],
+      "departureRunwayIds": [
+        "1L"
+      ]
+    },
+    {
+      "number": 5,
+      "name": "LIMITED",
+      "arrivalRunwayIds": [],
+      "departureRunwayIds": [],
+      "default": true
+    }
+  ],
+  "towerPositions": [
+    {
+      "name": "GC",
+      "runwayIds": [],
+      "default": true
+    },
+    {
+      "name": "LC",
+      "runwayIds": [
+        "13-31",
+        "1L-19R",
+        "1R-19L",
+        "7L-25R",
+        "7R-25L"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+{
+  "airport": "HOU",
+  "runwayConfigurations": [
+    {
+      "number": 1,
+      "name": "SOUTH",
+      "arrivalRunwayIds": [
+        "13R"
+      ],
+      "departureRunwayIds": [
+        "13R",
+        "22"
+      ]
+    },
+    {
+      "number": 2,
+      "name": "NORTH",
+      "arrivalRunwayIds": [
+        "31L"
+      ],
+      "departureRunwayIds": [
+        "31L"
+      ]
+    },
+    {
+      "number": 3,
+      "name": "EAST",
+      "arrivalRunwayIds": [
+        "4"
+      ],
+      "departureRunwayIds": [
+        "31L",
+        "4"
+      ]
+    },
+    {
+      "number": 4,
+      "name": "WEST",
+      "arrivalRunwayIds": [
+        "22"
+      ],
+      "departureRunwayIds": [
+        "22"
+      ]
+    },
+    {
+      "number": 5,
+      "name": "CHURCH",
+      "arrivalRunwayIds": [
+        "4"
+      ],
+      "departureRunwayIds": [
+        "13R",
+        "4"
+      ]
+    },
+    {
+      "number": 6,
+      "name": "SMGCS",
+      "arrivalRunwayIds": [
+        "4"
+      ],
+      "departureRunwayIds": [
+        "4"
+      ]
+    },
+    {
+      "number": 7,
+      "name": "MID",
+      "arrivalRunwayIds": [
+        "4"
+      ],
+      "departureRunwayIds": [
+        "22"
+      ]
+    },
+    {
+      "number": 8,
+      "name": "LIMITED",
+      "arrivalRunwayIds": [],
+      "departureRunwayIds": [],
+      "default": true
+    }
+  ],
+  "towerPositions": [
+    {
+      "name": "ALL",
+      "runwayIds": [],
+      "default": true
+    }
+  ]
+}

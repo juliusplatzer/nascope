@@ -1,0 +1,92 @@
+{
+  "airport": "MEM",
+  "runwayConfigurations": [
+    {
+      "number": 1,
+      "name": "NORTH27",
+      "arrivalRunwayIds": [
+        "27",
+        "36C",
+        "36L",
+        "36R"
+      ],
+      "departureRunwayIds": [
+        "27",
+        "36C",
+        "36L",
+        "36R"
+      ]
+    },
+    {
+      "number": 2,
+      "name": "NORTH9",
+      "arrivalRunwayIds": [
+        "36C",
+        "36L",
+        "36R",
+        "9"
+      ],
+      "departureRunwayIds": [
+        "36C",
+        "36L",
+        "36R",
+        "9"
+      ]
+    },
+    {
+      "number": 3,
+      "name": "SOUTH27",
+      "arrivalRunwayIds": [
+        "18C",
+        "18L",
+        "18R",
+        "27"
+      ],
+      "departureRunwayIds": [
+        "18C",
+        "18L",
+        "18R",
+        "27"
+      ]
+    },
+    {
+      "number": 4,
+      "name": "SOUTH9",
+      "arrivalRunwayIds": [
+        "18C",
+        "18L",
+        "18R",
+        "9"
+      ],
+      "departureRunwayIds": [
+        "18C",
+        "18L",
+        "18R",
+        "9"
+      ]
+    },
+    {
+      "number": 5,
+      "name": "LIMITED",
+      "arrivalRunwayIds": [],
+      "departureRunwayIds": [],
+      "default": true
+    }
+  ],
+  "towerPositions": [
+    {
+      "name": "MONITOR",
+      "runwayIds": [],
+      "default": true
+    },
+    {
+      "name": "TOWER",
+      "runwayIds": [
+        "18C-36C",
+        "18L-36R",
+        "18R-36L",
+        "9-27"
+      ]
+    }
+  ]
+}

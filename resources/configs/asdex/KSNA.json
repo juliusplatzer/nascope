@@ -1,0 +1,65 @@
+{
+  "airport": "SNA",
+  "runwayConfigurations": [
+    {
+      "number": 1,
+      "name": "NORTH",
+      "arrivalRunwayIds": [
+        "2L",
+        "2R"
+      ],
+      "departureRunwayIds": [
+        "2L",
+        "2R"
+      ]
+    },
+    {
+      "number": 2,
+      "name": "SOUTH",
+      "arrivalRunwayIds": [
+        "20L",
+        "20R"
+      ],
+      "departureRunwayIds": [
+        "20L",
+        "20R"
+      ]
+    },
+    {
+      "number": 3,
+      "name": "LIMITED",
+      "arrivalRunwayIds": [],
+      "departureRunwayIds": [],
+      "default": true
+    }
+  ],
+  "towerPositions": [
+    {
+      "name": "LC1",
+      "runwayIds": [
+        "2L-20R"
+      ],
+      "default": true
+    },
+    {
+      "name": "LC2",
+      "runwayIds": [
+        "2R-20L"
+      ]
+    },
+    {
+      "name": "GC",
+      "runwayIds": [
+        "2L-20R",
+        "2R-20L"
+      ]
+    },
+    {
+      "name": "ALL",
+      "runwayIds": [
+        "2L-20R",
+        "2R-20L"
+      ]
+    }
+  ]
+}
