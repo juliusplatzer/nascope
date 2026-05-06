@@ -410,11 +410,11 @@ QVector<int> endpointNodeIndices(const QVector<TaxiwayClosureNode>& nodes,
 
 QJsonArray getClosedTwysFromNotam(const QJsonObject& airportJson,
                                   const QString& closedTwyId,
-                                  const QString& fromBoundaryTwyId,
-                                  const QString& toBoundaryTwyId) {
+                                  const QString& fromTwyId,
+                                  const QString& toTwyId) {
     const QString closedTwy = normalizedTaxiwayToken(closedTwyId);
-    const QString fromTwy   = normalizedTaxiwayToken(fromBoundaryTwyId);
-    const QString toTwy     = normalizedTaxiwayToken(toBoundaryTwyId);
+    const QString fromTwy   = normalizedTaxiwayToken(fromTwyId);
+    const QString toTwy     = normalizedTaxiwayToken(toTwyId);
 
     const QJsonArray twys = airportJson.value(QStringLiteral("twys")).toArray();
     if (twys.isEmpty() || closedTwy.isEmpty() || fromTwy.isEmpty() || toTwy.isEmpty()) {
