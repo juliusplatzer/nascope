@@ -50,7 +50,7 @@ QColor tempDataColor() {
 
 } // namespace
 
-void drawRestrictionArea(QPainter& p, const QPolygonF& polyNm, const QTransform& nmToScreen) {
+void drawClosedAreas(QPainter& p, const QPolygonF& polyNm, const QTransform& nmToScreen) {
     if (polyNm.size() < 3) return;
 
     const QPolygonF poly  = nmToScreen.map(polyNm);
@@ -78,10 +78,11 @@ void drawRestrictionArea(QPainter& p, const QPolygonF& polyNm, const QTransform&
     p.setClipPath(clipPath, Qt::IntersectClip);
 
     // Per-area phase, anchored at the first polygon point in screen coords.
-    // Matches CRC's `offset = -((4*p.Y + p.X) % 50)`. Purpose is phase-lock:
-    // as the area pans the stripes pan with it instead of sliding past.
+    // The phase scalar must match the stripe equation below
+    // (`offset + x - 4y`), otherwise the clipped hatch behaves like a static
+    // screen layer under a moving polygon-shaped mask.
     const QPointF p0 = poly.first();
-    const double  offset = -std::fmod(kHatchYScale * p0.y() + p0.x(), kHatchSpacing);
+    const double  offset = -std::fmod(p0.x() - kHatchYScale * p0.y(), kHatchSpacing);
 
     const QRectF bbox    = poly.boundingRect();
     const double yTop    = bbox.top();
@@ -534,8 +535,8 @@ QJsonArray getClosedTwysFromNotam(const QJsonObject& airportJson,
 // ClosureCache — drives the NOTAM scraper subprocess, parses its compact
 // JSON output, joins it with the static airport surface data, and exposes a
 // list of NM-space render items the scope's paintEvent feeds into the helpers
-// above. v1 only resolves runway closures — taxiway closures are recorded by
-// the scraper (visible in the cache JSON) but skipped here.
+// above. Supported taxiway closed areas are resolved from the scraper's
+// closedAreas list; restrictionAreas are intentionally ignored here for now.
 // ===========================================================================
 
 namespace {
@@ -546,6 +547,32 @@ constexpr char kScraperRel[]     = "reader/notams/scrape.py";
 
 QString surfacePathFor(const QString& icao) {
     return QStringLiteral("%1/%2.json").arg(QString::fromLatin1(kSurfaceDirRel), icao);
+}
+
+QString normalizedSurfaceId(const QString& id) {
+    return id.trimmed().toUpper();
+}
+
+QPolygonF polygonNmFromJson(const QJsonArray& pts, const QTransform& lonLatToNmT) {
+    QPolygonF lonLat;
+    lonLat.reserve(pts.size());
+    for (const QJsonValue& p : pts) {
+        const QJsonArray a = p.toArray();
+        if (a.size() < 2) continue;
+        lonLat << QPointF(a.at(0).toDouble(), a.at(1).toDouble());
+    }
+    return lonLatToNmT.map(lonLat);
+}
+
+bool isSupportedClosedArea(const QJsonObject& obj) {
+    const QString btnFrom = obj.value(QStringLiteral("btnFrom")).toString().trimmed();
+    const QString btnTo   = obj.value(QStringLiteral("btnTo")).toString().trimmed();
+
+    if (btnFrom.isEmpty() && btnTo.isEmpty()) return true;
+    if (btnFrom.isEmpty() || btnTo.isEmpty()) return false;
+
+    return btnFrom.contains(QStringLiteral("TWY"), Qt::CaseInsensitive)
+        && btnTo.contains(QStringLiteral("TWY"), Qt::CaseInsensitive);
 }
 
 } // namespace
@@ -562,7 +589,13 @@ void ClosureCache::switchAirport(const QString& icao, QPointF anchorLonLat) {
 
     rwys_.clear();
     rwyClosures_.clear();
+    closedAreaClosures_.clear();
     items_.clear();
+    closedAreaItems_.clear();
+    fetchedAt_.clear();
+    surfaceJson_ = {};
+    twysByIndex_.clear();
+    exactTwyIndices_.clear();
 
     if (icao.isEmpty()) {
         emit changed();
@@ -596,8 +629,10 @@ void ClosureCache::loadSurface(const QString& icao, QPointF anchorLonLat) {
         return;
     }
 
+    surfaceJson_ = doc.object();
+
     const QTransform lonLatT = lonLatToNm(anchorLonLat);
-    const QJsonArray rwys    = doc.object().value(QStringLiteral("rwys")).toArray();
+    const QJsonArray rwys    = surfaceJson_.value(QStringLiteral("rwys")).toArray();
     for (const QJsonValue& v : rwys) {
         const QJsonObject obj = v.toObject();
         const QString     id  = obj.value(QStringLiteral("id")).toString();
@@ -616,13 +651,27 @@ void ClosureCache::loadSurface(const QString& icao, QPointF anchorLonLat) {
         rwys_.insert(id, lonLatT.map(lonLat));
     }
 
+    const QJsonArray twys = surfaceJson_.value(QStringLiteral("twys")).toArray();
+    twysByIndex_.resize(twys.size());
+    for (int i = 0; i < twys.size(); ++i) {
+        const QJsonObject obj = twys.at(i).toObject();
+        const QString id = normalizedSurfaceId(obj.value(QStringLiteral("id")).toString());
+        const QJsonArray pts = obj.value(QStringLiteral("polygon")).toArray();
+        if (id.isEmpty() || pts.size() < 3) continue;
+
+        const QPolygonF polyNm = polygonNmFromJson(pts, lonLatT);
+        if (polyNm.size() < 3) continue;
+
+        twysByIndex_[i] = polyNm;
+        exactTwyIndices_[id].append(i);
+    }
+
     qDebug().noquote() << "[closures]" << icao << "surface loaded:"
-                       << rwys_.size() << "runway(s)";
+                       << rwys_.size() << "runway(s),"
+                       << exactTwyIndices_.size() << "taxiway id(s)";
 }
 
 void ClosureCache::parseScrapeOutput(const QByteArray& bytes) {
-    rwyClosures_.clear();
-
     QJsonParseError err{};
     const QJsonDocument doc = QJsonDocument::fromJson(bytes, &err);
     if (err.error != QJsonParseError::NoError) {
@@ -630,24 +679,88 @@ void ClosureCache::parseScrapeOutput(const QByteArray& bytes) {
         return;
     }
 
-    const QJsonArray rwys = doc.object().value(QStringLiteral("rwyClosures")).toArray();
+    const QJsonObject root = doc.object();
+    QStringList nextRwyClosures;
+    QList<ClosedAreaClosure> nextClosedAreaClosures;
+
+    const QJsonArray rwys = root.value(QStringLiteral("rwyClosures")).toArray();
     for (const QJsonValue& v : rwys) {
         const QString id = v.toString();
-        if (!id.isEmpty()) rwyClosures_ << id;
+        if (!id.isEmpty()) nextRwyClosures << id;
     }
+
+    QJsonArray closedAreas = root.value(QStringLiteral("closedAreas")).toArray();
+    if (closedAreas.isEmpty() && root.contains(QStringLiteral("twyClosures"))) {
+        closedAreas = root.value(QStringLiteral("twyClosures")).toArray();
+    }
+
+    for (const QJsonValue& v : closedAreas) {
+        const QJsonObject obj = v.toObject();
+        const QString id = normalizedTaxiwayToken(obj.value(QStringLiteral("id")).toString());
+        if (id.isEmpty() || !isSupportedClosedArea(obj)) continue;
+
+        ClosedAreaClosure cl;
+        cl.id = id;
+        cl.btnFrom = obj.value(QStringLiteral("btnFrom")).toString().trimmed();
+        cl.btnTo = obj.value(QStringLiteral("btnTo")).toString().trimmed();
+        nextClosedAreaClosures.append(cl);
+    }
+
+    fetchedAt_ = root.value(QStringLiteral("fetchedAt")).toString();
+    rwyClosures_ = nextRwyClosures;
+    closedAreaClosures_ = nextClosedAreaClosures;
 }
 
 void ClosureCache::rebuildItems() {
-    items_.clear();
-    items_.reserve(rwyClosures_.size());
+    QList<QPolygonF> nextRunwayItems;
+    nextRunwayItems.reserve(rwyClosures_.size());
     for (const QString& id : rwyClosures_) {
         const auto it = rwys_.constFind(id);
         if (it == rwys_.constEnd()) {
             qDebug().noquote() << "[closures] no surface match for runway closure" << id;
             continue;
         }
-        items_.append(it.value());
+        nextRunwayItems.append(it.value());
     }
+
+    QSet<int> closedTwyIndices;
+    for (const ClosedAreaClosure& cl : closedAreaClosures_) {
+        if (cl.btnFrom.isEmpty() && cl.btnTo.isEmpty()) {
+            const auto it = exactTwyIndices_.constFind(cl.id);
+            if (it == exactTwyIndices_.constEnd()) {
+                qDebug().noquote() << "[closures] no exact surface match for closed area" << cl.id;
+                continue;
+            }
+            for (const int index : it.value()) closedTwyIndices.insert(index);
+            continue;
+        }
+
+        const QJsonArray hits = getClosedTwysFromNotam(surfaceJson_, cl.id, cl.btnFrom, cl.btnTo);
+        if (hits.isEmpty()) {
+            qDebug().noquote() << "[closures] no surface path for closed area"
+                               << cl.id << "between" << cl.btnFrom << "and" << cl.btnTo;
+            continue;
+        }
+
+        for (const QJsonValue& v : hits) {
+            const int index = v.toObject().value(QStringLiteral("index")).toInt(-1);
+            if (index >= 0) closedTwyIndices.insert(index);
+        }
+    }
+
+    QList<QPolygonF> nextClosedAreaItems;
+    nextClosedAreaItems.reserve(closedTwyIndices.size());
+    QList<int> sortedClosedIndices = closedTwyIndices.values();
+    std::sort(sortedClosedIndices.begin(), sortedClosedIndices.end());
+    for (const int index : sortedClosedIndices) {
+        if (index < 0 || index >= twysByIndex_.size() || twysByIndex_.at(index).isEmpty()) {
+            continue;
+        }
+        nextClosedAreaItems.append(twysByIndex_.at(index));
+    }
+
+    items_ = nextRunwayItems;
+    closedAreaItems_ = nextClosedAreaItems;
 }
 
 void ClosureCache::kickScrape() {
@@ -678,7 +791,8 @@ void ClosureCache::onScrapeFinished(QProcess* proc, int exitCode) {
         rebuildItems();
         emit changed();
         qDebug().noquote() << "[closures]" << icao_ << "scrape ok:"
-                           << items_.size() << "rendered closure(s)";
+                           << items_.size() << "runway closure(s),"
+                           << closedAreaItems_.size() << "closed area polygon(s)";
     } else {
         const QByteArray serr = proc->readAllStandardError().trimmed();
         qWarning().noquote() << "[closures]" << icao_

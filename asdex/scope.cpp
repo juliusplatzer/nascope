@@ -171,11 +171,14 @@ void Scope::paintEvent(QPaintEvent*) {
         const QTransform toScreen = nmToScreen(centerNm_, halfRangeNm_, size());
         map_.render(p, toScreen, mode_);
 
-        // Closure overlays sit above the videomap surface and below the
-        // targets — the X has to be visible against the runway, but a target
-        // taxiing across a closed runway should still draw on top.
-        for (const QPolygonF& polyNm : closures_.renderItems()) {
+        // Closure overlays sit above the videomap surface and below targets,
+        // lists, and datablocks. Runway X markers are lower; closed areas are
+        // z=-6.9, so the red hatch is drawn after runway closures.
+        for (const QPolygonF& polyNm : closures_.runwayClosureItems()) {
             drawRunwayClosure(p, polyNm, toScreen);
+        }
+        for (const QPolygonF& polyNm : closures_.closedAreaItems()) {
+            drawClosedAreas(p, polyNm, toScreen);
         }
 
         if (cache_ && !cache_->targets().isEmpty()) {

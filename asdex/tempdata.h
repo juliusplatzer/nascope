@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QHash>
+#include <QJsonObject>
 #include <QList>
 #include <QObject>
 #include <QPainter>
@@ -10,6 +11,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QTransform>
+#include <QVector>
 
 QT_FORWARD_DECLARE_CLASS(QProcess)
 
@@ -19,8 +21,7 @@ namespace asdex {
  * Temporary-data overlays — restriction areas, closure areas, runway
  * closures.
  *
- * Restriction areas and runway closures are implemented; closure areas will
- * be added here next. Restriction areas use the shared red palette
+ * Closed areas and runway closures are implemented. Closed areas use the shared red palette
  * (255,0,0 × `kTempDataBrightness`) with a screen-space diagonal hatch.
  * Runway closures are pure white 1px X markings with no brightness scaling.
  *
@@ -31,11 +32,11 @@ namespace asdex {
  * polygons for the scope's paintEvent to feed into the rendering helpers.
  */
 
-/// Renders one restriction area: 1px outline + diagonal hatch fill, both red.
+/// Renders one closed area: 1px outline + diagonal hatch fill, both red.
 /// `polyNm` is the area's outer ring in local NM; the hatch is computed in
 /// screen pixels and phase-anchored at the polygon's first vertex so the
 /// stripes stay locked to the area as the scope pans.
-void drawRestrictionArea(QPainter& p, const QPolygonF& polyNm, const QTransform& nmToScreen);
+void drawClosedAreas(QPainter& p, const QPolygonF& polyNm, const QTransform& nmToScreen);
 
 /// Renders one runway closure marker: 4 pure-white 1px segments at ±15° to
 /// the runway's long axis, anchored on the polygon's four outer corners.
@@ -67,8 +68,7 @@ void drawRunwayClosure(QPainter& p,
  *   3. When the subprocess finishes, the cache JSON is re-read, the derived
  *      render list is rebuilt, and `changed()` fires so the scope repaints.
  *
- * v1 only resolves runway closures; taxiway closures are recorded in the
- * cache JSON but skipped here. v2 will add taxiway resolution + rendering.
+ * Resolves runway closures and supported closed-area taxiway closures.
  */
 class ClosureCache : public QObject {
     Q_OBJECT
@@ -79,9 +79,14 @@ public:
      *  facility, loads the new surface JSON, and kicks a scrape. */
     void switchAirport(const QString& icao, QPointF anchorLonLat);
 
-    /** Resolved closure polygons in local NM. v1 only contains runway
-     *  closures; v2 will discriminate runway vs taxiway entries. */
-    const QList<QPolygonF>& renderItems() const { return items_; }
+    /** Runway closure polygons in local NM, rendered as white X markers. */
+    const QList<QPolygonF>& runwayClosureItems() const { return items_; }
+
+    /** Closed-area polygons in local NM, rendered as red hatched areas. */
+    const QList<QPolygonF>& closedAreaItems() const { return closedAreaItems_; }
+
+    /** Backwards-compatible alias for runway closure polygons. */
+    const QList<QPolygonF>& renderItems() const { return runwayClosureItems(); }
 
 signals:
     void changed();
@@ -93,11 +98,23 @@ private:
     void parseScrapeOutput(const QByteArray& bytes);
     void rebuildItems();
 
+    struct ClosedAreaClosure {
+        QString id;
+        QString btnFrom;
+        QString btnTo;
+    };
+
     QString                  icao_;
     QPointF                  anchorLonLat_ {0.0, 0.0};
+    QString                  fetchedAt_;
+    QJsonObject              surfaceJson_;
     QHash<QString, QPolygonF> rwys_;        // id → 4-corner polygon in NM
+    QVector<QPolygonF>       twysByIndex_;  // twys[index] → polygon in NM
+    QHash<QString, QList<int>> exactTwyIndices_; // exact id → twys indices
     QStringList              rwyClosures_;  // ids from the latest scrape
-    QList<QPolygonF>         items_;        // resolved closure polygons (NM)
+    QList<ClosedAreaClosure> closedAreaClosures_;
+    QList<QPolygonF>         items_;        // resolved runway closure polygons (NM)
+    QList<QPolygonF>         closedAreaItems_;
     QTimer                   refreshTimer_;
 };
 
