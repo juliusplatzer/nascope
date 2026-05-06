@@ -92,6 +92,13 @@ Scope::Scope(VideoMap map, TgtCache* cache, QWidget* parent)
     if (cache_) {
         connect(cache_, &TgtCache::changed, this, QOverload<>::of(&QWidget::update));
     }
+
+    // Same wiring for the closure cache, then kick its first scrape against
+    // the airport the target cache is already scoped to.
+    connect(&closures_, &ClosureCache::changed, this, QOverload<>::of(&QWidget::update));
+    if (cache_ && map_.isValid()) {
+        closures_.switchAirport(cache_->airport(), map_.anchorLonLat());
+    }
 }
 
 void Scope::setMode(Mode m) {
@@ -120,6 +127,7 @@ void Scope::setFacility(const QString& icao) {
 
     map_ = std::move(nextMap);
     cache_->setAirport(icao);
+    closures_.switchAirport(icao, map_.anchorLonLat());
 
     // Re-fit the viewport to the new airport's bounds and reset transient UI
     // state that's tied to the previous facility's targets.
@@ -162,6 +170,13 @@ void Scope::paintEvent(QPaintEvent*) {
         p.setRenderHint(QPainter::Antialiasing);
         const QTransform toScreen = nmToScreen(centerNm_, halfRangeNm_, size());
         map_.render(p, toScreen, mode_);
+
+        // Closure overlays sit above the videomap surface and below the
+        // targets — the X has to be visible against the runway, but a target
+        // taxiing across a closed runway should still draw on top.
+        for (const QPolygonF& polyNm : closures_.renderItems()) {
+            drawRunwayClosure(p, polyNm, toScreen);
+        }
 
         if (cache_ && !cache_->targets().isEmpty()) {
             const QTransform lonLatToNmT = lonLatToNm(map_.anchorLonLat());

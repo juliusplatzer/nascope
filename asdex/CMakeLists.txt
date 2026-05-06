@@ -17,6 +17,7 @@ add_executable(scope
     font.cpp
     lists.cpp
     targets.cpp
+    tempdata.cpp
     tgtcache.cpp
     dcb.cpp
 )

@@ -1,11 +1,20 @@
 #include "tempdata.h"
 
 #include "maths.h"
+#include "utils.h"
 
 #include <QColor>
+#include <QDebug>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
+#include <QJsonValue>
 #include <QPainterPath>
 #include <QPen>
 #include <QPointF>
+#include <QProcess>
 #include <QRectF>
 #include <QtMath>
 
@@ -17,7 +26,11 @@ namespace asdex {
 
 namespace {
 
-constexpr double kTempDataBrightness = 0.95;
+// applyBrightness is on the 1..99 integer scale (kBrightnessMax = 99). 95
+// = the kBrightnessDefault — same brightness the videomap, targets, and
+// vector lines pick up via defaultBrightness() so the closure overlays
+// match the rest of the scope.
+constexpr int kTempDataBrightness = 95;
 
 // Hatch parameters — match CRC's fragment shader literally so the visual
 // cadence (slope, stripe thickness, gap) is identical.
@@ -95,30 +108,54 @@ void drawRestrictionArea(QPainter& p, const QPolygonF& polyNm, const QTransform&
     p.restore();
 }
 
+namespace {
+
+// Long-axis direction for a 4-corner runway rectangle. Among the 6 pairwise
+// distances of 4 corners, sorted ascending we expect (W, W, L, L, D, D);
+// index 2 is one of the two long edges, whose direction = the runway axis.
+// Robust against magnetic-vs-true heading mismatch and arbitrary corner
+// ordering, which a heading-driven axis at e.g. KSFO (~14° declination)
+// gets badly wrong — the perp projection there gets dominated by length
+// instead of width and the segment length explodes.
+QPointF longAxisDir(const QPolygonF& c) {
+    if (c.size() != 4) return QPointF(0.0, 1.0);
+
+    struct Edge { int i, j; double distSq; };
+    Edge edges[6];
+    int k = 0;
+    for (int i = 0; i < 4; ++i) {
+        for (int j = i + 1; j < 4; ++j) {
+            const QPointF d = c[j] - c[i];
+            edges[k++] = { i, j, d.x() * d.x() + d.y() * d.y() };
+        }
+    }
+    std::sort(edges, edges + 6,
+              [](const Edge& a, const Edge& b) { return a.distSq < b.distSq; });
+
+    // edges[0..1] are the short edges (W), [2..3] long (L), [4..5] diagonals.
+    const QPointF v   = c[edges[2].j] - c[edges[2].i];
+    const double  len = std::hypot(v.x(), v.y());
+    return (len > 0.0) ? QPointF(v.x() / len, v.y() / len) : QPointF(0.0, 1.0);
+}
+
+} // namespace
+
 void drawRunwayClosure(QPainter& p,
-                       const QPolygonF& polyNm,
-                       double headingMagDeg,
+                       const QPolygonF& cornersNm,
                        const QTransform& nmToScreen) {
-    if (polyNm.size() < 4) return;
+    if (cornersNm.size() != 4) return;
 
     constexpr double kClosureAngleDeg = 15.0;
 
-    // Runway axis in NM (y = north). Heading θ rotates from N toward E so the
-    // axis vector is (sinθ, cosθ); the transverse vector 90° to the right of
-    // it is (cosθ, −sinθ). Magnetic heading is treated as true here — see the
-    // header for why.
-    const double thRad = qDegreesToRadians(headingMagDeg);
-    const QPointF axis(std::sin(thRad),  std::cos(thRad));
-    const QPointF perp(std::cos(thRad), -std::sin(thRad));
+    const QPointF axis = longAxisDir(cornersNm);
+    const QPointF perp(axis.y(), -axis.x());  // 90° to the right of axis
 
-    // Pick the four "outermost" polygon vertices in (axis, perp) coords.
-    // For a runway-shaped quadrilateral aligned with the heading, these are
-    // the four actual corners; for a polygon with extra vertices they are
-    // still the convex extremes in each runway-local quadrant.
+    // With exactly 4 corners + an axis derived from the polygon's own long
+    // edge, each (±axis, ±perp) extremum picks a unique, real corner.
     auto findCorner = [&](double axisSign, double perpSign) {
         QPointF best;
         double  bestScore = -std::numeric_limits<double>::infinity();
-        for (const QPointF& v : polyNm) {
+        for (const QPointF& v : cornersNm) {
             const double score = axisSign * QPointF::dotProduct(v, axis)
                                + perpSign * QPointF::dotProduct(v, perp);
             if (score > bestScore) { bestScore = score; best = v; }
@@ -134,7 +171,7 @@ void drawRunwayClosure(QPainter& p,
     // has to cover from its corner to the opposite long edge.
     double perpMin =  std::numeric_limits<double>::infinity();
     double perpMax = -std::numeric_limits<double>::infinity();
-    for (const QPointF& v : polyNm) {
+    for (const QPointF& v : cornersNm) {
         const double pp = QPointF::dotProduct(v, perp);
         perpMin = std::min(perpMin, pp);
         perpMax = std::max(perpMax, pp);
@@ -144,8 +181,8 @@ void drawRunwayClosure(QPainter& p,
 
     // Each arm leaves its corner at ±15° to axis, going inward, and stops
     // when it crosses the opposite long edge. With angle 15° to axis the
-    // segment length is `width / sin(15°)` — that's the total path length
-    // needed to traverse the full perpendicular extent at that slant.
+    // segment length is `width / sin(15°)` — total path length to traverse
+    // the full perpendicular extent at that slant.
     const double aRad   = qDegreesToRadians(kClosureAngleDeg);
     const double cosA   = std::cos(aRad);
     const double sinA   = std::sin(aRad);
@@ -157,13 +194,15 @@ void drawRunwayClosure(QPainter& p,
 
     struct Seg { QPointF start; QPointF dir; };
     const Seg segs[4] = {
-        { cornerFL, inward(-1, +1) },  // FL → toward back-right
-        { cornerFR, inward(-1, -1) },  // FR → toward back-left   (crosses FL's arm at front-end midline)
-        { cornerBL, inward(+1, +1) },  // BL → toward front-right
-        { cornerBR, inward(+1, -1) },  // BR → toward front-left  (crosses BL's arm at back-end midline)
+        { cornerFL, inward(-1, +1) },  // FL → back-right (crosses FR's arm at front-end midline)
+        { cornerFR, inward(-1, -1) },  // FR → back-left
+        { cornerBL, inward(+1, +1) },  // BL → front-right (crosses BR's arm at rollout-end midline)
+        { cornerBR, inward(+1, -1) },  // BR → front-left
     };
 
     p.save();
+    // Pure white, no brightness scaling — closure markings are spec'd at
+    // 100% intensity to stay legible against the runway fill.
     QPen pen(QColor(255, 255, 255));
     pen.setCosmetic(true);
     pen.setWidthF(1.0);
@@ -176,6 +215,164 @@ void drawRunwayClosure(QPainter& p,
     }
 
     p.restore();
+}
+
+// ===========================================================================
+// ClosureCache — drives the NOTAM scraper subprocess, parses its compact
+// JSON output, joins it with the static airport surface data, and exposes a
+// list of NM-space render items the scope's paintEvent feeds into the helpers
+// above. v1 only resolves runway closures — taxiway closures are recorded by
+// the scraper (visible in the cache JSON) but skipped here.
+// ===========================================================================
+
+namespace {
+
+constexpr int kRefreshIntervalMs = 30 * 60 * 1000;  // 30 min
+constexpr char kSurfaceDirRel[]  = "asdex/surface";
+constexpr char kScraperRel[]     = "reader/notams/scrape.py";
+
+QString surfacePathFor(const QString& icao) {
+    return QStringLiteral("%1/%2.json").arg(QString::fromLatin1(kSurfaceDirRel), icao);
+}
+
+} // namespace
+
+ClosureCache::ClosureCache(QObject* parent)
+    : QObject(parent) {
+    refreshTimer_.setInterval(kRefreshIntervalMs);
+    connect(&refreshTimer_, &QTimer::timeout, this, &ClosureCache::kickScrape);
+}
+
+void ClosureCache::switchAirport(const QString& icao, QPointF anchorLonLat) {
+    icao_         = icao;
+    anchorLonLat_ = anchorLonLat;
+
+    rwys_.clear();
+    rwyClosures_.clear();
+    items_.clear();
+
+    if (icao.isEmpty()) {
+        emit changed();
+        return;
+    }
+
+    loadSurface(icao, anchorLonLat);
+    // No on-disk cache: we just have an empty closure list until the first
+    // scrape completes (~15 s after switchAirport). Emit changed() now so
+    // the scope repaints with the new airport's surface in scope, and
+    // again from onScrapeFinished when closures arrive.
+    emit changed();
+
+    refreshTimer_.start();
+    kickScrape();
+}
+
+void ClosureCache::loadSurface(const QString& icao, QPointF anchorLonLat) {
+    const QString path = surfacePathFor(icao);
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        qWarning().noquote() << "[closures] no surface data for" << icao
+                             << "—" << f.errorString();
+        return;
+    }
+
+    QJsonParseError err{};
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
+    if (err.error != QJsonParseError::NoError) {
+        qWarning().noquote() << "[closures] surface json parse:" << err.errorString();
+        return;
+    }
+
+    const QTransform lonLatT = lonLatToNm(anchorLonLat);
+    const QJsonArray rwys    = doc.object().value(QStringLiteral("rwys")).toArray();
+    for (const QJsonValue& v : rwys) {
+        const QJsonObject obj = v.toObject();
+        const QString     id  = obj.value(QStringLiteral("id")).toString();
+        const QJsonArray  pts = obj.value(QStringLiteral("polygon")).toArray();
+        if (id.isEmpty() || pts.size() != 4) continue;  // expect exactly 4 corners
+
+        QPolygonF lonLat;
+        lonLat.reserve(4);
+        for (const QJsonValue& p : pts) {
+            const QJsonArray a = p.toArray();
+            if (a.size() < 2) continue;
+            lonLat << QPointF(a.at(0).toDouble(), a.at(1).toDouble());
+        }
+        if (lonLat.size() != 4) continue;
+
+        rwys_.insert(id, lonLatT.map(lonLat));
+    }
+
+    qDebug().noquote() << "[closures]" << icao << "surface loaded:"
+                       << rwys_.size() << "runway(s)";
+}
+
+void ClosureCache::parseScrapeOutput(const QByteArray& bytes) {
+    rwyClosures_.clear();
+
+    QJsonParseError err{};
+    const QJsonDocument doc = QJsonDocument::fromJson(bytes, &err);
+    if (err.error != QJsonParseError::NoError) {
+        qWarning().noquote() << "[closures] scrape json parse:" << err.errorString();
+        return;
+    }
+
+    const QJsonArray rwys = doc.object().value(QStringLiteral("rwyClosures")).toArray();
+    for (const QJsonValue& v : rwys) {
+        const QString id = v.toString();
+        if (!id.isEmpty()) rwyClosures_ << id;
+    }
+}
+
+void ClosureCache::rebuildItems() {
+    items_.clear();
+    items_.reserve(rwyClosures_.size());
+    for (const QString& id : rwyClosures_) {
+        const auto it = rwys_.constFind(id);
+        if (it == rwys_.constEnd()) {
+            qDebug().noquote() << "[closures] no surface match for runway closure" << id;
+            continue;
+        }
+        items_.append(it.value());
+    }
+}
+
+void ClosureCache::kickScrape() {
+    if (icao_.isEmpty()) return;
+
+    auto* proc = new QProcess(this);
+    proc->setProgram(QStringLiteral("python3"));
+    // `--output -` writes the compact JSON payload to stdout; we read it
+    // back in onScrapeFinished and parse without ever touching the disk.
+    proc->setArguments({
+        QString::fromLatin1(kScraperRel),
+        icao_,
+        QStringLiteral("--output"),
+        QStringLiteral("-"),
+    });
+
+    connect(proc, &QProcess::finished, this,
+            [this, proc](int exitCode, QProcess::ExitStatus /*status*/) {
+                onScrapeFinished(proc, exitCode);
+            });
+
+    proc->start();
+}
+
+void ClosureCache::onScrapeFinished(QProcess* proc, int exitCode) {
+    if (exitCode == 0) {
+        parseScrapeOutput(proc->readAllStandardOutput());
+        rebuildItems();
+        emit changed();
+        qDebug().noquote() << "[closures]" << icao_ << "scrape ok:"
+                           << items_.size() << "rendered closure(s)";
+    } else {
+        const QByteArray serr = proc->readAllStandardError().trimmed();
+        qWarning().noquote() << "[closures]" << icao_
+                             << "scrape failed (exit" << exitCode << ")"
+                             << QString::fromLocal8Bit(serr);
+    }
+    proc->deleteLater();
 }
 
 } // namespace asdex

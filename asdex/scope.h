@@ -13,6 +13,7 @@
 #include "dcb.h"
 #include "font.h"
 #include "lists.h"
+#include "tempdata.h"
 #include "videomaps.h"
 
 namespace asdex {
@@ -97,6 +98,12 @@ private:
     // Display Control Bar — top-of-screen toolbar by default. Rendered last so
     // it sits above everything (scope content, lists, the green border).
     dcb::Config        dcbCfg_;
+
+    // Runway / taxiway closure cache. Owns the NOTAM scraper subprocess and
+    // joins its results with the static airport surface data; emits changed()
+    // when the resolved closure list changes. v1 renders runway closures
+    // only — see ClosureCache docstring.
+    ClosureCache       closures_;
 
     // Per-target leader-line + datablock visibility — keys with the symbol
     // suppressed via a left-click toggle. Default for every non-Unknown
