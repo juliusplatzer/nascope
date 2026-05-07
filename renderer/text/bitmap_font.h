@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QSize>
 #include <QString>
+#include <QStringView>
 
 #include <cstdint>
 #include <vector>

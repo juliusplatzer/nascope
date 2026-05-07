@@ -1,4 +1,4 @@
-#include "renderer/bitmap_font.h"
+#include "renderer/text/bitmap_font.h"
 
 #include <QFile>
 
@@ -16,6 +16,12 @@ bool readI32(const QByteArray& bytes, qsizetype& offset, qint32& value) {
                  | (quint32(uchar(bytes[offset + 3])) << 24));
     offset += 4;
     return true;
+}
+
+bool readGlyphField(const QByteArray& bytes, qsizetype& offset, qint32& value, QString* error) {
+    if (readI32(bytes, offset, value)) return true;
+    if (error) *error = QStringLiteral("truncated glyph data");
+    return false;
 }
 
 const BitmapGlyph* glyphFor(const BitmapFontSize& fontSize, std::uint32_t codepoint) {
@@ -88,22 +94,19 @@ bool BitmapFont::loadFromFile(const QString& path, QString* error) {
         for (qint32 i = 0; i < glyphCount; ++i) {
             BitmapGlyph glyph;
 
-            if (!readI32(bytes, offset, value)) {
-                if (error) *error = QStringLiteral("truncated glyph data");
-                return false;
-            }
+            if (!readGlyphField(bytes, offset, value, error)) return false;
             glyph.codepoint = static_cast<std::uint32_t>(value);
-            if (!readI32(bytes, offset, value)) return false;
+            if (!readGlyphField(bytes, offset, value, error)) return false;
             glyph.width = value;
-            if (!readI32(bytes, offset, value)) return false;
+            if (!readGlyphField(bytes, offset, value, error)) return false;
             glyph.height = value;
-            if (!readI32(bytes, offset, value)) return false;
+            if (!readGlyphField(bytes, offset, value, error)) return false;
             glyph.textureOffset = value;
-            if (!readI32(bytes, offset, value)) return false;
+            if (!readGlyphField(bytes, offset, value, error)) return false;
             glyph.bearingX = value;
-            if (!readI32(bytes, offset, value)) return false;
+            if (!readGlyphField(bytes, offset, value, error)) return false;
             glyph.bearingY = value;
-            if (!readI32(bytes, offset, value)) return false;
+            if (!readGlyphField(bytes, offset, value, error)) return false;
             glyph.advance = value;
 
             fontSize.glyphIndex.insert(glyph.codepoint, static_cast<int>(fontSize.glyphs.size()));

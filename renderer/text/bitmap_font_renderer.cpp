@@ -1,8 +1,9 @@
-#include "renderer/bitmap_font_renderer.h"
+#include "renderer/text/bitmap_font_renderer.h"
 
-#include "renderer/asdex_resources.h"
-
+#include <QCoreApplication>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLVersionFunctionsFactory>
@@ -14,8 +15,37 @@
 namespace renderer {
 namespace {
 
+QStringList candidateRoots() {
+    QStringList roots;
+    const auto add = [&roots](const QString& path) {
+        if (path.isEmpty()) return;
+        const QString canonical = QDir(path).canonicalPath();
+        const QString normalized = canonical.isEmpty() ? QDir(path).absolutePath() : canonical;
+        if (!roots.contains(normalized)) roots << normalized;
+    };
+
+    add(QDir::currentPath());
+
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    add(appDir.absolutePath());
+    add(appDir.filePath(QStringLiteral("..")));
+    add(appDir.filePath(QStringLiteral("../..")));
+    add(appDir.filePath(QStringLiteral("../../..")));
+
+    return roots;
+}
+
+QString findProjectRelativeFile(const QString& relativePath) {
+    for (const QString& root : candidateRoots()) {
+        const QString candidate = QDir(root).filePath(relativePath);
+        const QFileInfo info(candidate);
+        if (info.isFile()) return info.canonicalFilePath().isEmpty() ? candidate : info.canonicalFilePath();
+    }
+    return relativePath;
+}
+
 QString readTextFile(const QString& relativePath, QString* error) {
-    const QString path = asdex::findProjectRelativeFile(relativePath);
+    const QString path = findProjectRelativeFile(relativePath);
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         if (error) *error = QStringLiteral("cannot open %1: %2").arg(path, file.errorString());
@@ -53,12 +83,14 @@ bool BitmapFontRenderer::initialize(const BitmapFont& font, QString* error) {
     functions_->initializeOpenGLFunctions();
 
     QString shaderError;
-    const QString vertexSource = readTextFile(QStringLiteral("renderer/shaders/font.vert"), &shaderError);
+    const QString vertexSource =
+        readTextFile(QStringLiteral("renderer/text/shaders/font.vert"), &shaderError);
     if (vertexSource.isEmpty()) {
         if (error) *error = shaderError;
         return false;
     }
-    const QString fragmentSource = readTextFile(QStringLiteral("renderer/shaders/font.frag"), &shaderError);
+    const QString fragmentSource =
+        readTextFile(QStringLiteral("renderer/text/shaders/font.frag"), &shaderError);
     if (fragmentSource.isEmpty()) {
         if (error) *error = shaderError;
         return false;
@@ -95,6 +127,7 @@ bool BitmapFontRenderer::initialize(const BitmapFont& font, QString* error) {
     functions_->glBindBuffer(GL_ARRAY_BUFFER, 0);
     functions_->glBindVertexArray(0);
     vertexCapacity_ = 0;
+    frameActive_ = false;
     return true;
 }
 
@@ -120,6 +153,16 @@ void BitmapFontRenderer::deinitialize() {
 
     shader_.removeAllShaders();
     vertexCapacity_ = 0;
+    frameActive_ = false;
+}
+
+void BitmapFontRenderer::beginFrame(const QMatrix4x4& screenProjection) {
+    screenProjection_ = screenProjection;
+    frameActive_ = true;
+}
+
+void BitmapFontRenderer::flush() {
+    frameActive_ = false;
 }
 
 bool BitmapFontRenderer::ensureGpuFontSize(int fontSize, QString* error) {
@@ -193,25 +236,34 @@ void BitmapFontRenderer::appendGlyphVertices(std::vector<FontVertex>& vertices,
     vertices.push_back(vertex(x0, y1, u0, v1));
 }
 
-void BitmapFontRenderer::renderTextTopLeft(QStringView text,
-                                           QPointF position,
-                                           int fontSize,
-                                           QColor color,
-                                           const QMatrix4x4& screenProjection) {
-    if (!font_ || !functions_ || !vao_ || text.isEmpty()) return;
-    if (!ensureGpuFontSize(fontSize)) return;
+void BitmapFontRenderer::drawTextTopLeft(QStringView text,
+                                         QPointF position,
+                                         const TextStyle& style) {
+    if (!frameActive_ || !font_ || !functions_ || !vao_ || text.isEmpty()) return;
+    if (!ensureGpuFontSize(style.size)) return;
 
-    const BitmapFontSize* fontSizeData = font_->fontSize(fontSize);
+    const BitmapFontSize* fontSizeData = font_->fontSize(style.size);
     if (!fontSizeData) return;
 
     std::vector<FontVertex> vertices;
     vertices.reserve(static_cast<std::size_t>(text.size()) * 6);
 
-    const QColor background(Qt::transparent);
     float penX = 0.0f;
     float penY = 0.0f;
 
-    for (const char32_t codepoint : text.toUcs4()) {
+    const auto codepoints = text.toUcs4();
+    const auto lastGlyphOnLine = [&](qsizetype index) {
+        for (qsizetype nextIndex = index + 1; nextIndex < codepoints.size(); ++nextIndex) {
+            const char32_t nextCodepoint = codepoints.at(nextIndex);
+            if (nextCodepoint == U'\r') continue;
+            if (nextCodepoint == U'\n') return true;
+            if (glyphFor(*fontSizeData, static_cast<std::uint32_t>(nextCodepoint))) return false;
+        }
+        return true;
+    };
+
+    for (qsizetype i = 0; i < codepoints.size(); ++i) {
+        const char32_t codepoint = codepoints.at(i);
         if (codepoint == U'\r') continue;
         if (codepoint == U'\n') {
             penX = 0.0f;
@@ -224,10 +276,14 @@ void BitmapFontRenderer::renderTextTopLeft(QStringView text,
 
         const QPointF glyphTopLeft(position.x() + penX + glyph->bearingX,
                                    position.y() + penY + fontSizeData->lineHeight - glyph->bearingY);
-        appendGlyphVertices(vertices, *fontSizeData, *glyph, glyphTopLeft, color, background);
-        penX += static_cast<float>(glyph->advance);
+        appendGlyphVertices(vertices, *fontSizeData, *glyph, glyphTopLeft, style.color, style.background);
+        penX += static_cast<float>(lastGlyphOnLine(i) ? glyph->width : glyph->advance);
     }
 
+    drawVertices(vertices, style.size);
+}
+
+void BitmapFontRenderer::drawVertices(const std::vector<FontVertex>& vertices, int fontSize) {
     if (vertices.empty()) return;
 
     const int vertexBytes = static_cast<int>(vertices.size() * sizeof(FontVertex));
@@ -242,7 +298,7 @@ void BitmapFontRenderer::renderTextTopLeft(QStringView text,
 
     const GpuFontSize gpu = gpuSizes_.value(fontSize);
     shader_.bind();
-    shader_.setUniformValue("u_projection", screenProjection);
+    shader_.setUniformValue("u_projection", screenProjection_);
     shader_.setUniformValue("u_fontAtlas", 0);
     functions_->glActiveTexture(GL_TEXTURE0);
     functions_->glBindTexture(GL_TEXTURE_2D, gpu.texture);
@@ -256,6 +312,10 @@ void BitmapFontRenderer::renderTextTopLeft(QStringView text,
 
 QSize BitmapFontRenderer::measureText(QStringView text, int fontSize) const {
     return font_ ? font_->measureText(text, fontSize) : QSize();
+}
+
+int BitmapFontRenderer::lineHeight(int fontSize) const {
+    return font_ ? font_->lineHeight(fontSize) : 0;
 }
 
 } // namespace renderer

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "renderer/bitmap_font.h"
+#include "renderer/text/bitmap_font.h"
 
 #include <QColor>
 #include <QHash>
@@ -9,6 +9,7 @@
 #include <QPointF>
 #include <QSize>
 #include <QString>
+#include <QStringView>
 
 #include <QtGui/qopengl.h>
 
@@ -18,18 +19,24 @@ class QOpenGLFunctions_3_3_Core;
 
 namespace renderer {
 
+struct TextStyle {
+    int size = 3;
+    QColor color = Qt::white;
+    QColor background = Qt::transparent;
+    bool underlined = false;
+};
+
 class BitmapFontRenderer {
 public:
     bool initialize(const BitmapFont& font, QString* error = nullptr);
     void deinitialize();
 
-    void renderTextTopLeft(QStringView text,
-                           QPointF position,
-                           int fontSize,
-                           QColor color,
-                           const QMatrix4x4& screenProjection);
+    void beginFrame(const QMatrix4x4& screenProjection);
+    void drawTextTopLeft(QStringView text, QPointF position, const TextStyle& style);
+    void flush();
 
     QSize measureText(QStringView text, int fontSize) const;
+    int lineHeight(int fontSize) const;
 
 private:
     struct GpuFontSize {
@@ -60,6 +67,7 @@ private:
                              QPointF topLeft,
                              QColor color,
                              QColor background) const;
+    void drawVertices(const std::vector<FontVertex>& vertices, int fontSize);
 
     const BitmapFont* font_ = nullptr;
     QOpenGLFunctions_3_3_Core* functions_ = nullptr;
@@ -68,6 +76,8 @@ private:
     GLuint vbo_ = 0;
     int vertexCapacity_ = 0;
     QOpenGLShaderProgram shader_;
+    QMatrix4x4 screenProjection_;
+    bool frameActive_ = false;
 };
 
 } // namespace renderer
