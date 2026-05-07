@@ -1,6 +1,7 @@
 #include "renderer/asdex_scope_widget.h"
 
 #include "renderer/asdex_math.h"
+#include "renderer/asdex_resources.h"
 
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
@@ -53,6 +54,15 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
 
     setMinimumSize(640, 480);
     setMouseTracking(true);
+
+    const QString assetsDir = asdex::findProjectRelativeDir(QStringLiteral("asdex/assets"));
+    QString cursorError;
+    if (cursors_.loadFromAssetsDir(assetsDir, &cursorError)) {
+        setAsdexCursor(CursorMode::Scope);
+    } else {
+        qWarning().noquote() << "[renderer] cursor load failed:" << cursorError;
+    }
+
     fitMapToView();
 }
 
@@ -106,6 +116,7 @@ void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
         panning_ = true;
         panStartMouseFramebuffer_ = framebufferPoint(event->position());
         panStartCenterFeet_ = centerFeet_;
+        setAsdexCursor(CursorMode::Hidden);
         grabMouse();
         event->accept();
         return;
@@ -138,6 +149,7 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::RightButton && panning_) {
         panning_ = false;
         releaseMouse();
+        setAsdexCursor(CursorMode::Scope);
         event->accept();
         return;
     }
@@ -313,6 +325,24 @@ void AsdexScopeWidget::zoomToCursorByFeet(double deltaFeet, const QPointF& curso
     const QPointF worldAfter = screenToWorldFeet(cursorLogicalPoint, renderSize);
     centerFeet_ += worldBefore - worldAfter;
     update();
+}
+
+void AsdexScopeWidget::setAsdexCursor(asdex::CursorType type) {
+    if (cursors_.has(type)) setCursor(cursors_.cursor(type));
+}
+
+void AsdexScopeWidget::setAsdexCursor(CursorMode mode) {
+    switch (mode) {
+        case CursorMode::Scope:
+            if (cursors_.has(asdex::CursorType::Scope))
+                setCursor(cursors_.cursor(asdex::CursorType::Scope));
+            else
+                unsetCursor();
+            break;
+        case CursorMode::Hidden:
+            setCursor(Qt::BlankCursor);
+            break;
+    }
 }
 
 QMatrix4x4 AsdexScopeWidget::viewProjection(const QSize& renderSize) const {

@@ -8,6 +8,7 @@ endif()
 add_library(nascope_renderer STATIC
     asdex_resources.cpp
     asdex_math.cpp
+    asdex_cursors.cpp
     videomap.cpp
     asdex_scope_widget.cpp
 )

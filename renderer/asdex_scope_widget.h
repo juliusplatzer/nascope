@@ -1,6 +1,7 @@
 #pragma once
 
 #include "renderer/asdex_colors.h"
+#include "renderer/asdex_cursors.h"
 #include "renderer/videomap.h"
 
 #include <QMatrix4x4>
@@ -33,6 +34,11 @@ protected:
     void wheelEvent(QWheelEvent* event) override;
 
 private:
+    enum class CursorMode {
+        Scope,
+        Hidden,
+    };
+
     struct DrawBatch {
         asdex::VideoMap::Kind kind = asdex::VideoMap::Kind::Apron;
         int indexCount = 0;
@@ -51,9 +57,12 @@ private:
     QPointF screenToWorldFeet(const QPointF& logicalPoint, const QSize& renderSize) const;
     void zoomByFeet(double deltaFeet);
     void zoomToCursorByFeet(double deltaFeet, const QPointF& cursorLogicalPoint);
+    void setAsdexCursor(CursorMode mode);
+    void setAsdexCursor(asdex::CursorType type);
 
     QString airport_;
     asdex::VideoMap map_;
+    asdex::CursorSet cursors_;
     QPointF centerFeet_;
     double halfRangeFeet_ = 1.0;
     asdex::Mode mode_ = asdex::Mode::Day;
