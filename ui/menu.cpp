@@ -1,11 +1,15 @@
 #include <QAbstractItemView>
 #include <QApplication>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDialog>
 #include <QDir>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListView>
+#include <QMessageBox>
+#include <QProcess>
 #include <QPushButton>
 #include <QStyleFactory>
 #include <QVBoxLayout>
@@ -14,7 +18,6 @@
 
 namespace {
 
-constexpr char kAsdexVideomapsDir[] = "resources/videomaps/asdex";
 // With ~40px per item (28px min + padding + spacing), 5 items ≈ 200px popup.
 constexpr int  kDropdownMaxVisible = 5;
 
@@ -92,13 +95,71 @@ QPushButton:hover    { background-color: rgb(45, 48, 56); }
 QPushButton:default  { border-color: rgb(200, 200, 205); }
 )";
 
+QStringList candidateRoots() {
+    QStringList roots;
+    const auto add = [&roots](const QString& path) {
+        if (path.isEmpty()) return;
+        const QString canonical = QDir(path).canonicalPath();
+        const QString normalized = canonical.isEmpty() ? QDir(path).absolutePath() : canonical;
+        if (!roots.contains(normalized)) roots << normalized;
+    };
+
+    add(QDir::currentPath());
+
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    add(appDir.absolutePath());
+    add(appDir.filePath(QStringLiteral("..")));
+    add(appDir.filePath(QStringLiteral("../..")));
+    add(appDir.filePath(QStringLiteral("../../..")));
+
+    return roots;
+}
+
+QString findProjectRelativeDir(const QString& relativePath) {
+    for (const QString& root : candidateRoots()) {
+        const QString candidate = QDir(root).filePath(relativePath);
+        const QFileInfo info(candidate);
+        if (info.isDir())
+            return info.canonicalFilePath().isEmpty() ? candidate : info.canonicalFilePath();
+    }
+    return relativePath;
+}
+
 QStringList loadAsdexAirports() {
-    QDir dir(kAsdexVideomapsDir);
+    const QDir dir(findProjectRelativeDir(QStringLiteral("resources/videomaps/asdex")));
     QStringList icaos;
-    for (const QString& name : dir.entryList(QStringList{"*.geojson.gz"}, QDir::Files, QDir::Name)) {
-        icaos << name.left(name.indexOf('.'));
+    for (const QString& name : dir.entryList(QStringList{QStringLiteral("*.geojson.gz")},
+                                             QDir::Files,
+                                             QDir::Name)) {
+        icaos << name.left(name.indexOf(QLatin1Char('.')));
     }
     return icaos;
+}
+
+QString executableSuffix() {
+#ifdef Q_OS_WIN
+    return QStringLiteral(".exe");
+#else
+    return QString();
+#endif
+}
+
+QString findAsdexScopeExecutable() {
+    const QString exeName = QStringLiteral("asdex_scope") + executableSuffix();
+    const QDir appDir(QCoreApplication::applicationDirPath());
+
+    const QStringList candidates = {
+        appDir.filePath(QStringLiteral("asdex/%1").arg(exeName)),
+        appDir.filePath(QStringLiteral("../asdex/%1").arg(exeName)),
+        appDir.filePath(QStringLiteral("../../asdex/%1").arg(exeName)),
+        QDir::current().filePath(QStringLiteral("ui/build/asdex/%1").arg(exeName)),
+    };
+
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(candidate)) return QFileInfo(candidate).absoluteFilePath();
+    }
+
+    return exeName;
 }
 
 QLabel* makeLabel(const QString& text) {
@@ -170,6 +231,17 @@ int main(int argc, char** argv) {
 
     Menu menu;
     if (menu.exec() != QDialog::Accepted) return 1;
-    std::cout << menu.selectedAirport().toStdString() << std::endl;
+
+    const QString airport = menu.selectedAirport();
+    std::cout << airport.toStdString() << std::endl;
+
+    const QString executable = findAsdexScopeExecutable();
+    if (!QProcess::startDetached(executable, QStringList{airport}, QDir::currentPath())) {
+        QMessageBox::critical(nullptr,
+                              QStringLiteral("nascope"),
+                              QStringLiteral("Could not launch ASDE-X renderer."));
+        return 2;
+    }
+
     return 0;
 }
