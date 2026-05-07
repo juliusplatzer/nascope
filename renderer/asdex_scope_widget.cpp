@@ -63,7 +63,22 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
         qWarning().noquote() << "[renderer] cursor load failed:" << cursorError;
     }
 
+    QString fontError;
+    fontLoaded_ = font_.loadFromFile(asdex::findProjectRelativeFile(QStringLiteral("asdex/assets/font.bin")),
+                                     &fontError);
+    if (!fontLoaded_) {
+        qWarning().noquote() << "[renderer] font load failed:" << fontError;
+    }
+
     fitMapToView();
+}
+
+AsdexScopeWidget::~AsdexScopeWidget() {
+    if (context()) {
+        makeCurrent();
+        fontRenderer_.deinitialize();
+        doneCurrent();
+    }
 }
 
 void AsdexScopeWidget::initializeGL() {
@@ -82,6 +97,13 @@ void AsdexScopeWidget::initializeGL() {
 
     initializeShaders();
     uploadMapGeometry();
+
+    if (fontLoaded_) {
+        QString fontError;
+        fontRendererReady_ = fontRenderer_.initialize(font_, &fontError);
+        if (!fontRendererReady_)
+            qWarning().noquote() << "[renderer] font renderer init failed:" << fontError;
+    }
 }
 
 void AsdexScopeWidget::resizeGL(int width, int height) {
@@ -99,6 +121,7 @@ void AsdexScopeWidget::paintGL() {
     functions->glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     renderVideoMap(renderSize);
+    renderTextOverlay(renderSize);
 }
 
 void AsdexScopeWidget::fitMapToView() {
@@ -271,9 +294,32 @@ void AsdexScopeWidget::renderVideoMap(const QSize& renderSize) {
     shader_.release();
 }
 
+void AsdexScopeWidget::renderTextOverlay(const QSize& renderSize) {
+    if (!fontRendererReady_) return;
+
+    const qreal ratio = devicePixelRatioF();
+    fontRenderer_.renderTextTopLeft(QStringView(airport_),
+                                    QPointF(8.0 * ratio, 8.0 * ratio),
+                                    3,
+                                    QColor(0, 255, 0),
+                                    screenProjection(renderSize));
+}
+
 QSize AsdexScopeWidget::framebufferRenderSize() const {
     const qreal ratio = devicePixelRatioF();
     return QSize(qRound(width() * ratio), qRound(height() * ratio));
+}
+
+QMatrix4x4 AsdexScopeWidget::screenProjection(const QSize& renderSize) const {
+    QMatrix4x4 projection;
+    projection.setToIdentity();
+    projection.ortho(0.0f,
+                     static_cast<float>(renderSize.width()),
+                     static_cast<float>(renderSize.height()),
+                     0.0f,
+                     -1.0f,
+                     1.0f);
+    return projection;
 }
 
 QPointF AsdexScopeWidget::framebufferPoint(const QPointF& logicalPoint) const {

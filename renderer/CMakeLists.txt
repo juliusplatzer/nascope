@@ -9,6 +9,8 @@ add_library(nascope_renderer STATIC
     asdex_resources.cpp
     asdex_math.cpp
     asdex_cursors.cpp
+    bitmap_font.cpp
+    bitmap_font_renderer.cpp
     videomap.cpp
     asdex_scope_widget.cpp
 )

@@ -2,6 +2,8 @@
 
 #include "renderer/asdex_colors.h"
 #include "renderer/asdex_cursors.h"
+#include "renderer/bitmap_font.h"
+#include "renderer/bitmap_font_renderer.h"
 #include "renderer/videomap.h"
 
 #include <QMatrix4x4>
@@ -21,6 +23,7 @@ namespace renderer {
 class AsdexScopeWidget : public QOpenGLWidget {
 public:
     explicit AsdexScopeWidget(QString airport, QWidget* parent = nullptr);
+    ~AsdexScopeWidget() override;
 
     QString airport() const { return airport_; }
 
@@ -49,7 +52,9 @@ private:
     void initializeShaders();
     void uploadMapGeometry();
     void renderVideoMap(const QSize& renderSize);
+    void renderTextOverlay(const QSize& renderSize);
     QSize framebufferRenderSize() const;
+    QMatrix4x4 screenProjection(const QSize& renderSize) const;
     QMatrix4x4 viewProjection(const QSize& renderSize) const;
     QColor colorFor(asdex::VideoMap::Kind kind) const;
     QPointF framebufferPoint(const QPointF& logicalPoint) const;
@@ -63,6 +68,8 @@ private:
     QString airport_;
     asdex::VideoMap map_;
     asdex::CursorSet cursors_;
+    BitmapFont font_;
+    BitmapFontRenderer fontRenderer_;
     QPointF centerFeet_;
     double halfRangeFeet_ = 1.0;
     asdex::Mode mode_ = asdex::Mode::Day;
@@ -77,6 +84,8 @@ private:
     QVector<DrawBatch> drawBatches_;
     bool shaderReady_ = false;
     bool geometryUploaded_ = false;
+    bool fontLoaded_ = false;
+    bool fontRendererReady_ = false;
 };
 
 } // namespace renderer
