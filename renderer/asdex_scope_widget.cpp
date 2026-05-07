@@ -15,6 +15,11 @@
 namespace renderer {
 namespace {
 
+constexpr double kMinHalfRangeFeet = 600.0;
+constexpr double kMaxHalfRangeFeet = 30000.0;
+constexpr double kWheelStepFeet = 400.0;
+constexpr double kCtrlWheelStepFeet = 1600.0;
+
 constexpr char kVertexShader[] = R"(
 #version 330 core
 layout(location = 0) in vec2 a_position;
@@ -72,7 +77,6 @@ void AsdexScopeWidget::initializeGL() {
 void AsdexScopeWidget::resizeGL(int width, int height) {
     Q_UNUSED(width);
     Q_UNUSED(height);
-    fitMapToView();
 }
 
 void AsdexScopeWidget::paintGL() {
@@ -93,7 +97,77 @@ void AsdexScopeWidget::fitMapToView() {
     const QRectF bounds = map_.boundsFeet();
     centerFeet_ = bounds.center();
     halfRangeFeet_ = 0.5 * std::max(bounds.width(), bounds.height());
+    halfRangeFeet_ = std::clamp(halfRangeFeet_, kMinHalfRangeFeet, kMaxHalfRangeFeet);
     if (halfRangeFeet_ <= 0.0) halfRangeFeet_ = 1.0;
+}
+
+void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::RightButton) {
+        panning_ = true;
+        panStartMouseFramebuffer_ = framebufferPoint(event->position());
+        panStartCenterFeet_ = centerFeet_;
+        grabMouse();
+        event->accept();
+        return;
+    }
+
+    QOpenGLWidget::mousePressEvent(event);
+}
+
+void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
+    if (panning_) {
+        const QSize renderSize = framebufferRenderSize();
+        const double ppf = pixelsPerFoot(renderSize);
+
+        if (ppf > 0.0) {
+            const QPointF current = framebufferPoint(event->position());
+            const QPointF delta = current - panStartMouseFramebuffer_;
+            centerFeet_ = QPointF(panStartCenterFeet_.x() - delta.x() / ppf,
+                                  panStartCenterFeet_.y() + delta.y() / ppf);
+            update();
+        }
+
+        event->accept();
+        return;
+    }
+
+    QOpenGLWidget::mouseMoveEvent(event);
+}
+
+void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() == Qt::RightButton && panning_) {
+        panning_ = false;
+        releaseMouse();
+        event->accept();
+        return;
+    }
+
+    QOpenGLWidget::mouseReleaseEvent(event);
+}
+
+void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
+    const QPoint angleDelta = event->angleDelta();
+    const QPoint pixelDelta = event->pixelDelta();
+
+    int wheelY = angleDelta.y();
+    if (wheelY == 0) wheelY = pixelDelta.y();
+
+    if (wheelY == 0) {
+        QOpenGLWidget::wheelEvent(event);
+        return;
+    }
+
+    const bool ctrl = event->modifiers().testFlag(Qt::ControlModifier);
+    const bool alt = event->modifiers().testFlag(Qt::AltModifier);
+    const double step = ctrl ? kCtrlWheelStepFeet : kWheelStepFeet;
+    const double deltaFeet = (wheelY > 0) ? -step : step;
+
+    if (alt)
+        zoomToCursorByFeet(deltaFeet, event->position());
+    else
+        zoomByFeet(deltaFeet);
+
+    event->accept();
 }
 
 void AsdexScopeWidget::initializeShaders() {
@@ -188,6 +262,57 @@ void AsdexScopeWidget::renderVideoMap(const QSize& renderSize) {
 QSize AsdexScopeWidget::framebufferRenderSize() const {
     const qreal ratio = devicePixelRatioF();
     return QSize(qRound(width() * ratio), qRound(height() * ratio));
+}
+
+QPointF AsdexScopeWidget::framebufferPoint(const QPointF& logicalPoint) const {
+    const qreal ratio = devicePixelRatioF();
+    return QPointF(logicalPoint.x() * ratio, logicalPoint.y() * ratio);
+}
+
+double AsdexScopeWidget::pixelsPerFoot(const QSize& renderSize) const {
+    if (renderSize.isEmpty() || halfRangeFeet_ <= 0.0) return 1.0;
+
+    const double availW = renderSize.width() * (1.0 - 2.0 * asdex::kViewportMargin);
+    const double availH = renderSize.height() * (1.0 - 2.0 * asdex::kViewportMargin);
+    const double radiusPx = 0.5 * std::min(availW, availH);
+    return radiusPx / halfRangeFeet_;
+}
+
+QPointF AsdexScopeWidget::screenToWorldFeet(const QPointF& logicalPoint,
+                                            const QSize& renderSize) const {
+    const QPointF point = framebufferPoint(logicalPoint);
+    const double ppf = pixelsPerFoot(renderSize);
+
+    if (ppf <= 0.0) return centerFeet_;
+
+    return QPointF(centerFeet_.x() + (point.x() - renderSize.width() * 0.5) / ppf,
+                   centerFeet_.y() + (renderSize.height() * 0.5 - point.y()) / ppf);
+}
+
+void AsdexScopeWidget::zoomByFeet(double deltaFeet) {
+    const double nextRange = std::clamp(halfRangeFeet_ + deltaFeet,
+                                        kMinHalfRangeFeet,
+                                        kMaxHalfRangeFeet);
+    if (qFuzzyCompare(halfRangeFeet_, nextRange)) return;
+
+    halfRangeFeet_ = nextRange;
+    update();
+}
+
+void AsdexScopeWidget::zoomToCursorByFeet(double deltaFeet, const QPointF& cursorLogicalPoint) {
+    const QSize renderSize = framebufferRenderSize();
+    const QPointF worldBefore = screenToWorldFeet(cursorLogicalPoint, renderSize);
+    const double oldRange = halfRangeFeet_;
+    const double newRange = std::clamp(oldRange + deltaFeet,
+                                       kMinHalfRangeFeet,
+                                       kMaxHalfRangeFeet);
+
+    if (qFuzzyCompare(oldRange, newRange)) return;
+
+    halfRangeFeet_ = newRange;
+    const QPointF worldAfter = screenToWorldFeet(cursorLogicalPoint, renderSize);
+    centerFeet_ += worldBefore - worldAfter;
+    update();
 }
 
 QMatrix4x4 AsdexScopeWidget::viewProjection(const QSize& renderSize) const {
