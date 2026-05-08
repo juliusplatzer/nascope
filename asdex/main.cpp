@@ -1,4 +1,4 @@
-#include "asdex/asdex_shell.h"
+#include "asdex/window.h"
 
 #include <QApplication>
 #include <QCommandLineParser>

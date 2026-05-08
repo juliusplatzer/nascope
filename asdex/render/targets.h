@@ -1,6 +1,6 @@
 #pragma once
 
-#include "renderer/asdex_colors.h"
+#include "asdex/render/colors.h"
 
 #include <QMatrix4x4>
 #include <QOpenGLBuffer>
@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <optional>
 
-namespace renderer::asdex {
+namespace asdex {
 
 struct TargetHistoryPoint {
     QPointF positionFeet;
@@ -133,4 +133,4 @@ private:
     bool ready_ = false;
 };
 
-} // namespace renderer::asdex
+} // namespace asdex

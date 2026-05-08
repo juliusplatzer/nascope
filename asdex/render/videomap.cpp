@@ -1,7 +1,7 @@
-#include "renderer/videomap.h"
+#include "asdex/render/videomap.h"
 
-#include "renderer/asdex_math.h"
-#include "renderer/asdex_resources.h"
+#include "asdex/render/math.h"
+#include "asdex/render/resources.h"
 
 #include <QDebug>
 #include <QFile>
@@ -26,7 +26,7 @@
 #define CALLBACK
 #endif
 
-namespace renderer::asdex {
+namespace asdex {
 namespace {
 
 std::optional<VideoMap::Kind> classify(const QString& asdexKind) {
@@ -354,4 +354,4 @@ VideoMap VideoMap::load(const QString& icao) {
     return map;
 }
 
-} // namespace renderer::asdex
+} // namespace asdex

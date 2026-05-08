@@ -1,7 +1,7 @@
-#include "renderer/asdex_scope_widget.h"
+#include "asdex/render/scope.h"
 
-#include "renderer/asdex_math.h"
-#include "renderer/asdex_resources.h"
+#include "asdex/render/math.h"
+#include "asdex/render/resources.h"
 
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
@@ -13,7 +13,7 @@
 #include <algorithm>
 #include <cstdint>
 
-namespace renderer {
+namespace asdex {
 namespace {
 
 constexpr double kMinHalfRangeFeet = 600.0;
@@ -65,6 +65,7 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
 
     setMinimumSize(640, 480);
     setMouseTracking(true);
+    setFocusPolicy(Qt::StrongFocus);
 
     const QString assetsDir = asdex::findProjectRelativeDir(QStringLiteral("asdex/assets"));
     QString cursorError;
@@ -165,6 +166,8 @@ void AsdexScopeWidget::fitMapToView() {
 }
 
 void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
+    setFocus(Qt::MouseFocusReason);
+
     if (event->button() == Qt::RightButton) {
         panning_ = true;
         panStartMouseFramebuffer_ = framebufferPoint(event->position());
@@ -209,6 +212,16 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
 
+    if (event->button() == Qt::LeftButton && event->modifiers() == Qt::NoModifier) {
+        updateHighlightedTarget(event->position());
+        if (AsdexTarget* target = highlightedTarget()) {
+            toggleDataBlockForTarget(*target);
+            update();
+            event->accept();
+            return;
+        }
+    }
+
     QOpenGLWidget::mouseReleaseEvent(event);
 }
 
@@ -235,6 +248,18 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
         zoomByFeet(deltaFeet);
 
     event->accept();
+}
+
+void AsdexScopeWidget::keyPressEvent(QKeyEvent* event) {
+    if (event->key() == Qt::Key_F6 && event->modifiers() == Qt::NoModifier) {
+        showDataBlocks_ = !showDataBlocks_;
+        datablockVisibility_.clear();
+        update();
+        event->accept();
+        return;
+    }
+
+    QOpenGLWidget::keyPressEvent(event);
 }
 
 void AsdexScopeWidget::initializeShaders() {
@@ -333,6 +358,7 @@ void AsdexScopeWidget::updateTargetsFromCache() {
         target.heavy = target.correlated && isHeavyWake(cached.wake);
         target.duplicateBeaconCode = false;
         target.coasting = false;
+        target.highlighted = target.id == highlightedTargetId_;
 
         target.history.reserve(cached.positionHistoryLonLat.size());
         for (const QPointF& lonLat : cached.positionHistoryLonLat) {
@@ -341,6 +367,9 @@ void AsdexScopeWidget::updateTargetsFromCache() {
 
         targets_.push_back(std::move(target));
     }
+
+    if (!highlightedTargetId_.isEmpty() && !highlightedTarget())
+        highlightedTargetId_.clear();
 }
 
 void AsdexScopeWidget::updateHighlightedTarget(const QPointF& mouseLogical) {
@@ -362,7 +391,58 @@ void AsdexScopeWidget::updateHighlightedTarget(const QPointF& mouseLogical) {
         }
     }
 
-    if (bestIndex >= 0) targets_[bestIndex].highlighted = true;
+    highlightedTargetId_.clear();
+    if (bestIndex >= 0) {
+        targets_[bestIndex].highlighted = true;
+        highlightedTargetId_ = targets_[bestIndex].id;
+    }
+}
+
+AsdexTarget* AsdexScopeWidget::highlightedTarget() {
+    if (highlightedTargetId_.isEmpty()) return nullptr;
+
+    for (AsdexTarget& target : targets_) {
+        if (target.id == highlightedTargetId_) return &target;
+    }
+
+    return nullptr;
+}
+
+bool AsdexScopeWidget::defaultDataBlockVisibleForTarget(const AsdexTarget& target) const {
+    Q_UNUSED(target);
+    return showDataBlocks_;
+}
+
+bool AsdexScopeWidget::isDataBlockVisible(const AsdexTarget& target) const {
+    const DataBlockVisibility visibility =
+        datablockVisibility_.value(target.id, DataBlockVisibility::Inherit);
+
+    switch (visibility) {
+        case DataBlockVisibility::ForceOn:
+            return true;
+        case DataBlockVisibility::ForceOff:
+            return false;
+        case DataBlockVisibility::Inherit:
+            return defaultDataBlockVisibleForTarget(target);
+    }
+
+    return defaultDataBlockVisibleForTarget(target);
+}
+
+void AsdexScopeWidget::toggleDataBlockForTarget(const AsdexTarget& target) {
+    const DataBlockVisibility current =
+        datablockVisibility_.value(target.id, DataBlockVisibility::Inherit);
+
+    if (current == DataBlockVisibility::Inherit) {
+        datablockVisibility_[target.id] = defaultDataBlockVisibleForTarget(target)
+            ? DataBlockVisibility::ForceOff
+            : DataBlockVisibility::ForceOn;
+        return;
+    }
+
+    datablockVisibility_[target.id] = current == DataBlockVisibility::ForceOn
+        ? DataBlockVisibility::ForceOff
+        : DataBlockVisibility::ForceOn;
 }
 
 void AsdexScopeWidget::renderVideoMap(const QSize& renderSize) {
@@ -413,6 +493,9 @@ void AsdexScopeWidget::renderScreenOverlays(const QSize& renderSize) {
                               projection,
                               [this, &renderSize](QPointF worldFeet) {
                                   return worldToScreenLogical(worldFeet, renderSize);
+                              },
+                              [this](const AsdexTarget& target) {
+                                  return isDataBlockVisible(target);
                               },
                               textRenderer_,
                               datablockSettings);
@@ -560,4 +643,4 @@ QColor AsdexScopeWidget::colorFor(asdex::VideoMap::Kind kind) const {
     return asdex::applyBrightness(base);
 }
 
-} // namespace renderer
+} // namespace asdex

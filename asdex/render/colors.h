@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-namespace renderer::asdex {
+namespace asdex {
 
 enum class Mode { Day, Night };
 
@@ -33,4 +33,4 @@ inline QColor backgroundColor(Mode mode) {
     return (mode == Mode::Day) ? QColor(0, 96, 120) : QColor(60, 60, 60);
 }
 
-} // namespace renderer::asdex
+} // namespace asdex

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "renderer/targets.h"
+#include "asdex/render/targets.h"
 #include "renderer/text/bitmap_font_renderer.h"
 
 #include <QMatrix4x4>
@@ -13,7 +13,7 @@
 
 #include <functional>
 
-namespace renderer {
+namespace asdex {
 
 enum class LeaderDirection {
     NE,
@@ -24,6 +24,12 @@ enum class LeaderDirection {
     SW,
     W,
     NW,
+};
+
+enum class DataBlockVisibility {
+    Inherit,
+    ForceOn,
+    ForceOff,
 };
 
 struct DataBlockSettings {
@@ -55,10 +61,11 @@ public:
     void initialize();
     void deinitialize();
 
-    void render(const QVector<asdex::AsdexTarget>& targets,
+    void render(const QVector<AsdexTarget>& targets,
                 const QMatrix4x4& screenProjection,
                 const std::function<QPointF(QPointF)>& worldToScreen,
-                BitmapFontRenderer& textRenderer,
+                const std::function<bool(const AsdexTarget&)>& isVisible,
+                renderer::BitmapFontRenderer& textRenderer,
                 const DataBlockSettings& settings);
 
 private:
@@ -72,9 +79,9 @@ private:
                         const QPointF& b,
                         const QColor& color,
                         const QMatrix4x4& screenProjection);
-    void renderOneDataBlock(const asdex::AsdexTarget& target,
+    void renderOneDataBlock(const AsdexTarget& target,
                             const QPointF& targetScreen,
-                            BitmapFontRenderer& textRenderer,
+                            renderer::BitmapFontRenderer& textRenderer,
                             const DataBlockSettings& settings,
                             const QMatrix4x4& screenProjection);
 
@@ -84,4 +91,4 @@ private:
     bool ready_ = false;
 };
 
-} // namespace renderer
+} // namespace asdex

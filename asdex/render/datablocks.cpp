@@ -1,4 +1,4 @@
-#include "renderer/datablocks.h"
+#include "asdex/render/datablocks.h"
 
 #include <QDateTime>
 #include <QDebug>
@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace renderer {
+namespace asdex {
 namespace {
 
 constexpr int kDatablockLineSpacing = 2;
@@ -112,9 +112,9 @@ bool scratchpadPhase() {
     return (ms % kTimeShareCycleMs) >= (kTimeShareCycleMs / 2);
 }
 
-BuiltDataBlock buildDataBlock(const asdex::AsdexTarget& target,
+BuiltDataBlock buildDataBlock(const AsdexTarget& target,
                               const DataBlockSettings& settings,
-                              const BitmapFontRenderer& textRenderer) {
+                              const renderer::BitmapFontRenderer& textRenderer) {
     BuiltDataBlock out;
 
     out.lines << (target.duplicateBeaconCode ? QStringLiteral("DUP BCN") : QString());
@@ -237,15 +237,17 @@ void DataBlockRenderer::initializeShaders() {
     ready_ = true;
 }
 
-void DataBlockRenderer::render(const QVector<asdex::AsdexTarget>& targets,
+void DataBlockRenderer::render(const QVector<AsdexTarget>& targets,
                                const QMatrix4x4& screenProjection,
                                const std::function<QPointF(QPointF)>& worldToScreen,
-                               BitmapFontRenderer& textRenderer,
+                               const std::function<bool(const AsdexTarget&)>& isVisible,
+                               renderer::BitmapFontRenderer& textRenderer,
                                const DataBlockSettings& settings) {
     if (!ready_ || !settings.showDataBlocks) return;
 
-    for (const asdex::AsdexTarget& target : targets) {
+    for (const AsdexTarget& target : targets) {
         if (!target.correlated) continue;
+        if (isVisible && !isVisible(target)) continue;
         renderOneDataBlock(target,
                            worldToScreen(target.positionFeet),
                            textRenderer,
@@ -285,9 +287,9 @@ void DataBlockRenderer::drawScreenLine(const QPointF& a,
     lineVao_.release();
 }
 
-void DataBlockRenderer::renderOneDataBlock(const asdex::AsdexTarget& target,
+void DataBlockRenderer::renderOneDataBlock(const AsdexTarget& target,
                                            const QPointF& targetScreen,
-                                           BitmapFontRenderer& textRenderer,
+                                           renderer::BitmapFontRenderer& textRenderer,
                                            const DataBlockSettings& settings,
                                            const QMatrix4x4& screenProjection) {
     const int fontSize = settings.fontSize;
@@ -324,7 +326,7 @@ void DataBlockRenderer::renderOneDataBlock(const asdex::AsdexTarget& target,
                     - kDatablockLineSpacing
                     - verticalLeftOffset;
 
-    TextStyle style;
+    renderer::TextStyle style;
     style.size = fontSize;
     style.color = color;
     style.background = Qt::transparent;
@@ -337,4 +339,4 @@ void DataBlockRenderer::renderOneDataBlock(const asdex::AsdexTarget& target,
     }
 }
 
-} // namespace renderer
+} // namespace asdex

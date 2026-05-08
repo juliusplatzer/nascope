@@ -1,4 +1,4 @@
-#include "renderer/asdex_cursors.h"
+#include "asdex/render/cursors.h"
 
 #include <QByteArray>
 #include <QDir>
@@ -7,7 +7,7 @@
 #include <QPixmap>
 #include <QStringList>
 
-namespace renderer::asdex {
+namespace asdex {
 namespace {
 
 struct CursorFile {
@@ -226,4 +226,4 @@ const QCursor& CursorSet::cursor(CursorType type) const {
     return fallback;
 }
 
-} // namespace renderer::asdex
+} // namespace asdex

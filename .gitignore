@@ -1,8 +1,11 @@
 target/
+build/
 .env
 *.iml
+.vscode/
 .idea/
 .DS_Store
+__MACOSX/
 *.key.pub
 *.key
 .claude

@@ -1,6 +1,6 @@
-#include "renderer/targets.h"
+#include "asdex/render/targets.h"
 
-#include "renderer/asdex_math.h"
+#include "asdex/render/math.h"
 
 #include <QDebug>
 #include <QOpenGLContext>
@@ -25,7 +25,7 @@
 #define CALLBACK
 #endif
 
-namespace renderer::asdex {
+namespace asdex {
 namespace {
 
 constexpr double kFeetPerDegree = 364560.0;
@@ -671,4 +671,4 @@ void TargetRenderer::render(const QVector<AsdexTarget>& targets,
     renderVectorLines(targets, worldProjection);
 }
 
-} // namespace renderer::asdex
+} // namespace asdex

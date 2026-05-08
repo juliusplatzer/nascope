@@ -1,10 +1,10 @@
-#include "renderer/asdex_resources.h"
+#include "asdex/render/resources.h"
 
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
 
-namespace renderer::asdex {
+namespace asdex {
 namespace {
 
 QStringList candidateRoots() {
@@ -63,4 +63,4 @@ QStringList availableAirports() {
     return icaos;
 }
 
-} // namespace renderer::asdex
+} // namespace asdex

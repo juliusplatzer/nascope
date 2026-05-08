@@ -152,7 +152,7 @@ QString findAsdexScopeExecutable() {
         appDir.filePath(QStringLiteral("asdex/%1").arg(exeName)),
         appDir.filePath(QStringLiteral("../asdex/%1").arg(exeName)),
         appDir.filePath(QStringLiteral("../../asdex/%1").arg(exeName)),
-        QDir::current().filePath(QStringLiteral("ui/build/asdex/%1").arg(exeName)),
+        QDir::current().filePath(QStringLiteral("build/asdex/%1").arg(exeName)),
     };
 
     for (const QString& candidate : candidates) {

@@ -11,8 +11,8 @@ if [[ -f .env ]]; then
 fi
 
 JAR="target/faascope-stdds-1.0-SNAPSHOT.jar"
-MENU_BIN="ui/build/menu"
-SCOPE_BIN="ui/build/asdex/asdex_scope"
+MENU_BIN="build/ui/menu"
+SCOPE_BIN="build/asdex/asdex_scope"
 WS_PORT="${WS_PORT:-8080}"
 
 QT_PREFIX=""
@@ -20,16 +20,16 @@ if command -v brew >/dev/null 2>&1; then
     QT_PREFIX="$(brew --prefix qt 2>/dev/null || brew --prefix qt@6 2>/dev/null || true)"
 fi
 
-CMAKE_ARGS=(-S ui -B ui/build)
+CMAKE_ARGS=(-S . -B build)
 if [[ -n "$QT_PREFIX" ]]; then
     CMAKE_ARGS+=(-DCMAKE_PREFIX_PATH="$QT_PREFIX")
 fi
 
 echo "[build] Building Qt frontend..." >&2
 cmake "${CMAKE_ARGS[@]}" >&2
-cmake --build ui/build >&2
+cmake --build build >&2
 
-echo "[build] Building STDDS reader..." >&2
+echo "[build] Building SWIM reader..." >&2
 mvn -q package
 
 STALE_PIDS="$(lsof -ti "tcp:${WS_PORT}" -sTCP:LISTEN 2>/dev/null || true)"
@@ -54,7 +54,7 @@ if [[ -z "$AIRPORT" ]]; then
     exit 1
 fi
 
-echo "[run] Starting STDDS/Solace consumer for $AIRPORT on websocket port $WS_PORT" >&2
+echo "[run] Starting SWIM/Solace consumer for $AIRPORT on websocket port $WS_PORT" >&2
 INITIAL_AIRPORT="$AIRPORT" WS_PORT="$WS_PORT" java -jar "$JAR" &
 CONSUMER_PID=$!
 

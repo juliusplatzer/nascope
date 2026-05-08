@@ -8,7 +8,7 @@
 
 #include <type_traits>
 
-namespace renderer::asdex {
+namespace asdex {
 
 enum class CursorType {
     Scope,
@@ -41,4 +41,4 @@ private:
     QHash<CursorType, QCursor> cursors_;
 };
 
-} // namespace renderer::asdex
+} // namespace asdex

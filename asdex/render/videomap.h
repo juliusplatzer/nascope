@@ -1,6 +1,6 @@
 #pragma once
 
-#include "renderer/asdex_colors.h"
+#include "asdex/render/colors.h"
 
 #include <QPointF>
 #include <QRectF>
@@ -9,7 +9,7 @@
 
 #include <cstdint>
 
-namespace renderer::asdex {
+namespace asdex {
 
 class VideoMap {
 public:
@@ -42,4 +42,4 @@ private:
     bool hasAny_ = false;
 };
 
-} // namespace renderer::asdex
+} // namespace asdex

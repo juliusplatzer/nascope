@@ -1,9 +1,9 @@
-#include "renderer/asdex_math.h"
+#include "asdex/render/math.h"
 
 #include <algorithm>
 #include <cmath>
 
-namespace renderer::asdex {
+namespace asdex {
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
@@ -43,4 +43,4 @@ QTransform nmToScreen(const QPointF& centerNm, double halfRangeNm, const QSize& 
     return transform;
 }
 
-} // namespace renderer::asdex
+} // namespace asdex
