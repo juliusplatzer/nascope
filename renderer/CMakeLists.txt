@@ -9,6 +9,7 @@ add_library(nascope_renderer STATIC
     asdex_resources.cpp
     asdex_math.cpp
     asdex_cursors.cpp
+    datablocks.cpp
     text/bitmap_font.cpp
     text/bitmap_font_renderer.cpp
     ../asdex/lists/screen_list.cpp

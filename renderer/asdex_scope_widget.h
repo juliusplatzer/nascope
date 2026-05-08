@@ -4,6 +4,7 @@
 #include "asdex/targets/target_cache.h"
 #include "renderer/asdex_colors.h"
 #include "renderer/asdex_cursors.h"
+#include "renderer/datablocks.h"
 #include "renderer/text/bitmap_font.h"
 #include "renderer/text/bitmap_font_renderer.h"
 #include "renderer/targets.h"
@@ -57,11 +58,12 @@ private:
     void updateTargetsFromCache();
     void renderVideoMap(const QSize& renderSize);
     void renderTargets(const QSize& renderSize);
-    void renderScreenLists();
+    void renderScreenOverlays(const QSize& renderSize);
     QSize framebufferRenderSize() const;
     QMatrix4x4 screenProjection() const;
     QMatrix4x4 viewProjection(const QSize& renderSize) const;
     QColor colorFor(asdex::VideoMap::Kind kind) const;
+    QPointF worldToScreenLogical(const QPointF& worldFeet, const QSize& renderSize) const;
     QPointF framebufferPoint(const QPointF& logicalPoint) const;
     double pixelsPerFoot(const QSize& renderSize) const;
     QPointF screenToWorldFeet(const QPointF& logicalPoint, const QSize& renderSize) const;
@@ -78,6 +80,7 @@ private:
     BitmapFont asdexFont_;
     BitmapFontRenderer textRenderer_;
     asdex::TargetRenderer targetRenderer_;
+    DataBlockRenderer datablockRenderer_;
     QVector<asdex::AsdexTarget> targets_;
     QPointF centerFeet_;
     double halfRangeFeet_ = 1.0;

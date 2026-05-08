@@ -101,6 +101,7 @@ AsdexScopeWidget::~AsdexScopeWidget() {
     if (context()) {
         makeCurrent();
         targetRenderer_.deinitialize();
+        datablockRenderer_.deinitialize();
         textRenderer_.deinitialize();
         doneCurrent();
     }
@@ -123,6 +124,7 @@ void AsdexScopeWidget::initializeGL() {
     initializeShaders();
     uploadMapGeometry();
     targetRenderer_.initialize();
+    datablockRenderer_.initialize();
 
     if (fontLoaded_) {
         QString fontError;
@@ -148,7 +150,7 @@ void AsdexScopeWidget::paintGL() {
 
     renderVideoMap(renderSize);
     renderTargets(renderSize);
-    renderScreenLists();
+    renderScreenOverlays(renderSize);
 }
 
 void AsdexScopeWidget::fitMapToView() {
@@ -309,6 +311,14 @@ void AsdexScopeWidget::updateTargetsFromCache() {
 
         asdex::AsdexTarget target;
         target.id = it.key();
+        target.callsign = cached.callsign;
+        target.aircraftType = cached.acType;
+        target.category = cached.wake;
+        target.beaconCode = cached.squawk;
+        target.fix = cached.exitFix;
+        target.altitudeTrue = cached.altitude;
+        target.scratchpad1.clear();
+        target.scratchpad2.clear();
         target.positionFeet = toFeet.map(QPointF(*cached.lon, *cached.lat));
 
         const double heading = cached.heading.value_or(0.0);
@@ -318,6 +328,8 @@ void AsdexScopeWidget::updateTargetsFromCache() {
 
         target.correlated = cached.tgtType == QLatin1String("aircraft") && !cached.callsign.isEmpty();
         target.heavy = target.correlated && isHeavyWake(cached.wake);
+        target.duplicateBeaconCode = false;
+        target.coasting = false;
 
         target.history.reserve(cached.positionHistoryLonLat.size());
         for (const QPointF& lonLat : cached.positionHistoryLonLat) {
@@ -359,10 +371,27 @@ void AsdexScopeWidget::renderTargets(const QSize& renderSize) {
     targetRenderer_.render(targets_, viewProjection(renderSize), mode_);
 }
 
-void AsdexScopeWidget::renderScreenLists() {
+void AsdexScopeWidget::renderScreenOverlays(const QSize& renderSize) {
     if (!textRendererReady_) return;
+    if (renderSize.isEmpty()) return;
 
-    textRenderer_.beginFrame(screenProjection());
+    const QMatrix4x4 projection = screenProjection();
+    textRenderer_.beginFrame(projection);
+
+    DataBlockSettings datablockSettings;
+    datablockSettings.fontSize = 2;
+    datablockSettings.brightness = 95;
+    datablockSettings.leaderLength = 2;
+    datablockSettings.leaderDirection = LeaderDirection::NE;
+
+    datablockRenderer_.render(targets_,
+                              projection,
+                              [this, &renderSize](QPointF worldFeet) {
+                                  return worldToScreenLogical(worldFeet, renderSize);
+                              },
+                              textRenderer_,
+                              datablockSettings);
+
     previewArea_.render(textRenderer_);
     textRenderer_.flush();
 }
@@ -382,6 +411,18 @@ QMatrix4x4 AsdexScopeWidget::screenProjection() const {
                      -1.0f,
                      1.0f);
     return projection;
+}
+
+QPointF AsdexScopeWidget::worldToScreenLogical(const QPointF& worldFeet,
+                                               const QSize& renderSize) const {
+    const double ppf = pixelsPerFoot(renderSize);
+    const double framebufferX = renderSize.width() * 0.5
+                              + (worldFeet.x() - centerFeet_.x()) * ppf;
+    const double framebufferY = renderSize.height() * 0.5
+                              - (worldFeet.y() - centerFeet_.y()) * ppf;
+
+    const qreal dpr = devicePixelRatioF();
+    return QPointF(framebufferX / dpr, framebufferY / dpr);
 }
 
 QPointF AsdexScopeWidget::framebufferPoint(const QPointF& logicalPoint) const {

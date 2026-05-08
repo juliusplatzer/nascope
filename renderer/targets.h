@@ -11,6 +11,7 @@
 #include <QVector>
 
 #include <cstdint>
+#include <optional>
 
 namespace renderer::asdex {
 
@@ -20,6 +21,14 @@ struct TargetHistoryPoint {
 
 struct AsdexTarget {
     QString id;
+    QString callsign;
+    QString aircraftType;
+    QString category;
+    QString beaconCode;
+    QString fix;
+    QString scratchpad1;
+    QString scratchpad2;
+
     QPointF positionFeet;
 
     // Aviation convention: 0 = north, 90 = east, 180 = south, 270 = west.
@@ -27,8 +36,12 @@ struct AsdexTarget {
     double groundTrackDegrees = 0.0;
     double groundSpeedKnots = 0.0;
 
+    std::optional<double> altitudeTrue;
+
     bool correlated = true;
     bool heavy = false;
+    bool duplicateBeaconCode = false;
+    bool coasting = false;
 
     QVector<TargetHistoryPoint> history;
 };
