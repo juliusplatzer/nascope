@@ -20,6 +20,7 @@ constexpr double kMinHalfRangeFeet = 600.0;
 constexpr double kMaxHalfRangeFeet = 30000.0;
 constexpr double kWheelStepFeet = 400.0;
 constexpr double kCtrlWheelStepFeet = 1600.0;
+constexpr double kMaxHoverRangeFeet = 150.0;
 
 constexpr char kVertexShader[] = R"(
 #version 330 core
@@ -194,6 +195,8 @@ void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
         return;
     }
 
+    updateHighlightedTarget(event->position());
+    update();
     QOpenGLWidget::mouseMoveEvent(event);
 }
 
@@ -338,6 +341,28 @@ void AsdexScopeWidget::updateTargetsFromCache() {
 
         targets_.push_back(std::move(target));
     }
+}
+
+void AsdexScopeWidget::updateHighlightedTarget(const QPointF& mouseLogical) {
+    const QSize renderSize = framebufferRenderSize();
+    const QPointF mouseWorld = screenToWorldFeet(mouseLogical, renderSize);
+    const double maxDistance2 = kMaxHoverRangeFeet * kMaxHoverRangeFeet;
+
+    int bestIndex = -1;
+    double bestDistance2 = maxDistance2;
+
+    for (qsizetype i = 0; i < targets_.size(); ++i) {
+        targets_[i].highlighted = false;
+
+        const QPointF delta = targets_[i].positionFeet - mouseWorld;
+        const double distance2 = delta.x() * delta.x() + delta.y() * delta.y();
+        if (distance2 <= bestDistance2) {
+            bestDistance2 = distance2;
+            bestIndex = int(i);
+        }
+    }
+
+    if (bestIndex >= 0) targets_[bestIndex].highlighted = true;
 }
 
 void AsdexScopeWidget::renderVideoMap(const QSize& renderSize) {

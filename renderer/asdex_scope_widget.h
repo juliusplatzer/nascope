@@ -56,6 +56,7 @@ private:
     void initializeShaders();
     void uploadMapGeometry();
     void updateTargetsFromCache();
+    void updateHighlightedTarget(const QPointF& mouseLogical);
     void renderVideoMap(const QSize& renderSize);
     void renderTargets(const QSize& renderSize);
     void renderScreenOverlays(const QSize& renderSize);

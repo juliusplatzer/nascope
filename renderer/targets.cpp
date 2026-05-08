@@ -77,6 +77,10 @@ QColor vectorColor() {
     return applyBrightness(QColor(140, 140, 140));
 }
 
+QColor highlightColor() {
+    return applyBrightness(QColor(255, 255, 255));
+}
+
 QPointF vectorEndFeet(const QPointF& start,
                       double groundSpeedKnots,
                       double trackDegrees,
@@ -95,6 +99,13 @@ QMatrix4x4 targetModel(const QPointF& positionFeet,
     QMatrix4x4 model;
     model.translate(float(positionFeet.x()), float(positionFeet.y()));
     model.rotate(float(90.0 - headingDegrees), 0.0f, 0.0f, 1.0f);
+    model.scale(float(scale), float(scale), 1.0f);
+    return model;
+}
+
+QMatrix4x4 ringModel(const QPointF& positionFeet, double scale) {
+    QMatrix4x4 model;
+    model.translate(float(positionFeet.x()), float(positionFeet.y()));
     model.scale(float(scale), float(scale), 1.0f);
     return model;
 }
@@ -192,6 +203,19 @@ QVector<std::uint32_t> circleFanIndices(int segments) {
     }
 
     return indices;
+}
+
+QVector<QPointF> regularRingFeet(int sides, double radiusFeet) {
+    QVector<QPointF> points;
+    points.reserve(sides + 1);
+
+    for (int i = 0; i <= sides; ++i) {
+        const double a = 2.0 * M_PI * double(i) / double(sides);
+        points.push_back(QPointF(radiusFeet * std::cos(a),
+                                 radiusFeet * std::sin(a)));
+    }
+
+    return points;
 }
 
 struct TessVertex {
@@ -331,6 +355,7 @@ void TargetRenderer::initialize() {
     uploadAircraftMesh();
     uploadUnknownMesh();
     uploadHistoryDotMesh();
+    uploadHighlightRingMesh();
 
     lineVao_.create();
     QOpenGLVertexArrayObject::Binder lineBinder(&lineVao_);
@@ -365,6 +390,10 @@ void TargetRenderer::deinitialize() {
     historyDotMesh_.vbo.destroy();
     historyDotMesh_.ebo.destroy();
     historyDotMesh_.indexCount = 0;
+
+    highlightRingMesh_.vao.destroy();
+    highlightRingMesh_.vbo.destroy();
+    highlightRingMesh_.vertexCount = 0;
 
     lineVao_.destroy();
     lineVbo_.destroy();
@@ -422,6 +451,32 @@ void TargetRenderer::uploadMesh(Mesh& mesh,
     mesh.indexCount = indices.size();
 }
 
+void TargetRenderer::uploadLineMesh(LineMesh& mesh, const QVector<QPointF>& points) {
+    if (points.size() < 2) return;
+
+    QVector<Vertex> vertices;
+    vertices.reserve(points.size());
+
+    for (const QPointF& point : points) {
+        vertices.push_back(Vertex{float(point.x()), float(point.y())});
+    }
+
+    mesh.vao.create();
+    QOpenGLVertexArrayObject::Binder binder(&mesh.vao);
+
+    mesh.vbo.create();
+    mesh.vbo.bind();
+    mesh.vbo.allocate(vertices.constData(), int(vertices.size() * sizeof(Vertex)));
+
+    shader_.bind();
+    shader_.enableAttributeArray(0);
+    shader_.setAttributeBuffer(0, GL_FLOAT, 0, 2, sizeof(Vertex));
+    shader_.release();
+
+    mesh.vertexCount = vertices.size();
+    mesh.vbo.release();
+}
+
 void TargetRenderer::uploadAircraftMesh() {
     const QVector<QPointF> points = aircraftShapeFeet();
     QVector<QPointF> vertices;
@@ -448,6 +503,14 @@ void TargetRenderer::uploadHistoryDotMesh() {
     uploadPointMesh(historyDotMesh_, vertices, circleFanIndices(kSegments));
 }
 
+void TargetRenderer::uploadHighlightRingMesh() {
+    constexpr int kHighlightRingSides = 20;
+    constexpr double kHighlightRingRadiusFeet = 0.012 * kFeetPerNm;
+
+    uploadLineMesh(highlightRingMesh_,
+                   regularRingFeet(kHighlightRingSides, kHighlightRingRadiusFeet));
+}
+
 void TargetRenderer::drawMesh(Mesh& mesh,
                               const QMatrix4x4& projection,
                               const QMatrix4x4& model,
@@ -464,6 +527,27 @@ void TargetRenderer::drawMesh(Mesh& mesh,
 
     QOpenGLFunctions* f = QOpenGLContext::currentContext()->functions();
     f->glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, nullptr);
+
+    shader_.release();
+}
+
+void TargetRenderer::drawLineMesh(LineMesh& mesh,
+                                  const QMatrix4x4& projection,
+                                  const QMatrix4x4& model,
+                                  const QColor& color,
+                                  float width) {
+    if (mesh.vertexCount <= 0) return;
+
+    shader_.bind();
+    shader_.setUniformValue("u_projection", projection);
+    shader_.setUniformValue("u_model", model);
+    shader_.setUniformValue("u_color", colorVector(color));
+
+    QOpenGLVertexArrayObject::Binder binder(&mesh.vao);
+
+    QOpenGLFunctions* f = QOpenGLContext::currentContext()->functions();
+    f->glLineWidth(width);
+    f->glDrawArrays(GL_LINE_STRIP, 0, mesh.vertexCount);
 
     shader_.release();
 }
@@ -488,6 +572,20 @@ void TargetRenderer::renderTargetSymbols(const QVector<AsdexTarget>& targets,
                      targetModel(target.positionFeet, target.groundTrackDegrees, 1.0),
                      unknownTargetColor());
         }
+    }
+}
+
+void TargetRenderer::renderHighlightRings(const QVector<AsdexTarget>& targets,
+                                          const QMatrix4x4& projection) {
+    for (const AsdexTarget& target : targets) {
+        if (!target.highlighted) continue;
+
+        const double scale = target.heavy ? 1.5 : 1.0;
+        drawLineMesh(highlightRingMesh_,
+                     projection,
+                     ringModel(target.positionFeet, scale),
+                     highlightColor(),
+                     1.0f);
     }
 }
 
@@ -568,6 +666,7 @@ void TargetRenderer::render(const QVector<AsdexTarget>& targets,
     f->glDisable(GL_DEPTH_TEST);
 
     renderHistoryDots(targets, worldProjection);
+    renderHighlightRings(targets, worldProjection);
     renderTargetSymbols(targets, worldProjection, mode);
     renderVectorLines(targets, worldProjection);
 }

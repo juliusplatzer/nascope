@@ -42,6 +42,7 @@ struct AsdexTarget {
     bool heavy = false;
     bool duplicateBeaconCode = false;
     bool coasting = false;
+    bool highlighted = false;
 
     QVector<TargetHistoryPoint> history;
 };
@@ -77,10 +78,17 @@ private:
         int indexCount = 0;
     };
 
+    struct LineMesh {
+        QOpenGLVertexArrayObject vao;
+        QOpenGLBuffer vbo{QOpenGLBuffer::VertexBuffer};
+        int vertexCount = 0;
+    };
+
     void initializeShaders();
     void uploadAircraftMesh();
     void uploadUnknownMesh();
     void uploadHistoryDotMesh();
+    void uploadHighlightRingMesh();
 
     void uploadPointMesh(Mesh& mesh,
                          const QVector<QPointF>& points,
@@ -88,15 +96,24 @@ private:
     void uploadMesh(Mesh& mesh,
                     const QVector<Vertex>& vertices,
                     const QVector<std::uint32_t>& indices);
+    void uploadLineMesh(LineMesh& mesh,
+                        const QVector<QPointF>& points);
 
     void drawMesh(Mesh& mesh,
                   const QMatrix4x4& projection,
                   const QMatrix4x4& model,
                   const QColor& color);
+    void drawLineMesh(LineMesh& mesh,
+                      const QMatrix4x4& projection,
+                      const QMatrix4x4& model,
+                      const QColor& color,
+                      float width = 1.0f);
 
     void renderTargetSymbols(const QVector<AsdexTarget>& targets,
                              const QMatrix4x4& projection,
                              Mode mode);
+    void renderHighlightRings(const QVector<AsdexTarget>& targets,
+                              const QMatrix4x4& projection);
     void renderVectorLines(const QVector<AsdexTarget>& targets,
                            const QMatrix4x4& projection);
     void renderHistoryDots(const QVector<AsdexTarget>& targets,
@@ -107,6 +124,7 @@ private:
     Mesh aircraftMesh_;
     Mesh unknownMesh_;
     Mesh historyDotMesh_;
+    LineMesh highlightRingMesh_;
 
     QOpenGLVertexArrayObject lineVao_;
     QOpenGLBuffer lineVbo_{QOpenGLBuffer::VertexBuffer};
