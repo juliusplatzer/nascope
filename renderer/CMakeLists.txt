@@ -1,4 +1,4 @@
-find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL OpenGLWidgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL OpenGLWidgets WebSockets)
 find_package(ZLIB REQUIRED)
 
 if(NOT APPLE)
@@ -13,7 +13,9 @@ add_library(nascope_renderer STATIC
     text/bitmap_font_renderer.cpp
     ../asdex/lists/screen_list.cpp
     ../asdex/lists/preview_area.cpp
+    ../asdex/targets/target_cache.cpp
     videomap.cpp
+    targets.cpp
     asdex_scope_widget.cpp
 )
 
@@ -27,6 +29,7 @@ target_link_libraries(nascope_renderer
         Qt6::Widgets
         Qt6::OpenGL
         Qt6::OpenGLWidgets
+        Qt6::WebSockets
     PRIVATE
         ZLIB::ZLIB
 )

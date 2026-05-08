@@ -1,10 +1,12 @@
 #pragma once
 
 #include "asdex/lists/preview_area.h"
+#include "asdex/targets/target_cache.h"
 #include "renderer/asdex_colors.h"
 #include "renderer/asdex_cursors.h"
 #include "renderer/text/bitmap_font.h"
 #include "renderer/text/bitmap_font_renderer.h"
+#include "renderer/targets.h"
 #include "renderer/videomap.h"
 
 #include <QMatrix4x4>
@@ -52,7 +54,9 @@ private:
     void fitMapToView();
     void initializeShaders();
     void uploadMapGeometry();
+    void updateTargetsFromCache();
     void renderVideoMap(const QSize& renderSize);
+    void renderTargets(const QSize& renderSize);
     void renderScreenLists();
     QSize framebufferRenderSize() const;
     QMatrix4x4 screenProjection() const;
@@ -68,10 +72,13 @@ private:
 
     QString airport_;
     asdex::VideoMap map_;
+    ::asdex::TargetCache targetCache_;
     asdex::CursorSet cursors_;
     ::asdex::PreviewArea previewArea_;
     BitmapFont asdexFont_;
     BitmapFontRenderer textRenderer_;
+    asdex::TargetRenderer targetRenderer_;
+    QVector<asdex::AsdexTarget> targets_;
     QPointF centerFeet_;
     double halfRangeFeet_ = 1.0;
     asdex::Mode mode_ = asdex::Mode::Day;

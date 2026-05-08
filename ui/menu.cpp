@@ -235,6 +235,8 @@ int main(int argc, char** argv) {
     const QString airport = menu.selectedAirport();
     std::cout << airport.toStdString() << std::endl;
 
+    if (QCoreApplication::arguments().contains(QStringLiteral("--select-only"))) return 0;
+
     const QString executable = findAsdexScopeExecutable();
     if (!QProcess::startDetached(executable, QStringList{airport}, QDir::currentPath())) {
         QMessageBox::critical(nullptr,

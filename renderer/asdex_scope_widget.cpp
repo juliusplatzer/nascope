@@ -42,12 +42,22 @@ void main() {
 }
 )";
 
+bool isHeavyWake(QStringView wake) {
+    if (wake.size() != 1) return false;
+
+    const QChar c = wake.at(0).toUpper();
+    return c == QLatin1Char('A') || c == QLatin1Char('B') || c == QLatin1Char('C')
+        || c == QLatin1Char('D') || c == QLatin1Char('E') || c == QLatin1Char('H')
+        || c == QLatin1Char('J');
+}
+
 } // namespace
 
 AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
     : QOpenGLWidget(parent),
       airport_(std::move(airport)),
-      map_(asdex::VideoMap::load(airport_)) {
+      map_(asdex::VideoMap::load(airport_)),
+      targetCache_(airport_, this) {
     QSurfaceFormat fmt = format();
     fmt.setSamples(0);
     setFormat(fmt);
@@ -79,12 +89,18 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
         qWarning().noquote() << "[renderer] preview area config load failed:" << listError;
     }
 
+    connect(&targetCache_, &::asdex::TargetCache::changed, this, [this] {
+        updateTargetsFromCache();
+        update();
+    });
+
     fitMapToView();
 }
 
 AsdexScopeWidget::~AsdexScopeWidget() {
     if (context()) {
         makeCurrent();
+        targetRenderer_.deinitialize();
         textRenderer_.deinitialize();
         doneCurrent();
     }
@@ -106,6 +122,7 @@ void AsdexScopeWidget::initializeGL() {
 
     initializeShaders();
     uploadMapGeometry();
+    targetRenderer_.initialize();
 
     if (fontLoaded_) {
         QString fontError;
@@ -130,6 +147,7 @@ void AsdexScopeWidget::paintGL() {
     functions->glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     renderVideoMap(renderSize);
+    renderTargets(renderSize);
     renderScreenLists();
 }
 
@@ -277,6 +295,39 @@ void AsdexScopeWidget::uploadMapGeometry() {
     geometryUploaded_ = true;
 }
 
+void AsdexScopeWidget::updateTargetsFromCache() {
+    targets_.clear();
+    if (!map_.isValid()) return;
+
+    const QTransform toFeet = asdex::lonLatToFeet(map_.anchorLonLat());
+    const QHash<QString, ::asdex::TargetCache::Target>& cachedTargets = targetCache_.targets();
+    targets_.reserve(cachedTargets.size());
+
+    for (auto it = cachedTargets.constBegin(); it != cachedTargets.constEnd(); ++it) {
+        const ::asdex::TargetCache::Target& cached = it.value();
+        if (!cached.lat || !cached.lon) continue;
+
+        asdex::AsdexTarget target;
+        target.id = it.key();
+        target.positionFeet = toFeet.map(QPointF(*cached.lon, *cached.lat));
+
+        const double heading = cached.heading.value_or(0.0);
+        target.headingDegrees = heading;
+        target.groundTrackDegrees = heading;
+        target.groundSpeedKnots = (cached.heading && cached.speed) ? *cached.speed : 0.0;
+
+        target.correlated = cached.tgtType == QLatin1String("aircraft") && !cached.callsign.isEmpty();
+        target.heavy = target.correlated && isHeavyWake(cached.wake);
+
+        target.history.reserve(cached.positionHistoryLonLat.size());
+        for (const QPointF& lonLat : cached.positionHistoryLonLat) {
+            target.history.push_back(asdex::TargetHistoryPoint{toFeet.map(lonLat)});
+        }
+
+        targets_.push_back(std::move(target));
+    }
+}
+
 void AsdexScopeWidget::renderVideoMap(const QSize& renderSize) {
     if (!shaderReady_ || !geometryUploaded_ || renderSize.isEmpty()) return;
 
@@ -301,6 +352,11 @@ void AsdexScopeWidget::renderVideoMap(const QSize& renderSize) {
     }
 
     shader_.release();
+}
+
+void AsdexScopeWidget::renderTargets(const QSize& renderSize) {
+    if (renderSize.isEmpty()) return;
+    targetRenderer_.render(targets_, viewProjection(renderSize), mode_);
 }
 
 void AsdexScopeWidget::renderScreenLists() {
