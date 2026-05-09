@@ -29,7 +29,7 @@ echo "[build] Building Qt frontend..." >&2
 cmake "${CMAKE_ARGS[@]}" >&2
 cmake --build build >&2
 
-echo "[build] Building SWIM reader..." >&2
+echo "[build] Building SMES reader..." >&2
 mvn -q package
 
 STALE_PIDS="$(lsof -ti "tcp:${WS_PORT}" -sTCP:LISTEN 2>/dev/null || true)"
