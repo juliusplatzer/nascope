@@ -1,5 +1,6 @@
 #pragma once
 
+#include "asdex/atis/atis_cache.h"
 #include "asdex/input/asdex_command.h"
 #include "asdex/input/datablock_edit_command.h"
 #include "asdex/lists/preview_area.h"
@@ -95,6 +96,7 @@ private:
     QString airport_;
     asdex::VideoMap map_;
     ::asdex::TargetCache targetCache_;
+    ::asdex::AtisCache atisCache_;
     asdex::CursorSet cursors_;
     ::asdex::PreviewArea previewArea_;
     renderer::BitmapFont asdexFont_;

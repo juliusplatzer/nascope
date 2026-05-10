@@ -5,6 +5,7 @@
 #include <QMatrix4x4>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 namespace renderer {
 class BitmapFontRenderer;
@@ -27,6 +28,9 @@ public:
 
     void setState(PreviewAreaState state) { state_ = std::move(state); }
     const PreviewAreaState& state() const { return state_; }
+    bool setRunwayConfigName(QString name);
+    bool updateRunwayConfigFromRunways(const QStringList& landingRunways,
+                                       const QStringList& departureRunways);
     void setSystemResponse(QString response);
 
     bool loadDefaultStateFromConfigFile(const QString& path, QString* error = nullptr);
@@ -39,12 +43,22 @@ public:
                              const QMatrix4x4& screenProjection) const;
 
 private:
+    struct RunwayConfiguration {
+        QString name;
+        QStringList arrivalRunwayIds;
+        QStringList departureRunwayIds;
+    };
+
     TextBlock buildTextBlock(const QStringList& commandLines) const;
+    QString matchedRunwayConfigName(const QStringList& landingRunways,
+                                    const QStringList& departureRunways) const;
     int baseLineCount() const;
     QColor textColor() const;
 
     ScreenList list_;
     PreviewAreaState state_;
+    QString defaultRunwayConfigName_;
+    QVector<RunwayConfiguration> runwayConfigurations_;
 };
 
 } // namespace asdex

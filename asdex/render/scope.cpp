@@ -60,7 +60,8 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
     : QOpenGLWidget(parent),
       airport_(std::move(airport)),
       map_(asdex::VideoMap::load(airport_)),
-      targetCache_(airport_, this) {
+      targetCache_(airport_, this),
+      atisCache_(airport_, this) {
     QSurfaceFormat fmt = format();
     fmt.setSamples(0);
     setFormat(fmt);
@@ -102,6 +103,11 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
 
     connect(&targetCache_, &::asdex::TargetCache::changed, this, [this] {
         updateTargetsFromCache();
+        update();
+    });
+    connect(&atisCache_, &::asdex::AtisCache::changed, this, [this] {
+        const ::asdex::AtisRunwayState& atis = atisCache_.state();
+        previewArea_.updateRunwayConfigFromRunways(atis.landingRunways, atis.departureRunways);
         update();
     });
 

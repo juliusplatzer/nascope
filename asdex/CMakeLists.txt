@@ -1,4 +1,4 @@
-find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL OpenGLWidgets WebSockets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network OpenGL OpenGLWidgets WebSockets)
 find_package(ZLIB REQUIRED)
 
 if(NOT APPLE)
@@ -7,6 +7,7 @@ endif()
 
 add_library(nascope_asdex STATIC
     window.cpp
+    atis/atis_cache.cpp
     input/datablock_edit_command.cpp
     render/math.cpp
     render/resources.cpp
@@ -29,6 +30,7 @@ target_include_directories(nascope_asdex
 target_link_libraries(nascope_asdex
     PUBLIC
         Qt6::Widgets
+        Qt6::Network
         Qt6::OpenGL
         Qt6::OpenGLWidgets
         Qt6::WebSockets
