@@ -77,6 +77,12 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
     });
     datablockTimeshareTimer_.start();
 
+    coastClockTimer_.setInterval(1000);
+    connect(&coastClockTimer_, &QTimer::timeout, this, [this] {
+        update();
+    });
+    coastClockTimer_.start();
+
     const QString assetsDir = asdex::findProjectRelativeDir(QStringLiteral("asdex/assets"));
     QString cursorError;
     if (cursors_.loadFromAssetsDir(assetsDir, &cursorError)) {
@@ -714,6 +720,8 @@ void AsdexScopeWidget::renderScreenOverlays(const QSize& renderSize) {
                               },
                               textRenderer_,
                               datablockSettings);
+
+    coastList_.render(textRenderer_, size());
 
     const QStringList commandLines = datablockEdit_ ? datablockEdit_->displayLines() : QStringList();
     previewArea_.render(textRenderer_, commandLines);

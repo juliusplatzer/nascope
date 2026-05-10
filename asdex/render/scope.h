@@ -3,6 +3,7 @@
 #include "asdex/atis/atis_cache.h"
 #include "asdex/input/asdex_command.h"
 #include "asdex/input/datablock_edit_command.h"
+#include "asdex/lists/coast_list.h"
 #include "asdex/lists/preview_area.h"
 #include "asdex/targets/target_cache.h"
 #include "asdex/render/colors.h"
@@ -107,6 +108,7 @@ private:
     QVector<asdex::AsdexTarget> targets_;
     QHash<QString, DataBlockVisibility> datablockVisibility_;
     QHash<QString, EditedDbFields> pendingDatablockEdits_;
+    CoastList coastList_;
     QString highlightedTargetId_;
     CommandType commandType_ = CommandType::None;
     std::optional<DatablockEditCommand> datablockEdit_;
@@ -117,6 +119,7 @@ private:
     bool showDataBlocks_ = true;
     bool timesharePrimary_ = true;
     QTimer datablockTimeshareTimer_;
+    QTimer coastClockTimer_;
     bool panning_ = false;
     bool rightDragMoved_ = false;
     QPointF panStartMouseFramebuffer_;

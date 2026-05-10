@@ -19,6 +19,7 @@ add_library(nascope_asdex STATIC
     render/scope.cpp
     lists/screen_list.cpp
     lists/preview_area.cpp
+    lists/coast_list.cpp
     targets/target_cache.cpp
 )
 
