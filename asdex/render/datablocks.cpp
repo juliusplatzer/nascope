@@ -1,6 +1,5 @@
 #include "asdex/render/datablocks.h"
 
-#include <QDateTime>
 #include <QDebug>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
@@ -106,10 +105,70 @@ QString beaconOrNoBeacon(const QString& beaconCode) {
     return trimmed.rightJustified(4, QLatin1Char('0'));
 }
 
-bool scratchpadPhase() {
-    constexpr qint64 kTimeShareCycleMs = 8000;
-    const qint64 ms = QDateTime::currentMSecsSinceEpoch();
-    return (ms % kTimeShareCycleMs) >= (kTimeShareCycleMs / 2);
+void updateMeasuredWidth(BuiltDataBlock& block,
+                         const QString& text,
+                         int lineNumber,
+                         int fontSize,
+                         const renderer::BitmapFontRenderer& textRenderer) {
+    const int width = textRenderer.measureText(QStringView(text), fontSize).width();
+
+    if (width > block.maxLineWidth) {
+        block.maxLineWidth = width;
+        block.longestHighestLineNumber = lineNumber;
+        block.longestLowestLineNumber = lineNumber;
+    } else if (width == block.maxLineWidth) {
+        block.longestLowestLineNumber = lineNumber;
+    }
+}
+
+QString buildPrimaryLine2(const AsdexTarget& target, const DataBlockSettings& settings) {
+    QString primaryLine2;
+    if (settings.showAircraftType && !target.aircraftType.trimmed().isEmpty()) {
+        primaryLine2 += target.aircraftType.trimmed();
+    }
+
+    if (settings.fullDataBlocks
+        && settings.showAircraftCategory
+        && !target.category.trimmed().isEmpty()) {
+        if (!primaryLine2.isEmpty()) primaryLine2 += QLatin1Char(' ');
+        primaryLine2 += target.category.trimmed();
+    }
+
+    if (settings.showFix && !target.fix.trimmed().isEmpty()) {
+        if (!primaryLine2.isEmpty()) primaryLine2 += QLatin1Char(' ');
+        primaryLine2 += target.fix.trimmed();
+    }
+
+    if (settings.fullDataBlocks && settings.showVelocity) {
+        if (!primaryLine2.isEmpty()) primaryLine2 += QLatin1Char(' ');
+        primaryLine2 += velocityTens(target.groundSpeedKnots);
+    }
+
+    return primaryLine2.trimmed();
+}
+
+QString buildScratchpadLine2(const AsdexTarget& target, const DataBlockSettings& settings) {
+    if (!settings.showScratchpads) return {};
+
+    return QStringLiteral("%1 %2")
+        .arg(target.scratchpad1, target.scratchpad2)
+        .trimmed();
+}
+
+QString chooseLine2(const QString& primary,
+                    const QString& secondary,
+                    const DataBlockSettings& settings) {
+    const bool hasPrimary = !primary.isEmpty();
+    const bool hasSecondary = !secondary.isEmpty();
+
+    if (settings.alertInProgress) return primary;
+
+    if (hasPrimary && hasSecondary)
+        return settings.timesharePrimary ? primary : secondary;
+
+    if (hasPrimary) return primary;
+    if (hasSecondary) return secondary;
+    return {};
 }
 
 BuiltDataBlock buildDataBlock(const AsdexTarget& target,
@@ -140,56 +199,14 @@ BuiltDataBlock buildDataBlock(const AsdexTarget& target,
 
     out.lines << line1.trimmed();
 
-    QString primaryLine2;
-    if (settings.showAircraftType && !target.aircraftType.trimmed().isEmpty()) {
-        primaryLine2 += target.aircraftType.trimmed();
-    }
+    const QString primaryLine2 = buildPrimaryLine2(target, settings);
+    const QString scratchLine2 = buildScratchpadLine2(target, settings);
+    out.lines << chooseLine2(primaryLine2, scratchLine2, settings);
 
-    if (settings.fullDataBlocks
-        && settings.showAircraftCategory
-        && !target.category.trimmed().isEmpty()) {
-        if (!primaryLine2.isEmpty()) primaryLine2 += QLatin1Char(' ');
-        primaryLine2 += target.category.trimmed();
-    }
-
-    if (settings.showFix && !target.fix.trimmed().isEmpty()) {
-        if (!primaryLine2.isEmpty()) primaryLine2 += QLatin1Char(' ');
-        primaryLine2 += target.fix.trimmed();
-    }
-
-    if (settings.fullDataBlocks && settings.showVelocity) {
-        if (!primaryLine2.isEmpty()) primaryLine2 += QLatin1Char(' ');
-        primaryLine2 += velocityTens(target.groundSpeedKnots);
-    }
-
-    QString scratchLine2;
-    if (settings.showScratchpads) {
-        scratchLine2 = QStringLiteral("%1 %2")
-                           .arg(target.scratchpad1, target.scratchpad2)
-                           .trimmed();
-    }
-
-    QString line2;
-    if (scratchLine2.isEmpty())
-        line2 = primaryLine2.trimmed();
-    else if (primaryLine2.trimmed().isEmpty())
-        line2 = scratchLine2;
-    else
-        line2 = scratchpadPhase() ? scratchLine2 : primaryLine2.trimmed();
-
-    out.lines << line2;
-
-    for (int i = 0; i < out.lines.size(); ++i) {
-        const int width = textRenderer.measureText(QStringView(out.lines.at(i)), settings.fontSize).width();
-
-        if (width > out.maxLineWidth) {
-            out.maxLineWidth = width;
-            out.longestHighestLineNumber = i;
-            out.longestLowestLineNumber = i;
-        } else if (width == out.maxLineWidth) {
-            out.longestLowestLineNumber = i;
-        }
-    }
+    updateMeasuredWidth(out, out.lines.value(0), 0, settings.fontSize, textRenderer);
+    updateMeasuredWidth(out, out.lines.value(1), 1, settings.fontSize, textRenderer);
+    updateMeasuredWidth(out, primaryLine2, 2, settings.fontSize, textRenderer);
+    updateMeasuredWidth(out, scratchLine2, 2, settings.fontSize, textRenderer);
 
     return out;
 }

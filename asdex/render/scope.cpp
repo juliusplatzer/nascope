@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cmath>
 
 namespace asdex {
 namespace {
@@ -21,6 +22,7 @@ constexpr double kMaxHalfRangeFeet = 30000.0;
 constexpr double kWheelStepFeet = 400.0;
 constexpr double kCtrlWheelStepFeet = 1600.0;
 constexpr double kMaxHoverRangeFeet = 150.0;
+constexpr double kRightClickDragTolerancePx = 3.0;
 
 constexpr char kVertexShader[] = R"(
 #version 330 core
@@ -67,6 +69,13 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
 
+    datablockTimeshareTimer_.setInterval(2000);
+    connect(&datablockTimeshareTimer_, &QTimer::timeout, this, [this] {
+        timesharePrimary_ = !timesharePrimary_;
+        update();
+    });
+    datablockTimeshareTimer_.start();
+
     const QString assetsDir = asdex::findProjectRelativeDir(QStringLiteral("asdex/assets"));
     QString cursorError;
     if (cursors_.loadFromAssetsDir(assetsDir, &cursorError)) {
@@ -102,6 +111,7 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
 AsdexScopeWidget::~AsdexScopeWidget() {
     if (context()) {
         makeCurrent();
+        screenLineRenderer_.deinitialize();
         targetRenderer_.deinitialize();
         datablockRenderer_.deinitialize();
         textRenderer_.deinitialize();
@@ -127,6 +137,7 @@ void AsdexScopeWidget::initializeGL() {
     uploadMapGeometry();
     targetRenderer_.initialize();
     datablockRenderer_.initialize();
+    screenLineRenderer_.initialize();
 
     if (fontLoaded_) {
         QString fontError;
@@ -168,8 +179,14 @@ void AsdexScopeWidget::fitMapToView() {
 void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
     setFocus(Qt::MouseFocusReason);
 
+    if (datablockEdit_) {
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::RightButton) {
         panning_ = true;
+        rightDragMoved_ = false;
         panStartMouseFramebuffer_ = framebufferPoint(event->position());
         panStartCenterFeet_ = centerFeet_;
         setAsdexCursor(CursorMode::Hidden);
@@ -182,6 +199,13 @@ void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
 }
 
 void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
+    if (datablockEdit_) {
+        clearHighlightedTarget();
+        update();
+        event->accept();
+        return;
+    }
+
     if (panning_) {
         const QSize renderSize = framebufferRenderSize();
         const double ppf = pixelsPerFoot(renderSize);
@@ -189,6 +213,9 @@ void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
         if (ppf > 0.0) {
             const QPointF current = framebufferPoint(event->position());
             const QPointF delta = current - panStartMouseFramebuffer_;
+            const double tolerance = kRightClickDragTolerancePx * devicePixelRatioF();
+            if (delta.x() * delta.x() + delta.y() * delta.y() > tolerance * tolerance)
+                rightDragMoved_ = true;
             centerFeet_ = QPointF(panStartCenterFeet_.x() - delta.x() / ppf,
                                   panStartCenterFeet_.y() + delta.y() / ppf);
             update();
@@ -205,9 +232,27 @@ void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
 
 void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::RightButton && panning_) {
+        const bool rightClick = !rightDragMoved_;
         panning_ = false;
+        rightDragMoved_ = false;
         releaseMouse();
-        setAsdexCursor(CursorMode::Scope);
+
+        if (rightClick) {
+            updateHighlightedTarget(event->position());
+            if (AsdexTarget* target = highlightedTarget()) {
+                startDatablockEdit(*target);
+            } else {
+                setAsdexCursor(CursorMode::Scope);
+            }
+        } else {
+            setAsdexCursor(CursorMode::Scope);
+        }
+
+        event->accept();
+        return;
+    }
+
+    if (datablockEdit_) {
         event->accept();
         return;
     }
@@ -237,6 +282,16 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
         return;
     }
 
+    if (datablockEdit_) {
+        if (wheelY > 0)
+            datablockEdit_->moveUp();
+        else
+            datablockEdit_->moveDown();
+        update();
+        event->accept();
+        return;
+    }
+
     const bool ctrl = event->modifiers().testFlag(Qt::ControlModifier);
     const bool alt = event->modifiers().testFlag(Qt::AltModifier);
     const double step = ctrl ? kCtrlWheelStepFeet : kWheelStepFeet;
@@ -251,6 +306,8 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
 }
 
 void AsdexScopeWidget::keyPressEvent(QKeyEvent* event) {
+    if (datablockEdit_ && handleDatablockEditKey(event)) return;
+
     if (event->key() == Qt::Key_F6 && event->modifiers() == Qt::NoModifier) {
         showDataBlocks_ = !showDataBlocks_;
         datablockVisibility_.clear();
@@ -260,6 +317,72 @@ void AsdexScopeWidget::keyPressEvent(QKeyEvent* event) {
     }
 
     QOpenGLWidget::keyPressEvent(event);
+}
+
+bool AsdexScopeWidget::handleDatablockEditKey(QKeyEvent* event) {
+    switch (event->key()) {
+        case Qt::Key_Escape:
+            cancelCommand();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+            if (datablockEdit_->enter())
+                submitDatablockEdit();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Left:
+            datablockEdit_->moveLeft();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Right:
+            datablockEdit_->moveRight();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Up:
+            datablockEdit_->moveUp();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Down:
+            datablockEdit_->moveDown();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Backspace:
+            datablockEdit_->backspace();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Delete:
+            datablockEdit_->deleteForward();
+            update();
+            event->accept();
+            return true;
+        default:
+            break;
+    }
+
+    if (event->modifiers().testFlag(Qt::ControlModifier)
+        || event->modifiers().testFlag(Qt::MetaModifier)) {
+        event->accept();
+        return true;
+    }
+
+    const QString text = event->text();
+    if (!text.isEmpty()) {
+        for (const QChar c : text) datablockEdit_->insert(c);
+        update();
+        event->accept();
+        return true;
+    }
+
+    event->accept();
+    return true;
 }
 
 void AsdexScopeWidget::initializeShaders() {
@@ -360,6 +483,11 @@ void AsdexScopeWidget::updateTargetsFromCache() {
         target.coasting = false;
         target.highlighted = target.id == highlightedTargetId_;
 
+        if (const auto pending = pendingDatablockEdits_.constFind(target.id);
+            pending != pendingDatablockEdits_.constEnd()) {
+            applyEditedFields(target, pending.value());
+        }
+
         target.history.reserve(cached.positionHistoryLonLat.size());
         for (const QPointF& lonLat : cached.positionHistoryLonLat) {
             target.history.push_back(asdex::TargetHistoryPoint{toFeet.map(lonLat)});
@@ -398,14 +526,93 @@ void AsdexScopeWidget::updateHighlightedTarget(const QPointF& mouseLogical) {
     }
 }
 
+void AsdexScopeWidget::clearHighlightedTarget() {
+    highlightedTargetId_.clear();
+    for (AsdexTarget& target : targets_) target.highlighted = false;
+}
+
 AsdexTarget* AsdexScopeWidget::highlightedTarget() {
     if (highlightedTargetId_.isEmpty()) return nullptr;
 
+    return targetById(highlightedTargetId_);
+}
+
+AsdexTarget* AsdexScopeWidget::targetById(const QString& targetId) {
+    if (targetId.isEmpty()) return nullptr;
+
     for (AsdexTarget& target : targets_) {
-        if (target.id == highlightedTargetId_) return &target;
+        if (target.id == targetId) return &target;
     }
 
     return nullptr;
+}
+
+void AsdexScopeWidget::startDatablockEdit(const AsdexTarget& target) {
+    if (commandType_ != CommandType::None) return;
+    if (!target.correlated || target.coasting) {
+        setAsdexCursor(CursorMode::Scope);
+        return;
+    }
+
+    commandType_ = CommandType::EditDatablockFields;
+    datablockEdit_ = DatablockEditCommand::fromTarget(target);
+    editingTrackId_ = target.id;
+    clearHighlightedTarget();
+    previewArea_.setSystemResponse({});
+    setAsdexCursor(CursorMode::Hidden);
+    update();
+}
+
+void AsdexScopeWidget::cancelCommand() {
+    commandType_ = CommandType::None;
+    datablockEdit_.reset();
+    editingTrackId_.clear();
+    previewArea_.setSystemResponse({});
+    setAsdexCursor(CursorMode::Scope);
+    clearHighlightedTarget();
+    update();
+}
+
+void AsdexScopeWidget::submitDatablockEdit() {
+    if (!datablockEdit_) return;
+
+    AsdexTarget* target = targetById(editingTrackId_);
+    if (!target) {
+        cancelCommand();
+        return;
+    }
+
+    QString error;
+    if (!datablockEdit_->validateForTarget(*target, &error)) {
+        previewArea_.setSystemResponse(error.isEmpty() ? QStringLiteral("INVALID ENTRY") : error);
+        return;
+    }
+
+    const EditedDbFields fields = datablockEdit_->values();
+    targetCache_.sendDatablockEdit(airport_,
+                                   editingTrackId_,
+                                   fields.callsign,
+                                   fields.beaconCode,
+                                   fields.category,
+                                   fields.aircraftType,
+                                   fields.fix,
+                                   fields.scratchpad1,
+                                   fields.scratchpad2);
+
+    pendingDatablockEdits_.insert(editingTrackId_, fields);
+    applyEditedFields(*target, fields);
+    cancelCommand();
+}
+
+void AsdexScopeWidget::applyEditedFields(AsdexTarget& target,
+                                         const EditedDbFields& fields) const {
+    target.callsign = fields.callsign;
+    target.beaconCode = fields.beaconCode;
+    target.category = fields.category;
+    target.aircraftType = fields.aircraftType;
+    target.fix = fields.fix;
+    target.scratchpad1 = fields.scratchpad1;
+    target.scratchpad2 = fields.scratchpad2;
 }
 
 bool AsdexScopeWidget::defaultDataBlockVisibleForTarget(const AsdexTarget& target) const {
@@ -488,6 +695,8 @@ void AsdexScopeWidget::renderScreenOverlays(const QSize& renderSize) {
     datablockSettings.brightness = 95;
     datablockSettings.leaderLength = 2;
     datablockSettings.leaderDirection = LeaderDirection::NE;
+    datablockSettings.timesharePrimary = timesharePrimary_;
+    datablockSettings.alertInProgress = false;
 
     datablockRenderer_.render(targets_,
                               projection,
@@ -500,8 +709,16 @@ void AsdexScopeWidget::renderScreenOverlays(const QSize& renderSize) {
                               textRenderer_,
                               datablockSettings);
 
-    previewArea_.render(textRenderer_);
+    const QStringList commandLines = datablockEdit_ ? datablockEdit_->displayLines() : QStringList();
+    previewArea_.render(textRenderer_, commandLines);
     textRenderer_.flush();
+
+    if (datablockEdit_) {
+        previewArea_.renderCommandCursor(screenLineRenderer_,
+                                         textRenderer_,
+                                         *datablockEdit_,
+                                         projection);
+    }
 }
 
 QSize AsdexScopeWidget::framebufferRenderSize() const {

@@ -7,9 +7,11 @@ endif()
 
 add_library(nascope_asdex STATIC
     window.cpp
+    input/datablock_edit_command.cpp
     render/math.cpp
     render/resources.cpp
     render/cursors.cpp
+    render/screen_line_renderer.cpp
     render/videomap.cpp
     render/targets.cpp
     render/datablocks.cpp

@@ -1,5 +1,7 @@
 #include "asdex/lists/preview_area.h"
 
+#include "asdex/input/datablock_edit_command.h"
+#include "asdex/render/screen_line_renderer.h"
 #include "renderer/text/bitmap_font_renderer.h"
 
 #include <QFile>
@@ -83,31 +85,81 @@ bool PreviewArea::loadDefaultStateFromConfigFile(const QString& path, QString* e
     return true;
 }
 
-TextBlock PreviewArea::buildTextBlock() const {
-    const QColor textColor(0, 248, 0);
+void PreviewArea::setSystemResponse(QString response) {
+    state_.systemResponse = std::move(response);
+}
+
+TextBlock PreviewArea::buildTextBlock(const QStringList& commandLines) const {
+    const QColor color = list_.style().baseTextColor;
 
     TextBlock block;
     block.lineSpacing = 3;
     block.fragments.push_back(TextFragment{QStringLiteral("RWY CFG: ") + state_.runwayConfigName,
-                                           textColor,
+                                           color,
                                            Qt::transparent,
                                            false,
                                            true});
     block.fragments.push_back(TextFragment{QStringLiteral("TWR CFG:") + state_.towerPositions.join(","),
-                                           textColor,
+                                           color,
                                            Qt::transparent,
                                            false,
                                            true});
     block.fragments.push_back(TextFragment{state_.systemResponse,
-                                           textColor,
+                                           color,
                                            Qt::transparent,
                                            false,
                                            true});
+    for (const QString& line : commandLines) {
+        block.fragments.push_back(TextFragment{line,
+                                               color,
+                                               Qt::transparent,
+                                               false,
+                                               true});
+    }
     return block;
 }
 
-void PreviewArea::render(renderer::BitmapFontRenderer& textRenderer) const {
-    list_.render(textRenderer, buildTextBlock());
+void PreviewArea::render(renderer::BitmapFontRenderer& textRenderer,
+                         const QStringList& commandLines) const {
+    list_.render(textRenderer, buildTextBlock(commandLines));
+}
+
+void PreviewArea::renderCommandCursor(ScreenLineRenderer& lineRenderer,
+                                      const renderer::BitmapFontRenderer& textRenderer,
+                                      const DatablockEditCommand& command,
+                                      const QMatrix4x4& screenProjection) const {
+    const ScreenListStyle& style = list_.style();
+    const QSize charSize = textRenderer.charSize(style.fontSize);
+    const int charWidth = charSize.width();
+    const int lineHeight = textRenderer.lineHeight(style.fontSize);
+    if (charWidth <= 0 || lineHeight <= 0) return;
+
+    const int fontSpacing = textRenderer.fontSpacing(style.fontSize);
+    const int column = command.cursorColumn();
+    const int line = command.cursorLine();
+    const QPointF location = style.location;
+
+    const double x = location.x()
+        + charWidth * column
+        + fontSpacing * (column - 1);
+    // Match preview text row pitch: font line height plus preview line spacing.
+    const double y = location.y()
+        + (lineHeight + style.lineSpacing) * (line + baseLineCount());
+
+    lineRenderer.drawLine(QPointF(x, y),
+                          QPointF(x + charWidth, y),
+                          textColor(),
+                          screenProjection,
+                          1.0f);
+}
+
+int PreviewArea::baseLineCount() const {
+    return 3;
+}
+
+QColor PreviewArea::textColor() const {
+    const ScreenListStyle& style = list_.style();
+    return applyCrcBrightness(style.baseTextColor, style.brightness, style.minBrightness);
 }
 
 } // namespace asdex

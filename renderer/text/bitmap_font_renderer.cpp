@@ -9,6 +9,7 @@
 #include <QOpenGLVersionFunctionsFactory>
 #include <QVector4D>
 
+#include <algorithm>
 #include <cstddef>
 #include <vector>
 
@@ -66,6 +67,20 @@ const BitmapGlyph* glyphFor(const BitmapFontSize& fontSizeData, std::uint32_t co
     const int index = it.value();
     if (index < 0 || index >= static_cast<int>(fontSizeData.glyphs.size())) return nullptr;
     return &fontSizeData.glyphs[static_cast<std::size_t>(index)];
+}
+
+const BitmapGlyph* representativeGlyph(const BitmapFontSize& fontSizeData) {
+    constexpr std::uint32_t candidates[] = {U'M', U'0', U'A', U'W'};
+    for (const std::uint32_t codepoint : candidates) {
+        const BitmapGlyph* glyph = glyphFor(fontSizeData, codepoint);
+        if (glyph && glyph->width > 0 && glyph->height > 0) return glyph;
+    }
+
+    for (const BitmapGlyph& glyph : fontSizeData.glyphs) {
+        if (glyph.width > 0 && glyph.height > 0) return &glyph;
+    }
+
+    return nullptr;
 }
 
 } // namespace
@@ -316,6 +331,28 @@ QSize BitmapFontRenderer::measureText(QStringView text, int fontSize) const {
 
 int BitmapFontRenderer::lineHeight(int fontSize) const {
     return font_ ? font_->lineHeight(fontSize) : 0;
+}
+
+QSize BitmapFontRenderer::charSize(int fontSize) const {
+    if (!font_) return {};
+
+    const BitmapFontSize* fontSizeData = font_->fontSize(fontSize);
+    if (!fontSizeData) return {};
+
+    const BitmapGlyph* glyph = representativeGlyph(*fontSizeData);
+    if (!glyph) return QSize(fontSizeData->lineHeight, fontSizeData->lineHeight);
+
+    return QSize(glyph->width, glyph->height);
+}
+
+int BitmapFontRenderer::fontSpacing(int fontSize) const {
+    if (!font_) return 0;
+
+    const BitmapFontSize* fontSizeData = font_->fontSize(fontSize);
+    if (!fontSizeData) return 0;
+
+    const BitmapGlyph* glyph = representativeGlyph(*fontSizeData);
+    return glyph ? std::max(0, glyph->advance - glyph->width) : 0;
 }
 
 } // namespace renderer

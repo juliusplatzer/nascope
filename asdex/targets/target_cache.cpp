@@ -173,4 +173,33 @@ void TargetCache::setAirport(const QString& icao) {
     if (socket_.state() == QAbstractSocket::ConnectedState) sendAirportFilter();
 }
 
+void TargetCache::sendDatablockEdit(const QString& facilityId,
+                                    const QString& trackId,
+                                    const QString& callsign,
+                                    const QString& beaconCode,
+                                    const QString& category,
+                                    const QString& aircraftType,
+                                    const QString& fix,
+                                    const QString& scratchpad1,
+                                    const QString& scratchpad2) {
+    if (socket_.state() != QAbstractSocket::ConnectedState) {
+        qWarning().noquote() << "[asdex] cannot send datablock edit: websocket disconnected";
+        return;
+    }
+
+    QJsonObject message;
+    message.insert(QStringLiteral("type"), QStringLiteral("edit_asdex_db_fields"));
+    message.insert(QStringLiteral("facilityId"), facilityId.toUpper());
+    message.insert(QStringLiteral("trackId"), trackId);
+    message.insert(QStringLiteral("callsign"), callsign);
+    message.insert(QStringLiteral("beaconCode"), beaconCode);
+    message.insert(QStringLiteral("category"), category);
+    message.insert(QStringLiteral("aircraftType"), aircraftType);
+    message.insert(QStringLiteral("fix"), fix);
+    message.insert(QStringLiteral("scratchpad1"), scratchpad1);
+    message.insert(QStringLiteral("scratchpad2"), scratchpad2);
+
+    socket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
+}
+
 } // namespace asdex

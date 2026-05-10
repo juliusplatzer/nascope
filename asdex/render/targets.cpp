@@ -639,7 +639,8 @@ void TargetRenderer::renderHistoryDots(const QVector<AsdexTarget>& targets,
         const int count = std::min(static_cast<int>(target.history.size()), kHistoryColorCount);
 
         for (int i = 0; i < count; ++i) {
-            const int value = kHistoryColors[i];
+            const int ageFromNewest = count - 1 - i;
+            const int value = kHistoryColors[ageFromNewest];
 
             QMatrix4x4 model;
             model.translate(float(target.history[i].positionFeet.x()),

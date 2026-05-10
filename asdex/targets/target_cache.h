@@ -42,6 +42,15 @@ public:
     QString airport() const { return icao_; }
 
     void setAirport(const QString& icao);
+    void sendDatablockEdit(const QString& facilityId,
+                           const QString& trackId,
+                           const QString& callsign,
+                           const QString& beaconCode,
+                           const QString& category,
+                           const QString& aircraftType,
+                           const QString& fix,
+                           const QString& scratchpad1,
+                           const QString& scratchpad2);
 
 signals:
     void changed();

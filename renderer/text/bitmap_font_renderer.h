@@ -37,6 +37,8 @@ public:
 
     QSize measureText(QStringView text, int fontSize) const;
     int lineHeight(int fontSize) const;
+    QSize charSize(int fontSize) const;
+    int fontSpacing(int fontSize) const;
 
 private:
     struct GpuFontSize {

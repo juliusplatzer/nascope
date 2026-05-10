@@ -40,6 +40,8 @@ struct DataBlockSettings {
     int brightness = 95;
     int leaderLength = 2;
     LeaderDirection leaderDirection = LeaderDirection::NE;
+    bool timesharePrimary = true;
+    bool alertInProgress = false;
 
     bool showAltitude = false;
     bool showAircraftType = true;

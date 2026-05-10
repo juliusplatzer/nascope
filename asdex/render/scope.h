@@ -1,10 +1,13 @@
 #pragma once
 
+#include "asdex/input/asdex_command.h"
+#include "asdex/input/datablock_edit_command.h"
 #include "asdex/lists/preview_area.h"
 #include "asdex/targets/target_cache.h"
 #include "asdex/render/colors.h"
 #include "asdex/render/cursors.h"
 #include "asdex/render/datablocks.h"
+#include "asdex/render/screen_line_renderer.h"
 #include "renderer/text/bitmap_font.h"
 #include "renderer/text/bitmap_font_renderer.h"
 #include "asdex/render/targets.h"
@@ -19,10 +22,12 @@
 #include <QOpenGLVertexArrayObject>
 #include <QOpenGLWidget>
 #include <QPointF>
+#include <QTimer>
 #include <QVector>
 #include <QWheelEvent>
 
 #include <cstddef>
+#include <optional>
 
 namespace asdex {
 
@@ -60,7 +65,14 @@ private:
     void uploadMapGeometry();
     void updateTargetsFromCache();
     void updateHighlightedTarget(const QPointF& mouseLogical);
+    void clearHighlightedTarget();
+    bool handleDatablockEditKey(QKeyEvent* event);
     AsdexTarget* highlightedTarget();
+    AsdexTarget* targetById(const QString& targetId);
+    void startDatablockEdit(const AsdexTarget& target);
+    void cancelCommand();
+    void submitDatablockEdit();
+    void applyEditedFields(AsdexTarget& target, const EditedDbFields& fields) const;
     bool defaultDataBlockVisibleForTarget(const AsdexTarget& target) const;
     bool isDataBlockVisible(const AsdexTarget& target) const;
     void toggleDataBlockForTarget(const AsdexTarget& target);
@@ -89,14 +101,22 @@ private:
     renderer::BitmapFontRenderer textRenderer_;
     asdex::TargetRenderer targetRenderer_;
     DataBlockRenderer datablockRenderer_;
+    ScreenLineRenderer screenLineRenderer_;
     QVector<asdex::AsdexTarget> targets_;
     QHash<QString, DataBlockVisibility> datablockVisibility_;
+    QHash<QString, EditedDbFields> pendingDatablockEdits_;
     QString highlightedTargetId_;
+    CommandType commandType_ = CommandType::None;
+    std::optional<DatablockEditCommand> datablockEdit_;
+    QString editingTrackId_;
     QPointF centerFeet_;
     double halfRangeFeet_ = 1.0;
     asdex::Mode mode_ = asdex::Mode::Day;
     bool showDataBlocks_ = true;
+    bool timesharePrimary_ = true;
+    QTimer datablockTimeshareTimer_;
     bool panning_ = false;
+    bool rightDragMoved_ = false;
     QPointF panStartMouseFramebuffer_;
     QPointF panStartCenterFeet_;
 
