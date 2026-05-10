@@ -145,6 +145,10 @@ void TargetCache::onTextMessage(const QString& text) {
             setString(target.exitFix, value);
         else if (keyName == QLatin1String("wake"))
             setString(target.wake, value);
+        else if (keyName == QLatin1String("scratchpad1"))
+            setString(target.scratchpad1, value);
+        else if (keyName == QLatin1String("scratchpad2"))
+            setString(target.scratchpad2, value);
         else if (keyName == QLatin1String("lat"))
             setOptionalDouble(target.lat, value);
         else if (keyName == QLatin1String("lon"))

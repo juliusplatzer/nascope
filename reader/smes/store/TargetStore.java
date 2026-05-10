@@ -86,6 +86,8 @@ public final class TargetStore extends AbstractVerticle {
             if (s.squawk   != null) changed.put("squawk",   s.squawk);
             if (s.exitFix  != null) changed.put("exitFix",  s.exitFix);
             if (s.wake     != null) changed.put("wake",     s.wake);
+            if (s.scratchpad1 != null) changed.put("scratchpad1", s.scratchpad1);
+            if (s.scratchpad2 != null) changed.put("scratchpad2", s.scratchpad2);
             if (s.lat      != null) changed.put("lat",      s.lat);
             if (s.lon      != null) changed.put("lon",      s.lon);
             if (s.altitude != null) changed.put("altitude", s.altitude);
@@ -158,7 +160,7 @@ public final class TargetStore extends AbstractVerticle {
         final String airport;
 
         // Identity
-        String tgtType, callsign, acType, squawk, exitFix, wake;
+        String tgtType, callsign, acType, squawk, exitFix, wake, scratchpad1, scratchpad2;
 
         // Position + kinematics
         Double lat, lon, altitude, speed, heading;
@@ -186,6 +188,8 @@ public final class TargetStore extends AbstractVerticle {
                 squawk   = trackFull(changed, "squawk",   squawk,   obs.squawk());
                 exitFix  = trackFull(changed, "exitFix",  exitFix,  obs.exitFix());
                 wake     = trackFull(changed, "wake",     wake,     obs.wake());
+                scratchpad1 = trackFull(changed, "scratchpad1", scratchpad1, obs.scratchpad1());
+                scratchpad2 = trackFull(changed, "scratchpad2", scratchpad2, obs.scratchpad2());
                 lat      = trackFull(changed, "lat",      lat,      obs.lat());
                 lon      = trackFull(changed, "lon",      lon,      obs.lon());
                 altitude = trackFull(changed, "altitude", altitude, obs.altitude());
@@ -198,6 +202,8 @@ public final class TargetStore extends AbstractVerticle {
                 squawk   = track(changed, "squawk",   squawk,   obs.squawk());
                 exitFix  = track(changed, "exitFix",  exitFix,  obs.exitFix());
                 wake     = track(changed, "wake",     wake,     obs.wake());
+                scratchpad1 = track(changed, "scratchpad1", scratchpad1, obs.scratchpad1());
+                scratchpad2 = track(changed, "scratchpad2", scratchpad2, obs.scratchpad2());
                 lat      = track(changed, "lat",      lat,      obs.lat());
                 lon      = track(changed, "lon",      lon,      obs.lon());
                 altitude = track(changed, "altitude", altitude, obs.altitude());

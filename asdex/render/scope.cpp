@@ -468,8 +468,8 @@ void AsdexScopeWidget::updateTargetsFromCache() {
         target.beaconCode = cached.squawk;
         target.fix = cached.exitFix;
         target.altitudeTrue = cached.altitude;
-        target.scratchpad1.clear();
-        target.scratchpad2.clear();
+        target.scratchpad1 = cached.scratchpad1;
+        target.scratchpad2 = cached.scratchpad2;
         target.positionFeet = toFeet.map(QPointF(*cached.lon, *cached.lat));
 
         const double heading = cached.heading.value_or(0.0);

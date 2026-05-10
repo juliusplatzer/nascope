@@ -22,6 +22,8 @@ public record SurfaceTarget(
         String  squawk,     // flightId/mode3ACode
         String  exitFix,    // flightInfo/fix
         String  wake,       // flightInfo/wake
+        String  scratchpad1,// manual/scratchpad1
+        String  scratchpad2,// manual/scratchpad2
 
         // Position + kinematics
         Double  lat,

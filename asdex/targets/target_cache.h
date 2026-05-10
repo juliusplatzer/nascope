@@ -24,6 +24,8 @@ public:
         QString squawk;
         QString exitFix;
         QString wake;
+        QString scratchpad1;
+        QString scratchpad2;
 
         std::optional<double> lat;
         std::optional<double> lon;

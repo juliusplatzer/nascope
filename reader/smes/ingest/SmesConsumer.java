@@ -194,6 +194,9 @@ public final class SmesConsumer extends AbstractVerticle {
 
         boolean isFull = "true".equalsIgnoreCase(el.getAttribute("full"));
         String stid    = blankToNull(text(child(el, "stid")));
+        Element manual = child(el, "manual");
+        String scratchpad1 = manual != null ? blankToNull(text(child(manual, "scratchpad1"))) : null;
+        String scratchpad2 = manual != null ? blankToNull(text(child(manual, "scratchpad2"))) : null;
 
         // Flight ID
         String callsign = null, squawk = null;
@@ -238,7 +241,7 @@ public final class SmesConsumer extends AbstractVerticle {
 
         return new SurfaceTarget(
                 airport, track, stid, isFull,
-                tgtType, callsign, acType, squawk, exitFix, wake,
+                tgtType, callsign, acType, squawk, exitFix, wake, scratchpad1, scratchpad2,
                 lat, lon, altitude, speed, heading
         );
     }
@@ -273,7 +276,7 @@ public final class SmesConsumer extends AbstractVerticle {
         // adsbReports typically lack stid, flight info, and identity fields
         return new SurfaceTarget(
                 airport, track, null, isFull,
-                "unknown", null, null, null, null, null,
+                "unknown", null, null, null, null, null, null, null,
                 lat, lon, altitude, speed, heading
         );
     }
