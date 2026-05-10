@@ -33,6 +33,15 @@ void setString(QString& dst, const QJsonValue& value) {
     dst = value.toString();
 }
 
+void setScratchpad(QString& dst, const QJsonValue& value) {
+    if (value.isNull()) return;
+
+    const QString next = value.toString();
+    dst = next.trimmed().compare(QStringLiteral("none"), Qt::CaseInsensitive) == 0
+        ? QString()
+        : next;
+}
+
 void setOptionalDouble(std::optional<double>& dst, const QJsonValue& value) {
     if (value.isNull()) return;
     dst = value.toDouble();
@@ -146,9 +155,9 @@ void TargetCache::onTextMessage(const QString& text) {
         else if (keyName == QLatin1String("wake"))
             setString(target.wake, value);
         else if (keyName == QLatin1String("scratchpad1"))
-            setString(target.scratchpad1, value);
+            setScratchpad(target.scratchpad1, value);
         else if (keyName == QLatin1String("scratchpad2"))
-            setString(target.scratchpad2, value);
+            setScratchpad(target.scratchpad2, value);
         else if (keyName == QLatin1String("lat"))
             setOptionalDouble(target.lat, value);
         else if (keyName == QLatin1String("lon"))

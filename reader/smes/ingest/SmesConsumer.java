@@ -195,8 +195,8 @@ public final class SmesConsumer extends AbstractVerticle {
         boolean isFull = "true".equalsIgnoreCase(el.getAttribute("full"));
         String stid    = blankToNull(text(child(el, "stid")));
         Element manual = child(el, "manual");
-        String scratchpad1 = manual != null ? blankToNull(text(child(manual, "scratchpad1"))) : null;
-        String scratchpad2 = manual != null ? blankToNull(text(child(manual, "scratchpad2"))) : null;
+        String scratchpad1 = manual != null ? scratchpadToNull(text(child(manual, "scratchpad1"))) : null;
+        String scratchpad2 = manual != null ? scratchpadToNull(text(child(manual, "scratchpad2"))) : null;
 
         // Flight ID
         String callsign = null, squawk = null;
@@ -313,6 +313,11 @@ public final class SmesConsumer extends AbstractVerticle {
     // -------------------------------------------------------------------------
 
     private static String blankToNull(String s) { return (s == null || s.isBlank()) ? null : s; }
+
+    private static String scratchpadToNull(String s) {
+        s = blankToNull(s);
+        return s == null || "none".equalsIgnoreCase(s.strip()) ? null : s;
+    }
 
     private static Double parseDouble(String s) {
         if (s == null || s.isBlank()) return null;
