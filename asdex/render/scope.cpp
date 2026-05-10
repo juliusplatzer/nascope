@@ -61,7 +61,10 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
       airport_(std::move(airport)),
       map_(asdex::VideoMap::load(airport_)),
       targetCache_(airport_, this),
-      atisCache_(airport_, this) {
+      atisCache_(airport_, this),
+      runwayClosureCache_(airport_,
+                           asdex::findProjectRelativeFile(QStringLiteral("tools/notams/scrape.py")),
+                           this) {
     QSurfaceFormat fmt = format();
     fmt.setSamples(0);
     setFormat(fmt);
@@ -107,6 +110,16 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
         qWarning().noquote() << "[renderer] preview area config load failed:" << listError;
     }
 
+    QString runwayClosureError;
+    const QString surfacePath = asdex::findProjectRelativeFile(
+        QStringLiteral("resources/surface/asdex/%1.json").arg(airport_.toUpper()));
+    if (!runwayClosureRenderer_.loadSurfaceFile(surfacePath,
+                                                map_.anchorLonLat(),
+                                                &runwayClosureError)) {
+        qWarning().noquote() << "[asdex] runway closure surface load failed:"
+                             << runwayClosureError;
+    }
+
     connect(&targetCache_, &::asdex::TargetCache::changed, this, [this] {
         updateTargetsFromCache();
         update();
@@ -114,6 +127,10 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
     connect(&atisCache_, &::asdex::AtisCache::changed, this, [this] {
         const ::asdex::AtisRunwayState& atis = atisCache_.state();
         previewArea_.updateRunwayConfigFromRunways(atis.landingRunways, atis.departureRunways);
+        update();
+    });
+    connect(&runwayClosureCache_, &::asdex::RunwayClosureCache::changed, this, [this] {
+        runwayClosureRenderer_.setClosedRunways(runwayClosureCache_.closedRunways());
         update();
     });
 
@@ -124,6 +141,7 @@ AsdexScopeWidget::~AsdexScopeWidget() {
     if (context()) {
         makeCurrent();
         screenLineRenderer_.deinitialize();
+        runwayClosureRenderer_.deinitialize();
         targetRenderer_.deinitialize();
         datablockRenderer_.deinitialize();
         textRenderer_.deinitialize();
@@ -147,6 +165,7 @@ void AsdexScopeWidget::initializeGL() {
 
     initializeShaders();
     uploadMapGeometry();
+    runwayClosureRenderer_.initialize();
     targetRenderer_.initialize();
     datablockRenderer_.initialize();
     screenLineRenderer_.initialize();
@@ -174,6 +193,7 @@ void AsdexScopeWidget::paintGL() {
     functions->glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     renderVideoMap(renderSize);
+    renderRunwayClosures(renderSize);
     renderTargets(renderSize);
     renderScreenOverlays(renderSize);
 }
@@ -693,6 +713,11 @@ void AsdexScopeWidget::renderVideoMap(const QSize& renderSize) {
 void AsdexScopeWidget::renderTargets(const QSize& renderSize) {
     if (renderSize.isEmpty()) return;
     targetRenderer_.render(targets_, viewProjection(renderSize), mode_);
+}
+
+void AsdexScopeWidget::renderRunwayClosures(const QSize& renderSize) {
+    if (renderSize.isEmpty()) return;
+    runwayClosureRenderer_.render(viewProjection(renderSize));
 }
 
 void AsdexScopeWidget::renderScreenOverlays(const QSize& renderSize) {

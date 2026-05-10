@@ -8,12 +8,14 @@ endif()
 add_library(nascope_asdex STATIC
     window.cpp
     atis/atis_cache.cpp
+    notams/runway_closure_cache.cpp
     input/datablock_edit_command.cpp
     render/math.cpp
     render/resources.cpp
     render/cursors.cpp
     render/screen_line_renderer.cpp
     render/videomap.cpp
+    render/runway_closures.cpp
     render/targets.cpp
     render/datablocks.cpp
     render/scope.cpp

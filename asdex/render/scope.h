@@ -5,10 +5,12 @@
 #include "asdex/input/datablock_edit_command.h"
 #include "asdex/lists/coast_list.h"
 #include "asdex/lists/preview_area.h"
+#include "asdex/notams/runway_closure_cache.h"
 #include "asdex/targets/target_cache.h"
 #include "asdex/render/colors.h"
 #include "asdex/render/cursors.h"
 #include "asdex/render/datablocks.h"
+#include "asdex/render/runway_closures.h"
 #include "asdex/render/screen_line_renderer.h"
 #include "renderer/text/bitmap_font.h"
 #include "renderer/text/bitmap_font_renderer.h"
@@ -79,6 +81,7 @@ private:
     bool isDataBlockVisible(const AsdexTarget& target) const;
     void toggleDataBlockForTarget(const AsdexTarget& target);
     void renderVideoMap(const QSize& renderSize);
+    void renderRunwayClosures(const QSize& renderSize);
     void renderTargets(const QSize& renderSize);
     void renderScreenOverlays(const QSize& renderSize);
     QSize framebufferRenderSize() const;
@@ -98,11 +101,13 @@ private:
     asdex::VideoMap map_;
     ::asdex::TargetCache targetCache_;
     ::asdex::AtisCache atisCache_;
+    ::asdex::RunwayClosureCache runwayClosureCache_;
     asdex::CursorSet cursors_;
     ::asdex::PreviewArea previewArea_;
     renderer::BitmapFont asdexFont_;
     renderer::BitmapFontRenderer textRenderer_;
     asdex::TargetRenderer targetRenderer_;
+    RunwayClosureRenderer runwayClosureRenderer_;
     DataBlockRenderer datablockRenderer_;
     ScreenLineRenderer screenLineRenderer_;
     QVector<asdex::AsdexTarget> targets_;
