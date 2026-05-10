@@ -12,6 +12,7 @@
 #include "asdex/render/datablocks.h"
 #include "asdex/render/runway_closures.h"
 #include "asdex/render/screen_line_renderer.h"
+#include "asdex/render/temp_areas.h"
 #include "renderer/text/bitmap_font.h"
 #include "renderer/text/bitmap_font_renderer.h"
 #include "asdex/render/targets.h"
@@ -82,6 +83,7 @@ private:
     void toggleDataBlockForTarget(const AsdexTarget& target);
     void renderVideoMap(const QSize& renderSize);
     void renderRunwayClosures(const QSize& renderSize);
+    void renderTempAreas(const QSize& renderSize);
     void renderTargets(const QSize& renderSize);
     void renderScreenOverlays(const QSize& renderSize);
     QSize framebufferRenderSize() const;
@@ -89,6 +91,7 @@ private:
     QMatrix4x4 viewProjection(const QSize& renderSize) const;
     QColor colorFor(asdex::VideoMap::Kind kind) const;
     QPointF worldToScreenLogical(const QPointF& worldFeet, const QSize& renderSize) const;
+    QPointF worldToFramebufferTopLeft(const QPointF& worldFeet, const QSize& renderSize) const;
     QPointF framebufferPoint(const QPointF& logicalPoint) const;
     double pixelsPerFoot(const QSize& renderSize) const;
     QPointF screenToWorldFeet(const QPointF& logicalPoint, const QSize& renderSize) const;
@@ -108,11 +111,13 @@ private:
     renderer::BitmapFontRenderer textRenderer_;
     asdex::TargetRenderer targetRenderer_;
     RunwayClosureRenderer runwayClosureRenderer_;
+    TempAreaRenderer tempAreaRenderer_;
     DataBlockRenderer datablockRenderer_;
     ScreenLineRenderer screenLineRenderer_;
     QVector<asdex::AsdexTarget> targets_;
     QHash<QString, DataBlockVisibility> datablockVisibility_;
     QHash<QString, EditedDbFields> pendingDatablockEdits_;
+    QVector<TempArea> closedTempAreas_;
     CoastList coastList_;
     QString highlightedTargetId_;
     CommandType commandType_ = CommandType::None;

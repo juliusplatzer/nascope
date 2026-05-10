@@ -119,6 +119,11 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
         qWarning().noquote() << "[asdex] runway closure surface load failed:"
                              << runwayClosureError;
     }
+    QString closedAreaError;
+    if (!runwayClosureCache_.loadSurfaceFile(surfacePath, map_.anchorLonLat(), &closedAreaError)) {
+        qWarning().noquote() << "[asdex] closed temp area surface load failed:"
+                             << closedAreaError;
+    }
 
     connect(&targetCache_, &::asdex::TargetCache::changed, this, [this] {
         updateTargetsFromCache();
@@ -131,6 +136,7 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
     });
     connect(&runwayClosureCache_, &::asdex::RunwayClosureCache::changed, this, [this] {
         runwayClosureRenderer_.setClosedRunways(runwayClosureCache_.closedRunways());
+        tempAreaRenderer_.setClosedAreas(runwayClosureCache_.closedTempAreas());
         update();
     });
 
@@ -141,6 +147,7 @@ AsdexScopeWidget::~AsdexScopeWidget() {
     if (context()) {
         makeCurrent();
         screenLineRenderer_.deinitialize();
+        tempAreaRenderer_.deinitialize();
         runwayClosureRenderer_.deinitialize();
         targetRenderer_.deinitialize();
         datablockRenderer_.deinitialize();
@@ -166,6 +173,7 @@ void AsdexScopeWidget::initializeGL() {
     initializeShaders();
     uploadMapGeometry();
     runwayClosureRenderer_.initialize();
+    tempAreaRenderer_.initialize();
     targetRenderer_.initialize();
     datablockRenderer_.initialize();
     screenLineRenderer_.initialize();
@@ -194,6 +202,7 @@ void AsdexScopeWidget::paintGL() {
 
     renderVideoMap(renderSize);
     renderRunwayClosures(renderSize);
+    renderTempAreas(renderSize);
     renderTargets(renderSize);
     renderScreenOverlays(renderSize);
 }
@@ -720,6 +729,15 @@ void AsdexScopeWidget::renderRunwayClosures(const QSize& renderSize) {
     runwayClosureRenderer_.render(viewProjection(renderSize));
 }
 
+void AsdexScopeWidget::renderTempAreas(const QSize& renderSize) {
+    if (renderSize.isEmpty()) return;
+    tempAreaRenderer_.renderClosedAreas(
+        viewProjection(renderSize),
+        [this, &renderSize](QPointF worldFeet) {
+            return worldToFramebufferTopLeft(worldFeet, renderSize);
+        });
+}
+
 void AsdexScopeWidget::renderScreenOverlays(const QSize& renderSize) {
     if (!textRendererReady_) return;
     if (renderSize.isEmpty()) return;
@@ -787,6 +805,13 @@ QPointF AsdexScopeWidget::worldToScreenLogical(const QPointF& worldFeet,
 
     const qreal dpr = devicePixelRatioF();
     return QPointF(framebufferX / dpr, framebufferY / dpr);
+}
+
+QPointF AsdexScopeWidget::worldToFramebufferTopLeft(const QPointF& worldFeet,
+                                                    const QSize& renderSize) const {
+    const double ppf = pixelsPerFoot(renderSize);
+    return QPointF(renderSize.width() * 0.5 + (worldFeet.x() - centerFeet_.x()) * ppf,
+                   renderSize.height() * 0.5 - (worldFeet.y() - centerFeet_.y()) * ppf);
 }
 
 QPointF AsdexScopeWidget::framebufferPoint(const QPointF& logicalPoint) const {

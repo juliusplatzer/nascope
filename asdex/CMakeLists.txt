@@ -16,6 +16,7 @@ add_library(nascope_asdex STATIC
     render/screen_line_renderer.cpp
     render/videomap.cpp
     render/runway_closures.cpp
+    render/temp_areas.cpp
     render/targets.cpp
     render/datablocks.cpp
     render/scope.cpp
