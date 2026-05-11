@@ -1,8 +1,8 @@
 #include "asdex/lists/preview_area.h"
 
 #include "asdex/input/datablock_edit_command.h"
-#include "asdex/render/screen_line_renderer.h"
-#include "renderer/text/bitmap_font_renderer.h"
+#include "renderer/builders.h"
+#include "renderer/font.h"
 
 #include <QFile>
 #include <QJsonArray>
@@ -206,22 +206,26 @@ QString PreviewArea::matchedRunwayConfigName(const QStringList& landingRunways,
     return {};
 }
 
-void PreviewArea::render(renderer::BitmapFontRenderer& textRenderer,
+void PreviewArea::render(renderer::TextBuilder& textBuilder,
+                         const renderer::BitmapFont& font,
+                         std::uint32_t fontTextureId,
                          const QStringList& commandLines) const {
-    list_.render(textRenderer, buildTextBlock(commandLines));
+    list_.render(textBuilder, font, fontTextureId, buildTextBlock(commandLines));
 }
 
-void PreviewArea::renderCommandCursor(ScreenLineRenderer& lineRenderer,
-                                      const renderer::BitmapFontRenderer& textRenderer,
+void PreviewArea::renderCommandCursor(renderer::LinesBuilder& lineBuilder,
+                                      const renderer::BitmapFont& font,
                                       const DatablockEditCommand& command,
                                       const QMatrix4x4& screenProjection) const {
+    Q_UNUSED(screenProjection);
+
     const ScreenListStyle& style = list_.style();
-    const QSize charSize = textRenderer.charSize(style.fontSize);
+    const QSize charSize = font.charSize(style.fontSize);
     const int charWidth = charSize.width();
-    const int lineHeight = textRenderer.lineHeight(style.fontSize);
+    const int lineHeight = font.lineHeight(style.fontSize);
     if (charWidth <= 0 || lineHeight <= 0) return;
 
-    const int fontSpacing = textRenderer.fontSpacing(style.fontSize);
+    const int fontSpacing = font.fontSpacing(style.fontSize);
     const int column = command.cursorColumn();
     const int line = command.cursorLine();
     const QPointF location = style.location;
@@ -233,11 +237,7 @@ void PreviewArea::renderCommandCursor(ScreenLineRenderer& lineRenderer,
     const double y = location.y()
         + (lineHeight + style.lineSpacing) * (line + baseLineCount());
 
-    lineRenderer.drawLine(QPointF(x, y),
-                          QPointF(x + charWidth, y),
-                          textColor(),
-                          screenProjection,
-                          1.0f);
+    lineBuilder.addLine(QPointF(x, y), QPointF(x + charWidth, y));
 }
 
 int PreviewArea::baseLineCount() const {

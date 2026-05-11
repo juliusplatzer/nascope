@@ -1,4 +1,4 @@
-#include "asdex/render/resources.h"
+#include "asdex/resources.h"
 
 #include <QCoreApplication>
 #include <QDir>

@@ -1,8 +1,16 @@
 find_package(Qt6 REQUIRED COMPONENTS Core Gui OpenGL)
 
+if(NOT APPLE)
+    find_package(OpenGL REQUIRED COMPONENTS GLU)
+endif()
+
 add_library(nascope_renderer STATIC
-    text/bitmap_font.cpp
-    text/bitmap_font_renderer.cpp
+    command_buffer.cpp
+    builders.cpp
+    font.cpp
+    gl/opengl_renderer.cpp
+    gl/shaders.cpp
+    gl/glu_tessellator.cpp
 )
 
 target_include_directories(nascope_renderer
@@ -16,3 +24,10 @@ target_link_libraries(nascope_renderer
         Qt6::Gui
         Qt6::OpenGL
 )
+
+if(APPLE)
+    target_link_libraries(nascope_renderer PRIVATE "-framework OpenGL")
+    target_compile_definitions(nascope_renderer PRIVATE GL_SILENCE_DEPRECATION)
+else()
+    target_link_libraries(nascope_renderer PRIVATE OpenGL::GLU)
+endif()

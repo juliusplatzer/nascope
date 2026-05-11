@@ -1,4 +1,4 @@
-#include "asdex/render/math.h"
+#include "asdex/math.h"
 
 #include <algorithm>
 #include <cmath>

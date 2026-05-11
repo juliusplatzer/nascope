@@ -1,13 +1,19 @@
-#include "asdex/render/scope.h"
+#include "asdex/scope.h"
 
-#include "asdex/render/math.h"
-#include "asdex/render/resources.h"
+#include "asdex/draw_datablocks.h"
+#include "asdex/draw_runway_closures.h"
+#include "asdex/draw_targets.h"
+#include "asdex/draw_temp_areas.h"
+#include "asdex/draw_video_map.h"
+#include "asdex/math.h"
+#include "asdex/resources.h"
+#include "renderer/builders.h"
+#include "renderer/command_buffer.h"
+#include "renderer/renderer.h"
 
-#include <QOpenGLContext>
-#include <QOpenGLFunctions>
 #include <QDebug>
+#include <QImage>
 #include <QSurfaceFormat>
-#include <QVector4D>
 #include <QtGlobal>
 
 #include <algorithm>
@@ -24,27 +30,6 @@ constexpr double kWheelStepFeet = 400.0;
 constexpr double kCtrlWheelStepFeet = 1600.0;
 constexpr double kMaxHoverRangeFeet = 150.0;
 constexpr double kRightClickDragTolerancePx = 3.0;
-
-constexpr char kVertexShader[] = R"(
-#version 330 core
-layout(location = 0) in vec2 a_position;
-uniform mat4 u_projection;
-uniform mat4 u_model;
-
-void main() {
-    gl_Position = u_projection * u_model * vec4(a_position, 0.0, 1.0);
-}
-)";
-
-constexpr char kFragmentShader[] = R"(
-#version 330 core
-uniform vec4 u_color;
-out vec4 fragColor;
-
-void main() {
-    fragColor = u_color;
-}
-)";
 
 bool isHeavyWake(QStringView wake) {
     if (wake.size() != 1) return false;
@@ -114,7 +99,7 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
     QString runwayClosureError;
     const QString surfacePath = asdex::findProjectRelativeFile(
         QStringLiteral("resources/surface/asdex/%1.json").arg(airport_.toUpper()));
-    if (!runwayClosureRenderer_.loadSurfaceFile(surfacePath,
+    if (!runwayClosureGeometry_.loadSurfaceFile(surfacePath,
                                                 map_.anchorLonLat(),
                                                 &runwayClosureError)) {
         qWarning().noquote() << "[asdex] runway closure surface load failed:"
@@ -136,7 +121,7 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
         update();
     });
     connect(&runwayClosureCache_, &::asdex::RunwayClosureCache::changed, this, [this] {
-        runwayClosureRenderer_.setClosedRunways(runwayClosureCache_.closedRunways());
+        runwayClosureGeometry_.setClosedRunways(runwayClosureCache_.closedRunways());
 
         QVector<TempArea> areas;
         areas.reserve(runwayClosureCache_.closedTempAreas().size()
@@ -158,7 +143,7 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
             areas.push_back(area);
         }
 
-        tempAreaRenderer_.setAreas(std::move(areas));
+        tempAreaGeometry_.setAreas(std::move(areas));
         update();
     });
 
@@ -168,43 +153,36 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
 AsdexScopeWidget::~AsdexScopeWidget() {
     if (context()) {
         makeCurrent();
-        screenLineRenderer_.deinitialize();
-        tempAreaRenderer_.deinitialize();
-        runwayClosureRenderer_.deinitialize();
-        targetRenderer_.deinitialize();
-        datablockRenderer_.deinitialize();
-        textRenderer_.deinitialize();
+        if (renderer_) {
+            for (const std::uint32_t textureId : fontTextureIds_) {
+                renderer_->destroyTexture(textureId);
+            }
+            fontTextureIds_.clear();
+            renderer_->deinitialize();
+        }
         doneCurrent();
     }
 }
 
 void AsdexScopeWidget::initializeGL() {
-    QOpenGLFunctions* functions = context()->functions();
-    functions->initializeOpenGLFunctions();
-    functions->glDisable(GL_DEPTH_TEST);
-    functions->glDisable(GL_STENCIL_TEST);
-    functions->glDisable(GL_MULTISAMPLE);
-    functions->glDisable(GL_LINE_SMOOTH);
-    functions->glDisable(GL_POLYGON_SMOOTH);
-    functions->glDisable(GL_DITHER);
-    functions->glDisable(GL_CULL_FACE);
-
-    functions->glEnable(GL_BLEND);
-    functions->glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    initializeShaders();
-    uploadMapGeometry();
-    runwayClosureRenderer_.initialize();
-    tempAreaRenderer_.initialize();
-    targetRenderer_.initialize();
-    datablockRenderer_.initialize();
-    screenLineRenderer_.initialize();
+    renderer_ = renderer::makeOpenGLRenderer();
+    QString rendererError;
+    if (!renderer_->initialize(&rendererError)) {
+        qWarning().noquote() << "[renderer] OpenGL renderer init failed:" << rendererError;
+        renderer_.reset();
+        return;
+    }
 
     if (fontLoaded_) {
-        QString fontError;
-        textRendererReady_ = textRenderer_.initialize(asdexFont_, &fontError);
-        if (!textRendererReady_)
-            qWarning().noquote() << "[renderer] font renderer init failed:" << fontError;
+        const int fontSizes[] = {2, 3};
+        for (const int fontSize : fontSizes) {
+            const QImage atlas = asdexFont_.atlasImage(fontSize);
+            if (atlas.isNull()) continue;
+
+            const std::uint32_t textureId = renderer_->createTextureFromImage(atlas, true);
+            if (textureId != 0) fontTextureIds_.insert(fontSize, textureId);
+        }
+        fontTexturesReady_ = !fontTextureIds_.isEmpty();
     }
 }
 
@@ -214,19 +192,8 @@ void AsdexScopeWidget::resizeGL(int width, int height) {
 }
 
 void AsdexScopeWidget::paintGL() {
-    QOpenGLFunctions* functions = context()->functions();
     const QSize renderSize = framebufferRenderSize();
-    functions->glViewport(0, 0, renderSize.width(), renderSize.height());
-
-    const QColor background = asdex::backgroundColor(mode_);
-    functions->glClearColor(background.redF(), background.greenF(), background.blueF(), 1.0f);
-    functions->glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    renderVideoMap(renderSize);
-    renderRunwayClosures(renderSize);
-    renderTempAreas(renderSize);
-    renderTargets(renderSize);
-    renderScreenOverlays(renderSize);
+    renderScene(renderSize);
 }
 
 void AsdexScopeWidget::fitMapToView() {
@@ -448,69 +415,6 @@ bool AsdexScopeWidget::handleDatablockEditKey(QKeyEvent* event) {
     return true;
 }
 
-void AsdexScopeWidget::initializeShaders() {
-    if (!shader_.addShaderFromSourceCode(QOpenGLShader::Vertex, kVertexShader)
-        || !shader_.addShaderFromSourceCode(QOpenGLShader::Fragment, kFragmentShader)
-        || !shader_.link()) {
-        qWarning().noquote() << "[renderer] shader setup failed:" << shader_.log();
-        shaderReady_ = false;
-        return;
-    }
-
-    shaderReady_ = true;
-}
-
-void AsdexScopeWidget::uploadMapGeometry() {
-    if (!shaderReady_ || !map_.isValid() || geometryUploaded_) return;
-
-    QVector<asdex::VideoMap::Vertex> vertices;
-    QVector<std::uint32_t> indices;
-    drawBatches_.clear();
-
-    for (const asdex::VideoMap::Mesh& mesh : map_.meshes()) {
-        if (mesh.indices.isEmpty()) continue;
-
-        const qsizetype batchStart = indices.size();
-        const std::uint32_t vertexBase = static_cast<std::uint32_t>(vertices.size());
-        vertices += mesh.vertices;
-        for (const std::uint32_t index : mesh.indices) indices.append(vertexBase + index);
-        const qsizetype batchCount = indices.size() - batchStart;
-
-        if (batchCount > 0) {
-            drawBatches_.append(DrawBatch{mesh.kind,
-                                          static_cast<int>(batchCount),
-                                          static_cast<std::size_t>(batchStart)
-                                              * sizeof(std::uint32_t)});
-        }
-    }
-
-    if (vertices.isEmpty() || indices.isEmpty()) return;
-
-    vertexArray_.create();
-    QOpenGLVertexArrayObject::Binder vaoBinder(&vertexArray_);
-
-    vertexBuffer_.create();
-    vertexBuffer_.bind();
-    vertexBuffer_.allocate(vertices.constData(),
-                           static_cast<int>(vertices.size() * sizeof(asdex::VideoMap::Vertex)));
-
-    indexBuffer_.create();
-    indexBuffer_.bind();
-    indexBuffer_.allocate(indices.constData(),
-                          static_cast<int>(indices.size() * sizeof(std::uint32_t)));
-
-    shader_.bind();
-    shader_.enableAttributeArray(0);
-    shader_.setAttributeBuffer(0,
-                               GL_FLOAT,
-                               0,
-                               2,
-                               sizeof(asdex::VideoMap::Vertex));
-    shader_.release();
-
-    geometryUploaded_ = true;
-}
-
 void AsdexScopeWidget::updateTargetsFromCache() {
     targets_.clear();
     if (!map_.isValid()) return;
@@ -715,94 +619,90 @@ void AsdexScopeWidget::toggleDataBlockForTarget(const AsdexTarget& target) {
         : DataBlockVisibility::ForceOn;
 }
 
-void AsdexScopeWidget::renderVideoMap(const QSize& renderSize) {
-    if (!shaderReady_ || !geometryUploaded_ || renderSize.isEmpty()) return;
+void AsdexScopeWidget::renderScene(const QSize& renderSize) {
+    if (!renderer_ || renderSize.isEmpty()) return;
 
-    shader_.bind();
-    QMatrix4x4 model;
-    model.setToIdentity();
-    shader_.setUniformValue("u_projection", viewProjection(renderSize));
-    shader_.setUniformValue("u_model", model);
+    renderer::CommandBuffer* commandBuffer = renderer::getCommandBuffer();
+    commandBuffer->resetState();
+    commandBuffer->viewport(0, 0, renderSize.width(), renderSize.height());
+    commandBuffer->clear(renderer::RGBA::fromQColor(backgroundColor(mode_)));
 
-    QOpenGLVertexArrayObject::Binder vaoBinder(&vertexArray_);
-    indexBuffer_.bind();
+    const QMatrix4x4 worldProjection = viewProjection(renderSize);
+    commandBuffer->loadProjectionMatrix(worldProjection);
+    drawVideoMap(map_, commandBuffer, mode_);
+    drawRunwayClosures(runwayClosureGeometry_, commandBuffer, worldProjection);
+    drawTempAreas(tempAreaGeometry_,
+                  commandBuffer,
+                  worldProjection,
+                  [this, &renderSize](QPointF worldFeet) {
+                      return worldToFramebufferTopLeft(worldFeet, renderSize);
+                  });
+    drawTargets(targets_, commandBuffer, worldProjection, mode_, targetVectorSeconds_);
 
-    QOpenGLFunctions* functions = context()->functions();
-    for (const DrawBatch& batch : drawBatches_) {
-        const QColor color = colorFor(batch.kind);
-        shader_.setUniformValue("u_color",
-                                QVector4D(color.redF(), color.greenF(), color.blueF(), color.alphaF()));
-        functions->glDrawElements(GL_TRIANGLES,
-                                  batch.indexCount,
-                                  GL_UNSIGNED_INT,
-                                  reinterpret_cast<const void*>(batch.indexOffsetBytes));
+    const std::uint32_t listFontTexture = fontTextureId(2);
+    if (fontTexturesReady_ && listFontTexture != 0) {
+        const QMatrix4x4 projection = screenProjection();
+
+        DataBlockSettings datablockSettings;
+        datablockSettings.fontSize = 2;
+        datablockSettings.brightness = 95;
+        datablockSettings.leaderLength = 2;
+        datablockSettings.leaderDirection = LeaderDirection::NE;
+        datablockSettings.timesharePrimary = timesharePrimary_;
+        datablockSettings.alertInProgress = false;
+
+        drawDatablocks(targets_,
+                       commandBuffer,
+                       projection,
+                       [this, &renderSize](QPointF worldFeet) {
+                           return worldToScreenLogical(worldFeet, renderSize);
+                       },
+                       [this](const AsdexTarget& target) {
+                           return isDataBlockVisible(target);
+                       },
+                       asdexFont_,
+                       listFontTexture,
+                       datablockSettings);
+
+        commandBuffer->loadProjectionMatrix(projection);
+
+        renderer::TextBuilder* textBuilder = renderer::getTextBuilder();
+        textBuilder->setFont(&asdexFont_);
+
+        coastList_.render(*textBuilder, asdexFont_, listFontTexture, size());
+
+        const QStringList commandLines =
+            datablockEdit_ ? datablockEdit_->displayLines() : QStringList();
+        previewArea_.render(*textBuilder, asdexFont_, listFontTexture, commandLines);
+        textBuilder->generateCommands(commandBuffer);
+        renderer::returnTextBuilder(textBuilder);
+
+        if (datablockEdit_) {
+            commandBuffer->setRgba(renderer::RGBA::fromQColor(
+                applyBrightness(QColor(0, 248, 0), 95, 20)));
+            commandBuffer->lineWidth(1.0f);
+
+            renderer::LinesBuilder* lineBuilder = renderer::getLinesBuilder();
+            previewArea_.renderCommandCursor(*lineBuilder,
+                                             asdexFont_,
+                                             *datablockEdit_,
+                                             projection);
+            lineBuilder->generateCommands(commandBuffer);
+            renderer::returnLinesBuilder(lineBuilder);
+        }
     }
 
-    shader_.release();
-}
-
-void AsdexScopeWidget::renderTargets(const QSize& renderSize) {
-    if (renderSize.isEmpty()) return;
-    targetRenderer_.render(targets_, viewProjection(renderSize), mode_);
-}
-
-void AsdexScopeWidget::renderRunwayClosures(const QSize& renderSize) {
-    if (renderSize.isEmpty()) return;
-    runwayClosureRenderer_.render(viewProjection(renderSize));
-}
-
-void AsdexScopeWidget::renderTempAreas(const QSize& renderSize) {
-    if (renderSize.isEmpty()) return;
-    tempAreaRenderer_.renderAreas(
-        viewProjection(renderSize),
-        [this, &renderSize](QPointF worldFeet) {
-            return worldToFramebufferTopLeft(worldFeet, renderSize);
-        });
-}
-
-void AsdexScopeWidget::renderScreenOverlays(const QSize& renderSize) {
-    if (!textRendererReady_) return;
-    if (renderSize.isEmpty()) return;
-
-    const QMatrix4x4 projection = screenProjection();
-    textRenderer_.beginFrame(projection);
-
-    DataBlockSettings datablockSettings;
-    datablockSettings.fontSize = 2;
-    datablockSettings.brightness = 95;
-    datablockSettings.leaderLength = 2;
-    datablockSettings.leaderDirection = LeaderDirection::NE;
-    datablockSettings.timesharePrimary = timesharePrimary_;
-    datablockSettings.alertInProgress = false;
-
-    datablockRenderer_.render(targets_,
-                              projection,
-                              [this, &renderSize](QPointF worldFeet) {
-                                  return worldToScreenLogical(worldFeet, renderSize);
-                              },
-                              [this](const AsdexTarget& target) {
-                                  return isDataBlockVisible(target);
-                              },
-                              textRenderer_,
-                              datablockSettings);
-
-    coastList_.render(textRenderer_, size());
-
-    const QStringList commandLines = datablockEdit_ ? datablockEdit_->displayLines() : QStringList();
-    previewArea_.render(textRenderer_, commandLines);
-    textRenderer_.flush();
-
-    if (datablockEdit_) {
-        previewArea_.renderCommandCursor(screenLineRenderer_,
-                                         textRenderer_,
-                                         *datablockEdit_,
-                                         projection);
-    }
+    renderer_->renderCommandBuffer(commandBuffer);
+    renderer::returnCommandBuffer(commandBuffer);
 }
 
 QSize AsdexScopeWidget::framebufferRenderSize() const {
     const qreal ratio = devicePixelRatioF();
     return QSize(qRound(width() * ratio), qRound(height() * ratio));
+}
+
+std::uint32_t AsdexScopeWidget::fontTextureId(int fontSize) const {
+    return fontTextureIds_.value(fontSize, 0);
 }
 
 QMatrix4x4 AsdexScopeWidget::screenProjection() const {
@@ -922,28 +822,6 @@ QMatrix4x4 AsdexScopeWidget::viewProjection(const QSize& renderSize) const {
     matrix(1, 1) = static_cast<float>(sy);
     matrix(1, 3) = static_cast<float>(-centerFeet_.y() * sy);
     return matrix;
-}
-
-QColor AsdexScopeWidget::colorFor(asdex::VideoMap::Kind kind) const {
-    const bool day = mode_ == asdex::Mode::Day;
-    QColor base;
-
-    switch (kind) {
-        case asdex::VideoMap::Kind::Runway:
-            base = QColor(0, 0, 0);
-            break;
-        case asdex::VideoMap::Kind::Taxiway:
-            base = day ? QColor(47, 47, 47) : QColor(17, 39, 80);
-            break;
-        case asdex::VideoMap::Kind::Apron:
-            base = day ? QColor(73, 73, 73) : QColor(18, 55, 97);
-            break;
-        case asdex::VideoMap::Kind::Structure:
-            base = day ? QColor(100, 100, 100) : QColor(34, 63, 103);
-            break;
-    }
-
-    return asdex::applyBrightness(base);
 }
 
 } // namespace asdex

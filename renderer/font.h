@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QHash>
+#include <QImage>
 #include <QSize>
 #include <QString>
 #include <QStringView>
@@ -38,6 +39,9 @@ public:
     const BitmapFontSize* fontSize(int size) const;
     QSize measureText(QStringView text, int size) const;
     int lineHeight(int size) const;
+    QSize charSize(int size) const;
+    int fontSpacing(int size) const;
+    QImage atlasImage(int size) const;
 
 private:
     QHash<int, BitmapFontSize> sizes_;

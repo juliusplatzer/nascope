@@ -1,6 +1,6 @@
 #pragma once
 
-#include "asdex/render/temp_areas.h"
+#include "asdex/draw_temp_areas.h"
 
 #include <QHash>
 #include <QJsonObject>

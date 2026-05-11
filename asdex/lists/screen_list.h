@@ -6,8 +6,11 @@
 #include <QPointF>
 #include <QSizeF>
 
+#include <cstdint>
+
 namespace renderer {
-class BitmapFontRenderer;
+class BitmapFont;
+class TextBuilder;
 }
 
 namespace asdex {
@@ -33,7 +36,10 @@ public:
 
     const ScreenListStyle& style() const { return style_; }
 
-    void render(renderer::BitmapFontRenderer& textRenderer, const TextBlock& block) const;
+    void render(renderer::TextBuilder& textBuilder,
+                const renderer::BitmapFont& font,
+                std::uint32_t fontTextureId,
+                const TextBlock& block) const;
 
 private:
     ScreenListStyle style_;

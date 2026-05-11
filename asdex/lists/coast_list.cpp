@@ -99,14 +99,17 @@ TextBlock CoastList::buildFullBlock(QDateTime utcNow) const {
     return block;
 }
 
-void CoastList::render(renderer::BitmapFontRenderer& textRenderer, QSize displaySize) const {
+void CoastList::render(renderer::TextBuilder& textBuilder,
+                       const renderer::BitmapFont& font,
+                       std::uint32_t fontTextureId,
+                       QSize displaySize) const {
     if (!visible_) return;
 
     ScreenListStyle actualStyle = style_;
     actualStyle.location = locationForDisplay(displaySize);
 
     ScreenList list(actualStyle);
-    list.render(textRenderer, buildHeaderBlock(QDateTime::currentDateTimeUtc()));
+    list.render(textBuilder, font, fontTextureId, buildHeaderBlock(QDateTime::currentDateTimeUtc()));
 }
 
 } // namespace asdex

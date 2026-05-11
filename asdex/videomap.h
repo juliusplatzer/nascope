@@ -1,6 +1,6 @@
 #pragma once
 
-#include "asdex/render/colors.h"
+#include "asdex/colors.h"
 
 #include <QPointF>
 #include <QRectF>

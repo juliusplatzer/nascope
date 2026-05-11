@@ -7,14 +7,17 @@
 #include <QStringList>
 #include <QVector>
 
+#include <cstdint>
+
 namespace renderer {
-class BitmapFontRenderer;
+class BitmapFont;
+class LinesBuilder;
+class TextBuilder;
 }
 
 namespace asdex {
 
 class DatablockEditCommand;
-class ScreenLineRenderer;
 
 struct PreviewAreaState {
     QString runwayConfigName = QStringLiteral("WEST");
@@ -35,10 +38,12 @@ public:
 
     bool loadDefaultStateFromConfigFile(const QString& path, QString* error = nullptr);
 
-    void render(renderer::BitmapFontRenderer& textRenderer,
+    void render(renderer::TextBuilder& textBuilder,
+                const renderer::BitmapFont& font,
+                std::uint32_t fontTextureId,
                 const QStringList& commandLines = {}) const;
-    void renderCommandCursor(ScreenLineRenderer& lineRenderer,
-                             const renderer::BitmapFontRenderer& textRenderer,
+    void renderCommandCursor(renderer::LinesBuilder& lineBuilder,
+                             const renderer::BitmapFont& font,
                              const DatablockEditCommand& command,
                              const QMatrix4x4& screenProjection) const;
 

@@ -1,6 +1,6 @@
 #include "asdex/window.h"
 
-#include "asdex/render/scope.h"
+#include "asdex/scope.h"
 
 namespace asdex {
 

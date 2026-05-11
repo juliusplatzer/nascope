@@ -1,4 +1,4 @@
-#include "asdex/render/cursors.h"
+#include "asdex/cursors.h"
 
 #include <QByteArray>
 #include <QDir>

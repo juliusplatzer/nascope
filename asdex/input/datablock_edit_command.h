@@ -1,6 +1,6 @@
 #pragma once
 
-#include "asdex/render/targets.h"
+#include "asdex/targets/asdex_target.h"
 
 #include <QChar>
 #include <QString>

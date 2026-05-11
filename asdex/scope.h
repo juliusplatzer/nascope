@@ -7,24 +7,20 @@
 #include "asdex/lists/preview_area.h"
 #include "asdex/notams/runway_closure_cache.h"
 #include "asdex/targets/target_cache.h"
-#include "asdex/render/colors.h"
-#include "asdex/render/cursors.h"
-#include "asdex/render/datablocks.h"
-#include "asdex/render/runway_closures.h"
-#include "asdex/render/screen_line_renderer.h"
-#include "asdex/render/temp_areas.h"
-#include "renderer/text/bitmap_font.h"
-#include "renderer/text/bitmap_font_renderer.h"
-#include "asdex/render/targets.h"
-#include "asdex/render/videomap.h"
+#include "asdex/colors.h"
+#include "asdex/cursors.h"
+#include "asdex/datablock_types.h"
+#include "asdex/draw_runway_closures.h"
+#include "asdex/draw_temp_areas.h"
+#include "asdex/draw_targets.h"
+#include "renderer/font.h"
+#include "asdex/targets/asdex_target.h"
+#include "asdex/videomap.h"
 
 #include <QMatrix4x4>
 #include <QHash>
 #include <QKeyEvent>
 #include <QMouseEvent>
-#include <QOpenGLBuffer>
-#include <QOpenGLShaderProgram>
-#include <QOpenGLVertexArrayObject>
 #include <QOpenGLWidget>
 #include <QPointF>
 #include <QTimer>
@@ -32,7 +28,13 @@
 #include <QWheelEvent>
 
 #include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <optional>
+
+namespace renderer {
+class Renderer;
+}
 
 namespace asdex {
 
@@ -59,15 +61,7 @@ private:
         Hidden,
     };
 
-    struct DrawBatch {
-        asdex::VideoMap::Kind kind = asdex::VideoMap::Kind::Apron;
-        int indexCount = 0;
-        std::size_t indexOffsetBytes = 0;
-    };
-
     void fitMapToView();
-    void initializeShaders();
-    void uploadMapGeometry();
     void updateTargetsFromCache();
     void updateHighlightedTarget(const QPointF& mouseLogical);
     void clearHighlightedTarget();
@@ -81,15 +75,11 @@ private:
     bool defaultDataBlockVisibleForTarget(const AsdexTarget& target) const;
     bool isDataBlockVisible(const AsdexTarget& target) const;
     void toggleDataBlockForTarget(const AsdexTarget& target);
-    void renderVideoMap(const QSize& renderSize);
-    void renderRunwayClosures(const QSize& renderSize);
-    void renderTempAreas(const QSize& renderSize);
-    void renderTargets(const QSize& renderSize);
-    void renderScreenOverlays(const QSize& renderSize);
+    void renderScene(const QSize& renderSize);
     QSize framebufferRenderSize() const;
+    std::uint32_t fontTextureId(int fontSize) const;
     QMatrix4x4 screenProjection() const;
     QMatrix4x4 viewProjection(const QSize& renderSize) const;
-    QColor colorFor(asdex::VideoMap::Kind kind) const;
     QPointF worldToScreenLogical(const QPointF& worldFeet, const QSize& renderSize) const;
     QPointF worldToFramebufferTopLeft(const QPointF& worldFeet, const QSize& renderSize) const;
     QPointF framebufferPoint(const QPointF& logicalPoint) const;
@@ -108,12 +98,10 @@ private:
     asdex::CursorSet cursors_;
     ::asdex::PreviewArea previewArea_;
     renderer::BitmapFont asdexFont_;
-    renderer::BitmapFontRenderer textRenderer_;
-    asdex::TargetRenderer targetRenderer_;
-    RunwayClosureRenderer runwayClosureRenderer_;
-    TempAreaRenderer tempAreaRenderer_;
-    DataBlockRenderer datablockRenderer_;
-    ScreenLineRenderer screenLineRenderer_;
+    std::unique_ptr<renderer::Renderer> renderer_;
+    QHash<int, std::uint32_t> fontTextureIds_;
+    RunwayClosureGeometry runwayClosureGeometry_;
+    TempAreaGeometry tempAreaGeometry_;
     QVector<asdex::AsdexTarget> targets_;
     QHash<QString, DataBlockVisibility> datablockVisibility_;
     QHash<QString, EditedDbFields> pendingDatablockEdits_;
@@ -135,15 +123,9 @@ private:
     QPointF panStartMouseFramebuffer_;
     QPointF panStartCenterFeet_;
 
-    QOpenGLShaderProgram shader_;
-    QOpenGLVertexArrayObject vertexArray_;
-    QOpenGLBuffer vertexBuffer_{QOpenGLBuffer::VertexBuffer};
-    QOpenGLBuffer indexBuffer_{QOpenGLBuffer::IndexBuffer};
-    QVector<DrawBatch> drawBatches_;
-    bool shaderReady_ = false;
-    bool geometryUploaded_ = false;
+    int targetVectorSeconds_ = 5;
     bool fontLoaded_ = false;
-    bool textRendererReady_ = false;
+    bool fontTexturesReady_ = false;
 };
 
 } // namespace asdex

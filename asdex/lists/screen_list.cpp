@@ -1,6 +1,7 @@
 #include "asdex/lists/screen_list.h"
 
-#include "renderer/text/bitmap_font_renderer.h"
+#include "renderer/builders.h"
+#include "renderer/font.h"
 
 #include <algorithm>
 #include <utility>
@@ -23,13 +24,16 @@ QColor applyCrcBrightness(QColor color, int brightness, int minBrightness) {
 ScreenList::ScreenList(ScreenListStyle style)
     : style_(std::move(style)) {}
 
-void ScreenList::render(renderer::BitmapFontRenderer& textRenderer, const TextBlock& block) const {
+void ScreenList::render(renderer::TextBuilder& textBuilder,
+                        const renderer::BitmapFont& font,
+                        std::uint32_t fontTextureId,
+                        const TextBlock& block) const {
     const QPointF screenLocation = style_.location;
     const qreal lineSpacing =
         qreal(block.lineSpacing > 0 ? block.lineSpacing : style_.lineSpacing);
 
     QPointF cursor = screenLocation;
-    const int lineHeight = textRenderer.lineHeight(style_.fontSize);
+    const int lineHeight = font.lineHeight(style_.fontSize);
 
     for (const TextFragment& fragment : block.fragments) {
         const QColor baseColor =
@@ -42,15 +46,15 @@ void ScreenList::render(renderer::BitmapFontRenderer& textRenderer, const TextBl
         textStyle.underlined = fragment.underlined;
 
         if (!fragment.text.isEmpty()) {
-            textRenderer.drawTextTopLeft(QStringView(fragment.text), cursor, textStyle);
+            textBuilder.addText(QStringView(fragment.text), cursor, textStyle, fontTextureId);
         }
 
         if (fragment.newLine) {
             cursor.setX(screenLocation.x());
             cursor.setY(cursor.y() + lineHeight + lineSpacing);
         } else if (!fragment.text.isEmpty()) {
-            cursor.setX(cursor.x() + textRenderer.measureText(QStringView(fragment.text),
-                                                              style_.fontSize).width());
+            cursor.setX(cursor.x() + font.measureText(QStringView(fragment.text),
+                                                      style_.fontSize).width());
         }
     }
 }

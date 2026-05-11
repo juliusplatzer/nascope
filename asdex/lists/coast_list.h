@@ -8,10 +8,12 @@
 #include <QString>
 #include <QVector>
 
+#include <cstdint>
 #include <utility>
 
 namespace renderer {
-class BitmapFontRenderer;
+class BitmapFont;
+class TextBuilder;
 }
 
 namespace asdex {
@@ -42,7 +44,10 @@ public:
 
     void setEntries(QVector<CoastListEntry> entries) { entries_ = std::move(entries); }
 
-    void render(renderer::BitmapFontRenderer& textRenderer, QSize displaySize) const;
+    void render(renderer::TextBuilder& textBuilder,
+                const renderer::BitmapFont& font,
+                std::uint32_t fontTextureId,
+                QSize displaySize) const;
 
 private:
     QPointF locationForDisplay(QSize displaySize) const;

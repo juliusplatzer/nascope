@@ -1,4 +1,4 @@
-#include "renderer/text/bitmap_font.h"
+#include "renderer/font.h"
 
 #include <QFile>
 
@@ -31,6 +31,20 @@ const BitmapGlyph* glyphFor(const BitmapFontSize& fontSize, std::uint32_t codepo
     const int index = it.value();
     if (index < 0 || index >= static_cast<int>(fontSize.glyphs.size())) return nullptr;
     return &fontSize.glyphs[static_cast<std::size_t>(index)];
+}
+
+const BitmapGlyph* representativeGlyph(const BitmapFontSize& fontSize) {
+    constexpr std::uint32_t candidates[] = {U'M', U'0', U'A', U'W'};
+    for (const std::uint32_t codepoint : candidates) {
+        const BitmapGlyph* glyph = glyphFor(fontSize, codepoint);
+        if (glyph && glyph->width > 0 && glyph->height > 0) return glyph;
+    }
+
+    for (const BitmapGlyph& glyph : fontSize.glyphs) {
+        if (glyph.width > 0 && glyph.height > 0) return &glyph;
+    }
+
+    return nullptr;
 }
 
 } // namespace
@@ -173,6 +187,36 @@ QSize BitmapFont::measureText(QStringView text, int size) const {
 int BitmapFont::lineHeight(int size) const {
     const BitmapFontSize* fontSizeData = fontSize(size);
     return fontSizeData ? fontSizeData->lineHeight : 0;
+}
+
+QSize BitmapFont::charSize(int size) const {
+    const BitmapFontSize* fontSizeData = fontSize(size);
+    if (!fontSizeData) return {};
+
+    const BitmapGlyph* glyph = representativeGlyph(*fontSizeData);
+    if (!glyph) return QSize(fontSizeData->lineHeight, fontSizeData->lineHeight);
+
+    return QSize(glyph->width, glyph->height);
+}
+
+int BitmapFont::fontSpacing(int size) const {
+    const BitmapFontSize* fontSizeData = fontSize(size);
+    if (!fontSizeData) return 0;
+
+    const BitmapGlyph* glyph = representativeGlyph(*fontSizeData);
+    return glyph ? std::max(0, glyph->advance - glyph->width) : 0;
+}
+
+QImage BitmapFont::atlasImage(int size) const {
+    const BitmapFontSize* fontSizeData = fontSize(size);
+    if (!fontSizeData || fontSizeData->atlasR8.isEmpty()) return {};
+
+    QImage image(reinterpret_cast<const uchar*>(fontSizeData->atlasR8.constData()),
+                 fontSizeData->atlasWidth,
+                 fontSizeData->atlasHeight,
+                 fontSizeData->atlasWidth,
+                 QImage::Format_Grayscale8);
+    return image.copy();
 }
 
 } // namespace renderer
