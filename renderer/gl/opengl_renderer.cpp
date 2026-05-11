@@ -143,6 +143,43 @@ std::uint32_t OpenGLRenderer::createTextureFromImage(const QImage& image, bool m
     return id;
 }
 
+std::uint32_t OpenGLRenderer::createTextureR8(int width,
+                                              int height,
+                                              const QByteArray& bytes,
+                                              bool magNearest) {
+    if (!functions_ || width <= 0 || height <= 0) return 0;
+    if (bytes.size() < width * height) return 0;
+
+    GLuint texture = 0;
+    functions_->glGenTextures(1, &texture);
+
+    const std::uint32_t id = nextTextureId_++;
+    textures_.insert(id, texture);
+
+    functions_->glBindTexture(GL_TEXTURE_2D, texture);
+    functions_->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    functions_->glTexParameteri(GL_TEXTURE_2D,
+                                GL_TEXTURE_MAG_FILTER,
+                                magNearest ? GL_NEAREST : GL_LINEAR);
+    functions_->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    functions_->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    functions_->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    functions_->glTexImage2D(GL_TEXTURE_2D,
+                             0,
+                             GL_R8,
+                             width,
+                             height,
+                             0,
+                             GL_RED,
+                             GL_UNSIGNED_BYTE,
+                             bytes.constData());
+    functions_->glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+    functions_->glBindTexture(GL_TEXTURE_2D, 0);
+    return id;
+}
+
 void OpenGLRenderer::updateTextureFromImage(std::uint32_t id,
                                             const QImage& image,
                                             bool magNearest) {

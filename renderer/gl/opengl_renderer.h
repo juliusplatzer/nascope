@@ -25,6 +25,10 @@ public:
     void deinitialize() override;
 
     std::uint32_t createTextureFromImage(const QImage& image, bool magNearest) override;
+    std::uint32_t createTextureR8(int width,
+                                  int height,
+                                  const QByteArray& bytes,
+                                  bool magNearest) override;
     void updateTextureFromImage(std::uint32_t id,
                                 const QImage& image,
                                 bool magNearest) override;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QImage>
 #include <QString>
 
@@ -36,6 +37,10 @@ public:
     virtual void deinitialize() = 0;
 
     virtual std::uint32_t createTextureFromImage(const QImage& image, bool magNearest) = 0;
+    virtual std::uint32_t createTextureR8(int width,
+                                          int height,
+                                          const QByteArray& bytes,
+                                          bool magNearest) = 0;
     virtual void updateTextureFromImage(std::uint32_t id,
                                         const QImage& image,
                                         bool magNearest) = 0;

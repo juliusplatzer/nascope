@@ -12,7 +12,6 @@
 #include "renderer/renderer.h"
 
 #include <QDebug>
-#include <QImage>
 #include <QSurfaceFormat>
 #include <QtGlobal>
 
@@ -176,10 +175,14 @@ void AsdexScopeWidget::initializeGL() {
     if (fontLoaded_) {
         const int fontSizes[] = {2, 3};
         for (const int fontSize : fontSizes) {
-            const QImage atlas = asdexFont_.atlasImage(fontSize);
-            if (atlas.isNull()) continue;
+            const renderer::BitmapFontSize* fontSizeData = asdexFont_.fontSize(fontSize);
+            if (!fontSizeData) continue;
 
-            const std::uint32_t textureId = renderer_->createTextureFromImage(atlas, true);
+            const std::uint32_t textureId =
+                renderer_->createTextureR8(fontSizeData->atlasWidth,
+                                           fontSizeData->atlasHeight,
+                                           fontSizeData->atlasR8,
+                                           true);
             if (textureId != 0) fontTextureIds_.insert(fontSize, textureId);
         }
         fontTexturesReady_ = !fontTextureIds_.isEmpty();
