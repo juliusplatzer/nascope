@@ -2,5 +2,6 @@
 <RCC version="1.0">
   <qresource prefix="/">
     <file>chevron.svg</file>
+    <file>menu.css</file>
   </qresource>
 </RCC>
