@@ -23,12 +23,12 @@ Output schema:
       ]
     }
 
-`closedAreas` / `restrictionAreas` are captured for visibility today; the
-C++ side currently renders runway closures plus supported taxiway closed areas.
+`closedAreas` / `restrictionAreas` are consumed by the C++ scope for supported
+taxiway temp areas.
 
 Usage:
-    python3 reader/notams/scrape.py KSFO --output -        # stdout (scope consumes this)
-    python3 reader/notams/scrape.py KJFK --output kjfk.json # local inspection
+    python3 tools/notams/scrape.py KSFO --output -        # stdout (scope consumes this)
+    python3 tools/notams/scrape.py KJFK --output kjfk.json # local inspection
 
 Requirements: pip install selenium webdriver-manager
 """

@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cmath>
+#include <utility>
 
 namespace asdex {
 namespace {
@@ -136,7 +137,28 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
     });
     connect(&runwayClosureCache_, &::asdex::RunwayClosureCache::changed, this, [this] {
         runwayClosureRenderer_.setClosedRunways(runwayClosureCache_.closedRunways());
-        tempAreaRenderer_.setClosedAreas(runwayClosureCache_.closedTempAreas());
+
+        QVector<TempArea> areas;
+        areas.reserve(runwayClosureCache_.closedTempAreas().size()
+                      + runwayClosureCache_.restrictedTempAreas().size()
+                      + restrictedTempAreas_.size());
+
+        for (TempArea area : runwayClosureCache_.closedTempAreas()) {
+            area.type = TempAreaType::ClosedArea;
+            areas.push_back(area);
+        }
+
+        for (TempArea area : runwayClosureCache_.restrictedTempAreas()) {
+            area.type = TempAreaType::RestrictedArea;
+            areas.push_back(area);
+        }
+
+        for (TempArea area : restrictedTempAreas_) {
+            area.type = TempAreaType::RestrictedArea;
+            areas.push_back(area);
+        }
+
+        tempAreaRenderer_.setAreas(std::move(areas));
         update();
     });
 
@@ -731,7 +753,7 @@ void AsdexScopeWidget::renderRunwayClosures(const QSize& renderSize) {
 
 void AsdexScopeWidget::renderTempAreas(const QSize& renderSize) {
     if (renderSize.isEmpty()) return;
-    tempAreaRenderer_.renderClosedAreas(
+    tempAreaRenderer_.renderAreas(
         viewProjection(renderSize),
         [this, &renderSize](QPointF worldFeet) {
             return worldToFramebufferTopLeft(worldFeet, renderSize);

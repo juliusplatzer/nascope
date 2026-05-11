@@ -95,10 +95,17 @@ QVector4D colorVector(const QColor& color) {
     return QVector4D(color.redF(), color.greenF(), color.blueF(), color.alphaF());
 }
 
-QColor areaColor(bool highlighted) {
-    return applyBrightness(highlighted ? QColor(0, 0, 255) : QColor(255, 0, 0),
-                           kTempMapAreasBrightness,
-                           kTempMapAreasMinBrightness);
+QColor areaColor(TempAreaType type, bool highlighted) {
+    QColor base;
+    if (highlighted) {
+        base = QColor(0, 0, 255);
+    } else if (type == TempAreaType::ClosedArea) {
+        base = QColor(255, 0, 0);
+    } else {
+        base = QColor(255, 255, 0);
+    }
+
+    return applyBrightness(base, kTempMapAreasBrightness, kTempMapAreasMinBrightness);
 }
 
 double dot(const QPointF& a, const QPointF& b) {
@@ -378,8 +385,8 @@ void TempAreaRenderer::deinitialize() {
     dirty_ = true;
 }
 
-void TempAreaRenderer::setClosedAreas(QVector<TempArea> areas) {
-    closedAreas_ = std::move(areas);
+void TempAreaRenderer::setAreas(QVector<TempArea> areas) {
+    areas_ = std::move(areas);
     dirty_ = true;
 }
 
@@ -423,8 +430,8 @@ void TempAreaRenderer::clearMeshes() {
 void TempAreaRenderer::rebuildMeshes() {
     clearMeshes();
 
-    meshes_.reserve(std::size_t(closedAreas_.size()));
-    for (const TempArea& area : closedAreas_) {
+    meshes_.reserve(std::size_t(areas_.size()));
+    for (const TempArea& area : areas_) {
         if (area.polygonFeet.size() < 3) continue;
 
         auto mesh = std::make_unique<AreaMesh>();
@@ -441,6 +448,7 @@ void TempAreaRenderer::rebuildMeshes() {
 
 void TempAreaRenderer::uploadAreaMesh(AreaMesh& mesh, const TempArea& area) {
     mesh.id = area.id;
+    mesh.type = area.type;
     mesh.polygonFeet = area.polygonFeet;
     mesh.highlighted = area.highlighted;
 
@@ -495,6 +503,12 @@ void TempAreaRenderer::rebuildVisualGroups() {
             const EdgeRecord& first = edges.at(i);
             const EdgeRecord& second = edges.at(j);
             if (first.meshIndex == second.meshIndex) continue;
+
+            const AreaMesh& firstMesh = *meshes_[std::size_t(first.meshIndex)];
+            const AreaMesh& secondMesh = *meshes_[std::size_t(second.meshIndex)];
+
+            if (firstMesh.type != secondMesh.type) continue;
+            if (firstMesh.highlighted != secondMesh.highlighted) continue;
             if (!edgesAreAdjacent(first, second)) continue;
 
             disjointSet.unite(first.meshIndex, second.meshIndex);
@@ -523,6 +537,7 @@ void TempAreaRenderer::rebuildVisualGroups() {
         meshes_[meshIndex]->groupIndex = groupIndex;
 
         AreaGroup& group = *groups_[std::size_t(groupIndex)];
+        group.type = meshes_[meshIndex]->type;
         group.meshIndices.push_back(meshIndex);
         group.highlighted = group.highlighted || meshes_[meshIndex]->highlighted;
         if (group.meshIndices.size() == 1 && !meshes_[meshIndex]->polygonFeet.isEmpty()) {
@@ -569,7 +584,7 @@ void TempAreaRenderer::uploadGroupOutline(AreaGroup& group,
     group.outlineVertexCount = vertices.size();
 }
 
-void TempAreaRenderer::renderClosedAreas(
+void TempAreaRenderer::renderAreas(
     const QMatrix4x4& worldProjection,
     const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft) {
     if (!ready_) return;
@@ -584,21 +599,27 @@ void TempAreaRenderer::renderClosedAreas(
     f->glDisable(GL_DITHER);
     f->glDisable(GL_DEPTH_TEST);
 
-    for (std::unique_ptr<AreaGroup>& group : groups_) {
-        if (group->meshIndices.isEmpty()) continue;
+    auto renderType = [&](TempAreaType type) {
+        for (std::unique_ptr<AreaGroup>& group : groups_) {
+            if (group->meshIndices.isEmpty()) continue;
+            if (group->type != type) continue;
 
-        const QColor color = areaColor(group->highlighted);
-        const QPointF firstScreen = worldToFramebufferTopLeft(group->hatchOriginFeet);
-        const float offset =
-            -std::fmod(float(firstScreen.x() + 4.0 * firstScreen.y()), 50.0f);
+            const QColor color = areaColor(group->type, group->highlighted);
+            const QPointF firstScreen = worldToFramebufferTopLeft(group->hatchOriginFeet);
+            const float offset =
+                -std::fmod(float(firstScreen.x() + 4.0 * firstScreen.y()), 50.0f);
 
-        for (int meshIndex : group->meshIndices) {
-            if (meshIndex < 0 || meshIndex >= int(meshes_.size())) continue;
-            drawFill(*meshes_[std::size_t(meshIndex)], worldProjection, color, offset);
+            drawOutline(*group, worldProjection, color);
+
+            for (int meshIndex : group->meshIndices) {
+                if (meshIndex < 0 || meshIndex >= int(meshes_.size())) continue;
+                drawFill(*meshes_[std::size_t(meshIndex)], worldProjection, color, offset);
+            }
         }
+    };
 
-        drawOutline(*group, worldProjection, color);
-    }
+    renderType(TempAreaType::RestrictedArea);
+    renderType(TempAreaType::ClosedArea);
 }
 
 void TempAreaRenderer::drawFill(AreaMesh& mesh,

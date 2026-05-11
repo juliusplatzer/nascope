@@ -23,6 +23,7 @@ public:
 
     const QSet<QString>& closedRunways() const { return closedRunways_; }
     const QVector<TempArea>& closedTempAreas() const { return closedTempAreas_; }
+    const QVector<TempArea>& restrictedTempAreas() const { return restrictedTempAreas_; }
     QString airport() const { return icao_; }
 
     bool loadSurfaceFile(const QString& path,
@@ -44,7 +45,10 @@ private:
 
     void handleFinished(int exitCode, QProcess::ExitStatus exitStatus);
     void handlePayload(const QByteArray& bytes);
-    void rebuildClosedTempAreas();
+    void rebuildTempAreas();
+    QVector<TempArea> buildTempAreas(const QList<ClosedAreaClosure>& closures,
+                                     TempAreaType type,
+                                     const QString& logLabel) const;
 
     QString icao_;
     QString scraperPath_;
@@ -52,11 +56,13 @@ private:
     QProcess process_;
     QSet<QString> closedRunways_;
     QList<ClosedAreaClosure> closedAreaClosures_;
+    QList<ClosedAreaClosure> restrictedAreaClosures_;
     QJsonObject surfaceJson_;
     QVector<QVector<QPointF>> twysByIndexFeet_;
     QVector<QString> twyIdsByIndex_;
     QHash<QString, QList<int>> exactTwyIndices_;
     QVector<TempArea> closedTempAreas_;
+    QVector<TempArea> restrictedTempAreas_;
 };
 
 } // namespace asdex

@@ -16,8 +16,14 @@
 
 namespace asdex {
 
+enum class TempAreaType {
+    RestrictedArea,
+    ClosedArea,
+};
+
 struct TempArea {
     QString id;
+    TempAreaType type = TempAreaType::ClosedArea;
     QVector<QPointF> polygonFeet;
     bool highlighted = false;
 };
@@ -38,15 +44,16 @@ public:
     void initialize();
     void deinitialize();
 
-    void setClosedAreas(QVector<TempArea> areas);
+    void setAreas(QVector<TempArea> areas);
 
-    void renderClosedAreas(
+    void renderAreas(
         const QMatrix4x4& worldProjection,
         const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft);
 
 private:
     struct AreaMesh {
         QString id;
+        TempAreaType type = TempAreaType::ClosedArea;
         QVector<QPointF> polygonFeet;
         bool highlighted = false;
         int groupIndex = -1;
@@ -58,6 +65,7 @@ private:
     };
 
     struct AreaGroup {
+        TempAreaType type = TempAreaType::ClosedArea;
         QVector<int> meshIndices;
         QPointF hatchOriginFeet;
         bool highlighted = false;
@@ -84,7 +92,7 @@ private:
                      const QMatrix4x4& worldProjection,
                      const QColor& color);
 
-    QVector<TempArea> closedAreas_;
+    QVector<TempArea> areas_;
     std::vector<std::unique_ptr<AreaMesh>> meshes_;
     std::vector<std::unique_ptr<AreaGroup>> groups_;
 

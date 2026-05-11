@@ -520,7 +520,9 @@ void RunwayClosureCache::setAirport(const QString& icao) {
     icao_ = next;
     closedRunways_.clear();
     closedAreaClosures_.clear();
+    restrictedAreaClosures_.clear();
     closedTempAreas_.clear();
+    restrictedTempAreas_.clear();
     emit changed();
     refreshNow();
 }
@@ -566,7 +568,7 @@ bool RunwayClosureCache::loadSurfaceFile(const QString& path,
         exactTwyIndices_[id].append(i);
     }
 
-    rebuildClosedTempAreas();
+    rebuildTempAreas();
     return true;
 }
 
@@ -611,41 +613,66 @@ void RunwayClosureCache::handlePayload(const QByteArray& bytes) {
     const QSet<QString> nextRunways =
         runwaySetFromJson(root.value(QStringLiteral("rwyClosures")).toArray());
 
-    QList<ClosedAreaClosure> nextClosedAreas;
+    auto parseAreaClosures = [](const QJsonArray& values) {
+        QList<ClosedAreaClosure> closures;
+
+        for (const QJsonValue& value : values) {
+            const QJsonObject object = value.toObject();
+            const QString id =
+                normalizedTaxiwayToken(object.value(QStringLiteral("id")).toString());
+            if (id.isEmpty() || !isSupportedClosedArea(object)) continue;
+
+            ClosedAreaClosure closure;
+            closure.id = id;
+            closure.btnFrom = object.value(QStringLiteral("btnFrom")).toString().trimmed();
+            closure.btnTo = object.value(QStringLiteral("btnTo")).toString().trimmed();
+            closures.append(closure);
+        }
+
+        return closures;
+    };
+
     QJsonArray closedAreas = root.value(QStringLiteral("closedAreas")).toArray();
     if (closedAreas.isEmpty() && root.contains(QStringLiteral("twyClosures"))) {
         closedAreas = root.value(QStringLiteral("twyClosures")).toArray();
     }
 
-    for (const QJsonValue& value : closedAreas) {
-        const QJsonObject object = value.toObject();
-        const QString id = normalizedTaxiwayToken(object.value(QStringLiteral("id")).toString());
-        if (id.isEmpty() || !isSupportedClosedArea(object)) continue;
-
-        ClosedAreaClosure closure;
-        closure.id = id;
-        closure.btnFrom = object.value(QStringLiteral("btnFrom")).toString().trimmed();
-        closure.btnTo = object.value(QStringLiteral("btnTo")).toString().trimmed();
-        nextClosedAreas.append(closure);
-    }
+    const QList<ClosedAreaClosure> nextClosedAreas = parseAreaClosures(closedAreas);
+    const QList<ClosedAreaClosure> nextRestrictedAreas =
+        parseAreaClosures(root.value(QStringLiteral("restrictionAreas")).toArray());
 
     closedRunways_ = nextRunways;
-    closedAreaClosures_ = std::move(nextClosedAreas);
-    rebuildClosedTempAreas();
+    closedAreaClosures_ = nextClosedAreas;
+    restrictedAreaClosures_ = nextRestrictedAreas;
+    rebuildTempAreas();
     qInfo().noquote() << "[asdex] runway closures" << icao_
                       << QStringList(closedRunways_.values()).join(",");
     qInfo().noquote() << "[asdex] closed temp areas" << icao_ << closedTempAreas_.size();
+    qInfo().noquote() << "[asdex] restricted temp areas" << icao_
+                      << restrictedTempAreas_.size();
     emit changed();
 }
 
-void RunwayClosureCache::rebuildClosedTempAreas() {
+void RunwayClosureCache::rebuildTempAreas() {
+    closedTempAreas_ = buildTempAreas(closedAreaClosures_,
+                                      TempAreaType::ClosedArea,
+                                      QStringLiteral("closed area"));
+    restrictedTempAreas_ = buildTempAreas(restrictedAreaClosures_,
+                                          TempAreaType::RestrictedArea,
+                                          QStringLiteral("restricted area"));
+}
+
+QVector<TempArea> RunwayClosureCache::buildTempAreas(
+    const QList<ClosedAreaClosure>& closures,
+    TempAreaType type,
+    const QString& logLabel) const {
     QSet<int> closedTwyIndices;
 
-    for (const ClosedAreaClosure& closure : closedAreaClosures_) {
+    for (const ClosedAreaClosure& closure : closures) {
         if (closure.btnFrom.isEmpty() && closure.btnTo.isEmpty()) {
             const auto it = exactTwyIndices_.constFind(closure.id);
             if (it == exactTwyIndices_.constEnd()) {
-                qDebug().noquote() << "[asdex] no exact surface match for closed area"
+                qDebug().noquote() << "[asdex] no exact surface match for" << logLabel
                                    << closure.id;
                 continue;
             }
@@ -656,7 +683,7 @@ void RunwayClosureCache::rebuildClosedTempAreas() {
         const QJsonArray hits =
             getClosedTwysFromNotam(surfaceJson_, closure.id, closure.btnFrom, closure.btnTo);
         if (hits.isEmpty()) {
-            qDebug().noquote() << "[asdex] no surface path for closed area"
+            qDebug().noquote() << "[asdex] no surface path for" << logLabel
                                << closure.id << "between" << closure.btnFrom
                                << "and" << closure.btnTo;
             continue;
@@ -682,11 +709,12 @@ void RunwayClosureCache::rebuildClosedTempAreas() {
 
         TempArea area;
         area.id = index < twyIdsByIndex_.size() ? twyIdsByIndex_.at(index) : QString();
+        area.type = type;
         area.polygonFeet = twysByIndexFeet_.at(index);
         next.push_back(std::move(area));
     }
 
-    closedTempAreas_ = std::move(next);
+    return next;
 }
 
 } // namespace asdex

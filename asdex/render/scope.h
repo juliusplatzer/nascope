@@ -117,7 +117,7 @@ private:
     QVector<asdex::AsdexTarget> targets_;
     QHash<QString, DataBlockVisibility> datablockVisibility_;
     QHash<QString, EditedDbFields> pendingDatablockEdits_;
-    QVector<TempArea> closedTempAreas_;
+    QVector<TempArea> restrictedTempAreas_;
     CoastList coastList_;
     QString highlightedTargetId_;
     CommandType commandType_ = CommandType::None;
