@@ -35,8 +35,7 @@ bool isHeavyWake(QStringView wake) {
 
     const QChar c = wake.at(0).toUpper();
     return c == QLatin1Char('A') || c == QLatin1Char('B') || c == QLatin1Char('C')
-        || c == QLatin1Char('D') || c == QLatin1Char('E') || c == QLatin1Char('H')
-        || c == QLatin1Char('J');
+        || c == QLatin1Char('D') || c == QLatin1Char('E');
 }
 
 } // namespace
