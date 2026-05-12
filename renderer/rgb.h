@@ -1,4 +1,5 @@
-#pragma once
+#ifndef RENDERER_RGB_H_
+#define RENDERER_RGB_H_
 
 #include <QColor>
 
@@ -31,3 +32,5 @@ struct RGBA {
 };
 
 } // namespace renderer
+
+#endif  // RENDERER_RGB_H_

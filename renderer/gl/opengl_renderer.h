@@ -1,4 +1,5 @@
-#pragma once
+#ifndef RENDERER_GL_OPENGL_RENDERER_H_
+#define RENDERER_GL_OPENGL_RENDERER_H_
 
 #include "renderer/rgb.h"
 #include "renderer/renderer.h"
@@ -60,3 +61,5 @@ private:
 };
 
 } // namespace renderer
+
+#endif  // RENDERER_GL_OPENGL_RENDERER_H_

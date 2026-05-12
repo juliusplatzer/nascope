@@ -1,4 +1,5 @@
-#pragma once
+#ifndef ASDEX_SCOPE_H_
+#define ASDEX_SCOPE_H_
 
 #include "asdex/atiscache.h"
 #include "asdex/cmdslew.h"
@@ -125,3 +126,5 @@ private:
 };
 
 } // namespace asdex
+
+#endif  // ASDEX_SCOPE_H_

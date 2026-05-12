@@ -1,4 +1,5 @@
-#pragma once
+#ifndef ASDEX_DATABLOCKS_H_
+#define ASDEX_DATABLOCKS_H_
 
 #include "asdex/targetcache.h"
 
@@ -63,3 +64,5 @@ void drawDatablocks(const QVector<AsdexTarget>& targets,
                     const DataBlockSettings& settings);
 
 } // namespace asdex
+
+#endif  // ASDEX_DATABLOCKS_H_

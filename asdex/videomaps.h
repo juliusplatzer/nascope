@@ -1,4 +1,5 @@
-#pragma once
+#ifndef ASDEX_VIDEOMAPS_H_
+#define ASDEX_VIDEOMAPS_H_
 
 #include "asdex/colors.h"
 
@@ -49,3 +50,5 @@ private:
 void drawVideoMap(const VideoMap& map, renderer::CommandBuffer* commandBuffer, Mode mode);
 
 } // namespace asdex
+
+#endif  // ASDEX_VIDEOMAPS_H_

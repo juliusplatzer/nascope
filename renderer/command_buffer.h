@@ -1,4 +1,5 @@
-#pragma once
+#ifndef RENDERER_COMMAND_BUFFER_H_
+#define RENDERER_COMMAND_BUFFER_H_
 
 #include "renderer/rgb.h"
 
@@ -122,3 +123,5 @@ CommandBuffer* getCommandBuffer();
 void returnCommandBuffer(CommandBuffer* commandBuffer);
 
 } // namespace renderer
+
+#endif  // RENDERER_COMMAND_BUFFER_H_

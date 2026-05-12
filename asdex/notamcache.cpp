@@ -27,6 +27,7 @@ namespace asdex {
 namespace {
 
 constexpr int kRefreshIntervalMs = 10 * 60 * 1000;
+constexpr int kScraperTimeoutMs = 90 * 1000;
 constexpr double kTaxiwayAdjacencyToleranceM = 2.0;
 constexpr double kRunwayEndpointToleranceM = 10.0;
 constexpr double kEarthRadiusM = 6371008.8;
@@ -500,17 +501,41 @@ RunwayClosureCache::RunwayClosureCache(QString icao, QString scraperPath, QObjec
     icao_ = icao_.toUpper();
 
     refreshTimer_.setInterval(kRefreshIntervalMs);
+    processTimeout_.setSingleShot(true);
+    processTimeout_.setInterval(kScraperTimeoutMs);
+
     connect(&refreshTimer_, &QTimer::timeout, this, &RunwayClosureCache::refreshNow);
+    connect(&processTimeout_, &QTimer::timeout, this, [this] {
+        if (process_.state() == QProcess::NotRunning) return;
+
+        qWarning().noquote() << "[asdex] NOTAM scraper timed out:" << icao_;
+        process_.kill();
+    });
     connect(&process_,
             QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this,
             &RunwayClosureCache::handleFinished);
     connect(&process_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+        if (stoppingProcess_) return;
         qWarning().noquote() << "[asdex] NOTAM scraper process error:" << icao_ << error;
     });
 
     refreshTimer_.start();
     QTimer::singleShot(0, this, &RunwayClosureCache::refreshNow);
+}
+
+RunwayClosureCache::~RunwayClosureCache() {
+    refreshTimer_.stop();
+    processTimeout_.stop();
+
+    if (process_.state() == QProcess::NotRunning) return;
+
+    stoppingProcess_ = true;
+    process_.terminate();
+    if (!process_.waitForFinished(1500)) {
+        process_.kill();
+        process_.waitForFinished(1500);
+    }
 }
 
 void RunwayClosureCache::setAirport(const QString& icao) {
@@ -582,14 +607,23 @@ void RunwayClosureCache::refreshNow() {
 
     process_.setProgram(QStringLiteral("python3"));
     process_.setArguments({scraperPath_, icao_, QStringLiteral("--output"), QStringLiteral("-")});
+    stoppingProcess_ = false;
     process_.start();
+    processTimeout_.start();
 }
 
 void RunwayClosureCache::handleFinished(int exitCode, QProcess::ExitStatus exitStatus) {
+    processTimeout_.stop();
+
     const QByteArray stdoutBytes = process_.readAllStandardOutput();
     const QByteArray stderrBytes = process_.readAllStandardError();
     if (!stderrBytes.trimmed().isEmpty()) {
         qInfo().noquote() << QString::fromUtf8(stderrBytes).trimmed();
+    }
+
+    if (stoppingProcess_) {
+        stoppingProcess_ = false;
+        return;
     }
 
     if (exitStatus != QProcess::NormalExit || exitCode != 0) {

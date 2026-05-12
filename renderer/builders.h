@@ -1,4 +1,5 @@
-#pragma once
+#ifndef RENDERER_BUILDERS_H_
+#define RENDERER_BUILDERS_H_
 
 #include "renderer/command_buffer.h"
 #include "renderer/font.h"
@@ -148,3 +149,5 @@ TextBuilder* getTextBuilder();
 void returnTextBuilder(TextBuilder* builder);
 
 } // namespace renderer
+
+#endif  // RENDERER_BUILDERS_H_

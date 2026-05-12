@@ -1,4 +1,5 @@
-#pragma once
+#ifndef ASDEX_TARGETCACHE_H_
+#define ASDEX_TARGETCACHE_H_
 
 #include <QHash>
 #include <QList>
@@ -104,3 +105,5 @@ private:
 };
 
 } // namespace asdex
+
+#endif  // ASDEX_TARGETCACHE_H_

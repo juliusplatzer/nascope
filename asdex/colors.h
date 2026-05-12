@@ -1,4 +1,5 @@
-#pragma once
+#ifndef ASDEX_COLORS_H_
+#define ASDEX_COLORS_H_
 
 #include <QColor>
 
@@ -34,3 +35,5 @@ inline QColor backgroundColor(Mode mode) {
 }
 
 } // namespace asdex
+
+#endif  // ASDEX_COLORS_H_

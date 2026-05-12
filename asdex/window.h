@@ -1,4 +1,5 @@
-#pragma once
+#ifndef ASDEX_WINDOW_H_
+#define ASDEX_WINDOW_H_
 
 #include <QMainWindow>
 #include <QString>
@@ -11,3 +12,5 @@ public:
 };
 
 } // namespace asdex
+
+#endif  // ASDEX_WINDOW_H_

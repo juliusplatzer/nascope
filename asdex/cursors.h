@@ -1,4 +1,5 @@
-#pragma once
+#ifndef ASDEX_CURSORS_H_
+#define ASDEX_CURSORS_H_
 
 #include <QCursor>
 #include <QHash>
@@ -42,3 +43,5 @@ private:
 };
 
 } // namespace asdex
+
+#endif  // ASDEX_CURSORS_H_

@@ -1,4 +1,5 @@
-#pragma once
+#ifndef ASDEX_NOTAMCACHE_H_
+#define ASDEX_NOTAMCACHE_H_
 
 #include "asdex/tempdata.h"
 
@@ -20,6 +21,7 @@ class RunwayClosureCache : public QObject {
 
 public:
     RunwayClosureCache(QString icao, QString scraperPath, QObject* parent = nullptr);
+    ~RunwayClosureCache() override;
 
     const QSet<QString>& closedRunways() const { return closedRunways_; }
     const QVector<TempArea>& closedTempAreas() const { return closedTempAreas_; }
@@ -53,6 +55,7 @@ private:
     QString icao_;
     QString scraperPath_;
     QTimer refreshTimer_;
+    QTimer processTimeout_;
     QProcess process_;
     QSet<QString> closedRunways_;
     QList<ClosedAreaClosure> closedAreaClosures_;
@@ -63,6 +66,9 @@ private:
     QHash<QString, QList<int>> exactTwyIndices_;
     QVector<TempArea> closedTempAreas_;
     QVector<TempArea> restrictedTempAreas_;
+    bool stoppingProcess_ = false;
 };
 
 } // namespace asdex
+
+#endif  // ASDEX_NOTAMCACHE_H_

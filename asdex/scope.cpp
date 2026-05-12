@@ -43,11 +43,10 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
     : QOpenGLWidget(parent),
       airport_(std::move(airport)),
       map_(asdex::VideoMap::load(airport_)),
-      targetCache_(airport_, this),
-      atisCache_(airport_, this),
+      targetCache_(airport_),
+      atisCache_(airport_),
       runwayClosureCache_(airport_,
-                           utils::findProjectRelativeFile(QStringLiteral("asdex/notams.py")),
-                           this) {
+                           utils::findProjectRelativeFile(QStringLiteral("asdex/notams.py"))) {
     QSurfaceFormat fmt = format();
     fmt.setSamples(0);
     setFormat(fmt);

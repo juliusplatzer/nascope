@@ -1,4 +1,5 @@
-#pragma once
+#ifndef RENDERER_RENDERER_H_
+#define RENDERER_RENDERER_H_
 
 #include <QByteArray>
 #include <QImage>
@@ -53,3 +54,5 @@ public:
 std::unique_ptr<Renderer> makeOpenGLRenderer();
 
 } // namespace renderer
+
+#endif  // RENDERER_RENDERER_H_

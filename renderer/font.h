@@ -1,4 +1,5 @@
-#pragma once
+#ifndef RENDERER_FONT_H_
+#define RENDERER_FONT_H_
 
 #include <QByteArray>
 #include <QHash>
@@ -48,3 +49,5 @@ private:
 };
 
 } // namespace renderer
+
+#endif  // RENDERER_FONT_H_

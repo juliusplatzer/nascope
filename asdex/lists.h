@@ -1,4 +1,5 @@
-#pragma once
+#ifndef ASDEX_LISTS_H_
+#define ASDEX_LISTS_H_
 
 #include <QColor>
 #include <QDateTime>
@@ -164,3 +165,5 @@ private:
 };
 
 } // namespace asdex
+
+#endif  // ASDEX_LISTS_H_

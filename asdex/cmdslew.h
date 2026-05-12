@@ -1,4 +1,5 @@
-#pragma once
+#ifndef ASDEX_CMDSLEW_H_
+#define ASDEX_CMDSLEW_H_
 
 #include "asdex/targetcache.h"
 
@@ -72,3 +73,5 @@ private:
 };
 
 } // namespace asdex
+
+#endif  // ASDEX_CMDSLEW_H_

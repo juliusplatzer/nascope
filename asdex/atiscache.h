@@ -1,4 +1,5 @@
-#pragma once
+#ifndef ASDEX_ATISCACHE_H_
+#define ASDEX_ATISCACHE_H_
 
 #include <QDateTime>
 #include <QNetworkAccessManager>
@@ -44,3 +45,5 @@ private:
 };
 
 } // namespace asdex
+
+#endif  // ASDEX_ATISCACHE_H_

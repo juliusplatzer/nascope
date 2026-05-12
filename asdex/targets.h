@@ -1,4 +1,5 @@
-#pragma once
+#ifndef ASDEX_TARGETS_H_
+#define ASDEX_TARGETS_H_
 
 #include "asdex/colors.h"
 #include "asdex/targetcache.h"
@@ -21,3 +22,5 @@ void drawTargets(const QVector<AsdexTarget>& targets,
 int clampedTargetVectorSeconds(int seconds);
 
 } // namespace asdex
+
+#endif  // ASDEX_TARGETS_H_

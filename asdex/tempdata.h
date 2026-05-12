@@ -1,4 +1,5 @@
-#pragma once
+#ifndef ASDEX_TEMPDATA_H_
+#define ASDEX_TEMPDATA_H_
 
 #include <QMatrix4x4>
 #include <QPointF>
@@ -93,3 +94,5 @@ void drawTempAreas(const TempAreaGeometry& geometry,
                    const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft);
 
 } // namespace asdex
+
+#endif  // ASDEX_TEMPDATA_H_
