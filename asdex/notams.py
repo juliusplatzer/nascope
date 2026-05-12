@@ -37,13 +37,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -54,6 +56,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 BASE_URL = "https://notams.online/icao/{icao}"
 WAIT_TIMEOUT = 30
+PAGE_LOAD_TIMEOUT = 45
 EXTRA_WAIT = 3.0
 FETCH_ATTEMPTS = 2
 LOAD_SELECTOR = ".notam-card, .raw-text"
@@ -78,17 +81,47 @@ TWY_BTN_RE = re.compile(
 TWY_PLAIN_RE = re.compile(rf"\bTWY\s+(\S+)\s+CLSD{CONDITION_SUFFIX}\b")
 
 
+def find_cached_chromedriver() -> str | None:
+    explicit = os.environ.get("NASCOPE_CHROMEDRIVER")
+    if explicit and Path(explicit).is_file():
+        return explicit
+
+    cache_root = Path.home() / ".wdm" / "drivers" / "chromedriver"
+    if not cache_root.is_dir():
+        return None
+
+    candidates = [
+        path for path in cache_root.rglob("chromedriver")
+        if path.is_file() and os.access(path, os.X_OK)
+    ]
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    return str(candidates[0])
+
+
+def chromedriver_service() -> Service:
+    cached = find_cached_chromedriver()
+    if cached:
+        print(f"[notams] using cached chromedriver {cached}", file=sys.stderr)
+        return Service(cached)
+
+    print("[notams] resolving chromedriver with webdriver-manager", file=sys.stderr)
+    return Service(ChromeDriverManager().install())
+
+
 def build_driver() -> webdriver.Chrome:
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--window-size=1280,900")
+    options.add_argument("--disable-gpu")
     options.add_argument(
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     )
-    service = Service(ChromeDriverManager().install())
-    return webdriver.Chrome(service=service, options=options)
+    return webdriver.Chrome(service=chromedriver_service(), options=options)
 
 
 def fetch_raw_notams(icao: str) -> list[str]:
@@ -96,8 +129,14 @@ def fetch_raw_notams(icao: str) -> list[str]:
     print(f"[notams] opening {url}", file=sys.stderr)
 
     for attempt in range(1, FETCH_ATTEMPTS + 1):
-        driver = build_driver()
+        driver = None
         try:
+            print(f"[notams] launching Chrome (attempt {attempt}/{FETCH_ATTEMPTS})", file=sys.stderr)
+            driver = build_driver()
+            driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
+            driver.set_script_timeout(15)
+
+            print(f"[notams] loading page (attempt {attempt}/{FETCH_ATTEMPTS})", file=sys.stderr)
             driver.get(url)
             try:
                 WebDriverWait(driver, WAIT_TIMEOUT).until(
@@ -127,8 +166,21 @@ def fetch_raw_notams(icao: str) -> list[str]:
                 f"(attempt {attempt}/{FETCH_ATTEMPTS})",
                 file=sys.stderr,
             )
+        except TimeoutException as exc:
+            print(
+                f"[notams] page load timed out after {PAGE_LOAD_TIMEOUT}s "
+                f"(attempt {attempt}/{FETCH_ATTEMPTS}): {exc.msg}",
+                file=sys.stderr,
+            )
+        except WebDriverException as exc:
+            print(
+                f"[notams] webdriver error "
+                f"(attempt {attempt}/{FETCH_ATTEMPTS}): {exc.msg}",
+                file=sys.stderr,
+            )
         finally:
-            driver.quit()
+            if driver is not None:
+                driver.quit()
 
     return []
 
