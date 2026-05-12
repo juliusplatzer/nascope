@@ -1,21 +1,17 @@
 #pragma once
 
-#include "asdex/atis/atis_cache.h"
-#include "asdex/input/asdex_command.h"
-#include "asdex/input/datablock_edit_command.h"
-#include "asdex/lists/coast_list.h"
-#include "asdex/lists/preview_area.h"
-#include "asdex/notams/runway_closure_cache.h"
-#include "asdex/targets/target_cache.h"
+#include "asdex/atiscache.h"
+#include "asdex/cmdslew.h"
+#include "asdex/lists.h"
+#include "asdex/notamcache.h"
+#include "asdex/targetcache.h"
 #include "asdex/colors.h"
 #include "asdex/cursors.h"
-#include "asdex/datablock_types.h"
-#include "asdex/draw_runway_closures.h"
-#include "asdex/draw_temp_areas.h"
-#include "asdex/draw_targets.h"
+#include "asdex/datablocks.h"
+#include "asdex/tempdata.h"
+#include "asdex/targets.h"
 #include "renderer/font.h"
-#include "asdex/targets/asdex_target.h"
-#include "asdex/videomap.h"
+#include "asdex/videomaps.h"
 
 #include <QMatrix4x4>
 #include <QHash>

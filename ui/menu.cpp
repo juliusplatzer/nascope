@@ -15,6 +15,8 @@
 #include <QStyleFactory>
 #include <QVBoxLayout>
 
+#include "utils/resources.h"
+
 #include <iostream>
 
 namespace {
@@ -30,38 +32,8 @@ constexpr char kStatePast[]    = "past";
 constexpr char kStateCurrent[] = "current";
 [[maybe_unused]] constexpr char kStateFuture[]  = "future";
 
-QStringList candidateRoots() {
-    QStringList roots;
-    const auto add = [&roots](const QString& path) {
-        if (path.isEmpty()) return;
-        const QString canonical = QDir(path).canonicalPath();
-        const QString normalized = canonical.isEmpty() ? QDir(path).absolutePath() : canonical;
-        if (!roots.contains(normalized)) roots << normalized;
-    };
-
-    add(QDir::currentPath());
-
-    const QDir appDir(QCoreApplication::applicationDirPath());
-    add(appDir.absolutePath());
-    add(appDir.filePath(QStringLiteral("..")));
-    add(appDir.filePath(QStringLiteral("../..")));
-    add(appDir.filePath(QStringLiteral("../../..")));
-
-    return roots;
-}
-
-QString findProjectRelativeDir(const QString& relativePath) {
-    for (const QString& root : candidateRoots()) {
-        const QString candidate = QDir(root).filePath(relativePath);
-        const QFileInfo info(candidate);
-        if (info.isDir())
-            return info.canonicalFilePath().isEmpty() ? candidate : info.canonicalFilePath();
-    }
-    return relativePath;
-}
-
 QStringList loadAsdexAirports() {
-    const QDir dir(findProjectRelativeDir(QStringLiteral("resources/videomaps/asdex")));
+    const QDir dir(utils::findProjectRelativeDir(QStringLiteral("resources/videomaps/asdex")));
     QStringList icaos;
     for (const QString& name : dir.entryList(QStringList{QStringLiteral("*.geojson.gz")},
                                              QDir::Files,

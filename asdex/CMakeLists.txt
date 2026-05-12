@@ -3,23 +3,17 @@ find_package(ZLIB REQUIRED)
 
 add_library(nascope_asdex STATIC
     window.cpp
-    atis/atis_cache.cpp
-    notams/runway_closure_cache.cpp
-    input/datablock_edit_command.cpp
-    math.cpp
-    resources.cpp
+    atiscache.cpp
+    notamcache.cpp
+    cmdslew.cpp
     cursors.cpp
-    videomap.cpp
-    draw_video_map.cpp
-    draw_runway_closures.cpp
-    draw_temp_areas.cpp
-    draw_targets.cpp
-    draw_datablocks.cpp
+    videomaps.cpp
+    tempdata.cpp
+    targets.cpp
+    datablocks.cpp
     scope.cpp
-    lists/screen_list.cpp
-    lists/preview_area.cpp
-    lists/coast_list.cpp
-    targets/target_cache.cpp
+    lists.cpp
+    targetcache.cpp
 )
 
 target_include_directories(nascope_asdex
@@ -34,6 +28,7 @@ target_link_libraries(nascope_asdex
         Qt6::OpenGLWidgets
         Qt6::WebSockets
         nascope_renderer
+        nascope_utils
     PRIVATE
         ZLIB::ZLIB
 )

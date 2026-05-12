@@ -9,4 +9,4 @@ set(CMAKE_AUTORCC ON)
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 add_executable(menu menu.cpp resources.qrc)
-target_link_libraries(menu PRIVATE Qt6::Widgets)
+target_link_libraries(menu PRIVATE Qt6::Widgets nascope_utils)

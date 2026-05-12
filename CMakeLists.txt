@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
+add_subdirectory(utils)
 add_subdirectory(renderer)
 add_subdirectory(asdex)
 add_subdirectory(ui)

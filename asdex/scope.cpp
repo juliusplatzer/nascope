@@ -1,12 +1,11 @@
 #include "asdex/scope.h"
 
-#include "asdex/draw_datablocks.h"
-#include "asdex/draw_runway_closures.h"
-#include "asdex/draw_targets.h"
-#include "asdex/draw_temp_areas.h"
-#include "asdex/draw_video_map.h"
-#include "asdex/math.h"
-#include "asdex/resources.h"
+#include "asdex/datablocks.h"
+#include "asdex/tempdata.h"
+#include "asdex/targets.h"
+#include "asdex/videomaps.h"
+#include "utils/math.h"
+#include "utils/resources.h"
 #include "renderer/builders.h"
 #include "renderer/command_buffer.h"
 #include "renderer/renderer.h"
@@ -47,7 +46,7 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
       targetCache_(airport_, this),
       atisCache_(airport_, this),
       runwayClosureCache_(airport_,
-                           asdex::findProjectRelativeFile(QStringLiteral("tools/notams/scrape.py")),
+                           utils::findProjectRelativeFile(QStringLiteral("asdex/notams.py")),
                            this) {
     QSurfaceFormat fmt = format();
     fmt.setSamples(0);
@@ -70,7 +69,7 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
     });
     coastClockTimer_.start();
 
-    const QString assetsDir = asdex::findProjectRelativeDir(QStringLiteral("asdex/assets"));
+    const QString assetsDir = utils::findProjectRelativeDir(QStringLiteral("asdex/assets"));
     QString cursorError;
     if (cursors_.loadFromAssetsDir(assetsDir, &cursorError)) {
         setAsdexCursor(CursorMode::Scope);
@@ -80,7 +79,7 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
 
     QString fontError;
     fontLoaded_ =
-        asdexFont_.loadFromFile(asdex::findProjectRelativeFile(QStringLiteral("asdex/assets/font.bin")),
+        asdexFont_.loadFromFile(utils::findProjectRelativeFile(QStringLiteral("asdex/assets/font.bin")),
                                 &fontError);
     if (!fontLoaded_) {
         qWarning().noquote() << "[renderer] font load failed:" << fontError;
@@ -88,15 +87,15 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
 
     QString listError;
     if (!previewArea_.loadDefaultStateFromConfigFile(
-            asdex::findProjectRelativeFile(
+            utils::findProjectRelativeFile(
                 QStringLiteral("resources/configs/asdex/%1.json").arg(airport_.toUpper())),
             &listError)) {
         qWarning().noquote() << "[renderer] preview area config load failed:" << listError;
     }
 
     QString runwayClosureError;
-    const QString surfacePath = asdex::findProjectRelativeFile(
-        QStringLiteral("resources/surface/asdex/%1.json").arg(airport_.toUpper()));
+    const QString surfacePath = utils::findProjectRelativeFile(
+        QStringLiteral("asdex/surface/%1.json").arg(airport_.toUpper()));
     if (!runwayClosureGeometry_.loadSurfaceFile(surfacePath,
                                                 map_.anchorLonLat(),
                                                 &runwayClosureError)) {
@@ -421,7 +420,7 @@ void AsdexScopeWidget::updateTargetsFromCache() {
     targets_.clear();
     if (!map_.isValid()) return;
 
-    const QTransform toFeet = asdex::lonLatToFeet(map_.anchorLonLat());
+    const QTransform toFeet = utils::lonLatToFeet(map_.anchorLonLat());
     const QHash<QString, ::asdex::TargetCache::Target>& cachedTargets = targetCache_.targets();
     targets_.reserve(cachedTargets.size());
 
@@ -746,8 +745,8 @@ QPointF AsdexScopeWidget::framebufferPoint(const QPointF& logicalPoint) const {
 double AsdexScopeWidget::pixelsPerFoot(const QSize& renderSize) const {
     if (renderSize.isEmpty() || halfRangeFeet_ <= 0.0) return 1.0;
 
-    const double availW = renderSize.width() * (1.0 - 2.0 * asdex::kViewportMargin);
-    const double availH = renderSize.height() * (1.0 - 2.0 * asdex::kViewportMargin);
+    const double availW = renderSize.width() * (1.0 - 2.0 * utils::kViewportMargin);
+    const double availH = renderSize.height() * (1.0 - 2.0 * utils::kViewportMargin);
     const double radiusPx = 0.5 * std::min(availW, availH);
     return radiusPx / halfRangeFeet_;
 }
@@ -812,8 +811,8 @@ QMatrix4x4 AsdexScopeWidget::viewProjection(const QSize& renderSize) const {
     matrix.setToIdentity();
     if (renderSize.isEmpty() || halfRangeFeet_ <= 0.0) return matrix;
 
-    const double availW = renderSize.width() * (1.0 - 2.0 * asdex::kViewportMargin);
-    const double availH = renderSize.height() * (1.0 - 2.0 * asdex::kViewportMargin);
+    const double availW = renderSize.width() * (1.0 - 2.0 * utils::kViewportMargin);
+    const double availH = renderSize.height() * (1.0 - 2.0 * utils::kViewportMargin);
     const double radiusPx = 0.5 * std::min(availW, availH);
     const double pxPerFoot = radiusPx / halfRangeFeet_;
     const double sx = 2.0 * pxPerFoot / renderSize.width();
