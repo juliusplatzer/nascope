@@ -197,7 +197,8 @@ void drawTargets(const QVector<AsdexTarget>& targets,
                  renderer::CommandBuffer* commandBuffer,
                  const QMatrix4x4& worldProjection,
                  Mode mode,
-                 int vectorSeconds) {
+                 int vectorSeconds,
+                 bool showVectorLine) {
     Q_UNUSED(mode);
     if (!commandBuffer) return;
 
@@ -247,19 +248,21 @@ void drawTargets(const QVector<AsdexTarget>& targets,
 
     addTargetSymbols(targets, commandBuffer);
 
-    renderer::LinesBuilder* vectorBuilder = renderer::getLinesBuilder();
-    for (const AsdexTarget& target : targets) {
-        if (target.groundSpeedKnots <= 0.0) continue;
-        vectorBuilder->addLine(target.positionFeet,
-                               vectorEndFeet(target.positionFeet,
-                                             target.groundSpeedKnots,
-                                             target.groundTrackDegrees,
-                                             vectorSeconds));
+    if (showVectorLine) {
+        renderer::LinesBuilder* vectorBuilder = renderer::getLinesBuilder();
+        for (const AsdexTarget& target : targets) {
+            if (target.groundSpeedKnots <= 0.0) continue;
+            vectorBuilder->addLine(target.positionFeet,
+                                   vectorEndFeet(target.positionFeet,
+                                                 target.groundSpeedKnots,
+                                                 target.groundTrackDegrees,
+                                                 vectorSeconds));
+        }
+        commandBuffer->setRgba(renderer::RGBA::fromQColor(vectorColor()));
+        commandBuffer->lineWidth(1.0f);
+        vectorBuilder->generateCommands(commandBuffer);
+        renderer::returnLinesBuilder(vectorBuilder);
     }
-    commandBuffer->setRgba(renderer::RGBA::fromQColor(vectorColor()));
-    commandBuffer->lineWidth(1.0f);
-    vectorBuilder->generateCommands(commandBuffer);
-    renderer::returnLinesBuilder(vectorBuilder);
 }
 
 } // namespace asdex

@@ -18,6 +18,7 @@ enum class CommandType {
     EditDatablockFields,
     Range,
     Rotate,
+    VectorLength,
 };
 
 struct EditedDbFields {
@@ -115,6 +116,18 @@ public:
         spec.numericOnly = true;
         spec.wrapWheel = true;
         return DcbEntryCommand(spec, QString::number(currentRotation));
+    }
+
+    static DcbEntryCommand vectorLength(int currentVectorLength) {
+        Spec spec;
+        spec.type = CommandType::VectorLength;
+        spec.label = QStringLiteral("VECTOR LENGTH");
+        spec.minValue = 1;
+        spec.maxValue = 20;
+        spec.wheelStep = 1;
+        spec.invalidMessage = QStringLiteral("INVALID ENTRY");
+        spec.numericOnly = true;
+        return DcbEntryCommand(spec, QString::number(currentVectorLength));
     }
 
     QStringList displayLines() const { return {spec_.label, value_}; }

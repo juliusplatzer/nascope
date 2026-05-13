@@ -17,7 +17,8 @@ void drawTargets(const QVector<AsdexTarget>& targets,
                  renderer::CommandBuffer* commandBuffer,
                  const QMatrix4x4& worldProjection,
                  Mode mode,
-                 int vectorSeconds);
+                 int vectorSeconds,
+                 bool showVectorLine);
 
 int clampedTargetVectorSeconds(int seconds);
 
