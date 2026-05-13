@@ -10,6 +10,7 @@
 #include "renderer/command_buffer.h"
 #include "renderer/renderer.h"
 
+#include <QCursor>
 #include <QDebug>
 #include <QSurfaceFormat>
 #include <QtGlobal>
@@ -218,6 +219,16 @@ void AsdexScopeWidget::fitMapToView() {
 void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
     setFocus(Qt::MouseFocusReason);
 
+    if (isMapRepositionCommandActive()) {
+        if (event->button() == Qt::LeftButton) {
+            suppressNextMapRepositionRelease_ = true;
+            commitMapRepositionCommand();
+        }
+
+        event->accept();
+        return;
+    }
+
     if (commandActive()) {
         event->accept();
         return;
@@ -253,6 +264,15 @@ void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
 }
 
 void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
+    if (isMapRepositionCommandActive()) {
+        clearHighlightedTarget();
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Hidden);
+        handleMapRepositionMouseMove(event->position());
+        event->accept();
+        return;
+    }
+
     if (commandActive()) {
         clearHighlightedTarget();
         clearDcbHover();
@@ -310,6 +330,17 @@ void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
+    if (suppressNextMapRepositionRelease_ && event->button() == Qt::LeftButton) {
+        suppressNextMapRepositionRelease_ = false;
+        event->accept();
+        return;
+    }
+
+    if (isMapRepositionCommandActive()) {
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::RightButton && panning_) {
         const bool rightClick = !rightDragMoved_;
         panning_ = false;
@@ -415,6 +446,11 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
         return;
     }
 
+    if (isMapRepositionCommandActive()) {
+        event->accept();
+        return;
+    }
+
     if (datablockEdit_) {
         clearDcbHover();
         if (wheelY > 0)
@@ -493,6 +529,17 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
 }
 
 void AsdexScopeWidget::keyPressEvent(QKeyEvent* event) {
+    if (isMapRepositionCommandActive()) {
+        if (event->key() == Qt::Key_Escape || event->key() == Qt::Key_Backspace) {
+            cancelCommand();
+            event->accept();
+            return;
+        }
+
+        event->accept();
+        return;
+    }
+
     if (datablockEdit_ && handleDatablockEditKey(event)) return;
     if (dcbEntryCommand_ && handleDcbEntryCommandKey(event)) return;
 
@@ -506,6 +553,12 @@ void AsdexScopeWidget::keyPressEvent(QKeyEvent* event) {
 
     if (event->key() == Qt::Key_F10 && event->modifiers() == Qt::NoModifier) {
         toggleDayNite();
+        event->accept();
+        return;
+    }
+
+    if (event->key() == Qt::Key_F8 && event->modifiers() == Qt::NoModifier) {
+        startMapRepositionCommand();
         event->accept();
         return;
     }
@@ -763,9 +816,17 @@ void AsdexScopeWidget::startDatablockEdit(const AsdexTarget& target) {
 }
 
 void AsdexScopeWidget::cancelCommand() {
+    if (commandType_ == CommandType::MapReposition) {
+        cancelMapRepositionCommand();
+        return;
+    }
+
     commandType_ = CommandType::None;
     datablockEdit_.reset();
     dcbEntryCommand_.reset();
+    mapRepositionOriginalCenter_.reset();
+    suppressNextMapRepositionMove_ = false;
+    suppressNextMapRepositionRelease_ = false;
     editingTrackId_.clear();
     previewArea_.setSystemResponse({});
     clearDcbHover();
@@ -855,7 +916,9 @@ void AsdexScopeWidget::applyEditedFields(AsdexTarget& target,
 }
 
 bool AsdexScopeWidget::commandActive() const {
-    return datablockEdit_.has_value() || dcbEntryCommand_.has_value();
+    return datablockEdit_.has_value()
+        || dcbEntryCommand_.has_value()
+        || isMapRepositionCommandActive();
 }
 
 bool AsdexScopeWidget::defaultDataBlockVisibleForTarget(const AsdexTarget& target) const {
@@ -899,6 +962,9 @@ void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
     switch (function) {
         case DcbFunction::Range:
             startRangeCommand();
+            return;
+        case DcbFunction::MapReposition:
+            startMapRepositionCommand();
             return;
         case DcbFunction::Rotate:
             startRotateCommand();
@@ -1015,9 +1081,98 @@ void AsdexScopeWidget::startVectorLengthCommand() {
     update();
 }
 
+void AsdexScopeWidget::startMapRepositionCommand() {
+    if (commandType_ != CommandType::None) return;
+
+    commandType_ = CommandType::MapReposition;
+    datablockEdit_.reset();
+    dcbEntryCommand_.reset();
+    editingTrackId_.clear();
+    mapRepositionOriginalCenter_ = centerFeet_;
+    mapRepositionLastMouseFramebuffer_ = framebufferPoint(mapRepositionBoxCenterLogical());
+    suppressNextMapRepositionMove_ = true;
+    suppressNextMapRepositionRelease_ = false;
+
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Hidden);
+    grabMouse();
+    moveMapRepositionCursorToBoxCenter();
+    update();
+}
+
+void AsdexScopeWidget::commitMapRepositionCommand() {
+    commandType_ = CommandType::None;
+    mapRepositionOriginalCenter_.reset();
+    suppressNextMapRepositionMove_ = false;
+    releaseMouse();
+    clearHighlightedTarget();
+    clearDcbHover();
+    setAsdexCursor(CursorMode::Scope);
+    update();
+}
+
+void AsdexScopeWidget::cancelMapRepositionCommand() {
+    if (mapRepositionOriginalCenter_) centerFeet_ = *mapRepositionOriginalCenter_;
+
+    commandType_ = CommandType::None;
+    mapRepositionOriginalCenter_.reset();
+    suppressNextMapRepositionMove_ = false;
+    suppressNextMapRepositionRelease_ = false;
+    releaseMouse();
+    clearHighlightedTarget();
+    clearDcbHover();
+    setAsdexCursor(CursorMode::Scope);
+    update();
+}
+
+bool AsdexScopeWidget::isMapRepositionCommandActive() const {
+    return commandType_ == CommandType::MapReposition;
+}
+
+QPointF AsdexScopeWidget::mapRepositionBoxCenterLogical() const {
+    return QPointF(std::min(50.0, std::max(0.0, width() * 0.5)),
+                   std::min(50.0, std::max(0.0, height() * 0.5)));
+}
+
+void AsdexScopeWidget::moveMapRepositionCursorToBoxCenter() {
+    const QPointF point = mapRepositionBoxCenterLogical();
+    QCursor::setPos(mapToGlobal(QPoint(int(std::round(point.x())),
+                                      int(std::round(point.y())))));
+}
+
+void AsdexScopeWidget::handleMapRepositionMouseMove(const QPointF& logicalPoint) {
+    const QSize renderSize = framebufferRenderSize();
+    if (renderSize.isEmpty()) return;
+
+    const QPointF currentFramebuffer = framebufferPoint(logicalPoint);
+    if (suppressNextMapRepositionMove_) {
+        suppressNextMapRepositionMove_ = false;
+        mapRepositionLastMouseFramebuffer_ = currentFramebuffer;
+        return;
+    }
+
+    const QPointF boxCenterFramebuffer = framebufferPoint(mapRepositionBoxCenterLogical());
+    QPointF delta = currentFramebuffer - boxCenterFramebuffer;
+    if (std::abs(delta.x()) < 0.5 && std::abs(delta.y()) < 0.5) {
+        delta = currentFramebuffer - mapRepositionLastMouseFramebuffer_;
+    }
+
+    if (std::abs(delta.x()) < 0.5 && std::abs(delta.y()) < 0.5) return;
+
+    const QPointF worldDelta = screenDeltaToWorldDelta(delta, renderSize);
+    centerFeet_ -= worldDelta;
+    mapRepositionLastMouseFramebuffer_ = boxCenterFramebuffer;
+    suppressNextMapRepositionMove_ = true;
+    moveMapRepositionCursorToBoxCenter();
+    update();
+}
+
 QStringList AsdexScopeWidget::activeCommandLines() const {
     if (datablockEdit_) return datablockEdit_->displayLines();
     if (dcbEntryCommand_) return dcbEntryCommand_->displayLines();
+    if (isMapRepositionCommandActive()) return {QStringLiteral("MAP RPOS")};
     return {};
 }
 

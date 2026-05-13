@@ -19,6 +19,7 @@ enum class CommandType {
     Range,
     Rotate,
     VectorLength,
+    MapReposition,
 };
 
 struct EditedDbFields {
