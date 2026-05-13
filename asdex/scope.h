@@ -89,6 +89,10 @@ private:
     void setRotationValue(int degrees);
     void rotateByDegrees(int deltaDegrees);
     void startRotateCommand();
+    void toggleVectorLine();
+    int currentVectorLengthValue() const;
+    void setVectorLengthValue(int seconds);
+    void startVectorLengthCommand();
     bool handleDcbEntryCommandKey(QKeyEvent* event);
     QStringList activeCommandLines() const;
     void renderScene(const QSize& renderSize);
@@ -154,6 +158,7 @@ private:
     QPointF panStartCenterFeet_;
 
     int targetVectorSeconds_ = 5;
+    bool showVectorLine_ = true;
     CursorMode currentCursorMode_ = CursorMode::Hidden;
     bool fontLoaded_ = false;
     bool fontTexturesReady_ = false;

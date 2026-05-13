@@ -427,14 +427,36 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
     }
 
     if (dcbEntryCommand_) {
-        const int steps = dcbEntryCommand_->type() == CommandType::Rotate
-            ? (wheelY > 0 ? 1 : -1)
-            : (wheelY > 0 ? -1 : 1);
-        dcbEntryCommand_->wheelDelta(steps);
-        if (dcbEntryCommand_->type() == CommandType::Rotate) {
-            int value = 0;
-            if (dcbEntryCommand_->valueInt(&value)) setRotationValue(value);
+        int steps = 0;
+        switch (dcbEntryCommand_->type()) {
+            case CommandType::Rotate:
+            case CommandType::VectorLength:
+                steps = wheelY > 0 ? 1 : -1;
+                break;
+            case CommandType::Range:
+            case CommandType::None:
+            case CommandType::EditDatablockFields:
+            default:
+                steps = wheelY > 0 ? -1 : 1;
+                break;
         }
+
+        dcbEntryCommand_->wheelDelta(steps);
+
+        int value = 0;
+        if (dcbEntryCommand_->valueInt(&value)) {
+            switch (dcbEntryCommand_->type()) {
+                case CommandType::Rotate:
+                    setRotationValue(value);
+                    break;
+                case CommandType::VectorLength:
+                    setVectorLengthValue(value);
+                    break;
+                default:
+                    break;
+            }
+        }
+
         clearDcbHover();
         setAsdexCursor(CursorMode::Hidden);
         update();
@@ -804,6 +826,9 @@ void AsdexScopeWidget::submitDcbEntryCommand() {
         case CommandType::Rotate:
             setRotationValue(value);
             break;
+        case CommandType::VectorLength:
+            setVectorLengthValue(value);
+            break;
         case CommandType::None:
         case CommandType::EditDatablockFields:
         default:
@@ -877,6 +902,12 @@ void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
             return;
         case DcbFunction::Rotate:
             startRotateCommand();
+            return;
+        case DcbFunction::VectorOnOff:
+            toggleVectorLine();
+            return;
+        case DcbFunction::VectorLength:
+            startVectorLengthCommand();
             return;
         case DcbFunction::DayNite:
             toggleDayNite();
@@ -955,6 +986,35 @@ void AsdexScopeWidget::startRotateCommand() {
     update();
 }
 
+void AsdexScopeWidget::toggleVectorLine() {
+    showVectorLine_ = !showVectorLine_;
+    clearDcbHover();
+    update();
+}
+
+int AsdexScopeWidget::currentVectorLengthValue() const {
+    return clampedTargetVectorSeconds(targetVectorSeconds_);
+}
+
+void AsdexScopeWidget::setVectorLengthValue(int seconds) {
+    targetVectorSeconds_ = clampedTargetVectorSeconds(seconds);
+    update();
+}
+
+void AsdexScopeWidget::startVectorLengthCommand() {
+    if (commandType_ != CommandType::None) return;
+
+    commandType_ = CommandType::VectorLength;
+    dcbEntryCommand_ = DcbEntryCommand::vectorLength(currentVectorLengthValue());
+    datablockEdit_.reset();
+    editingTrackId_.clear();
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Hidden);
+    update();
+}
+
 QStringList AsdexScopeWidget::activeCommandLines() const {
     if (datablockEdit_) return datablockEdit_->displayLines();
     if (dcbEntryCommand_) return dcbEntryCommand_->displayLines();
@@ -979,7 +1039,12 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
                   [this, &renderSize](QPointF worldFeet) {
                       return worldToFramebufferTopLeft(worldFeet, renderSize);
                   });
-    drawTargets(targets_, commandBuffer, worldProjection, mode_, targetVectorSeconds_);
+    drawTargets(targets_,
+                commandBuffer,
+                worldProjection,
+                mode_,
+                targetVectorSeconds_,
+                showVectorLine_);
 
     const QMatrix4x4 projection = screenProjection();
     commandBuffer->loadProjectionMatrix(projection);
@@ -1071,10 +1136,10 @@ DcbState AsdexScopeWidget::makeDcbState() const {
     DcbState state;
     state.range = currentRangeValue();
     state.rotation = currentRotationValue();
-    state.vectorLength = targetVectorSeconds_;
+    state.vectorLength = currentVectorLengthValue();
     state.leaderLength = 2;
     state.nightMode = mode_ == Mode::Night;
-    state.showVectorLine = true;
+    state.showVectorLine = showVectorLine_;
     state.showDataBlocks = showDataBlocks_;
     state.dcbOn = !dcbOff_;
     state.networkConnected = true;
