@@ -1,35 +1,47 @@
-#pragma once
+#ifndef ASDEX_CURSORS_H_
+#define ASDEX_CURSORS_H_
 
 #include <QCursor>
 #include <QHash>
+#include <QImage>
+#include <QPoint>
 #include <QString>
+
+#include <type_traits>
 
 namespace asdex {
 
-/**
- * Loads the ASDE-X .cur cursor files from `assetsDir` (e.g. "asdex/assets").
- * Mirrors CRC's AsdexWindowManager.CreateCursor end-to-end: reads the
- * UInt16-LE hotspot at offsets 10 & 12, then decodes the DIB payload by
- * hand — XOR color bitmap on top, AND transparency mask on bottom (so the
- * DIB header's height = visual height × 2), RGBQUAD reserved byte ignored.
- *
- * Decoding manually instead of going through Qt's generic ICO plugin keeps
- * the .cur semantics (especially the AND-mask transparency) identical to
- * Avalonia's, which is what CRC ships — the plugin path occasionally
- * softens edges that should stay binary-transparent.
- *
- * Returned hash keys (paired with the file they're loaded from):
- *   "scope_cursor"      ← Asdex.cur
- *   "dcb_cursor"        ← AsdexDcb.cur
- *   "captured_cursor"   ← AsdexCaptured.cur
- *   "select_cursor"     ← AsdexSelect.cur
- *   "move_cursor"       ← AsdexMove.cur
- *   "updown_cursor"     ← AsdexUpDown.cur
- *   "leftright_cursor"  ← AsdexLeftRight.cur
- *
- * Files that fail to load are skipped with a message appended to `*err` (if
- * non-null); the surviving cursors are still returned.
- */
-QHash<QString, QCursor> loadCursors(const QString& assetsDir, QString* err = nullptr);
+enum class CursorType {
+    Scope,
+    Dcb,
+    Captured,
+    Select,
+    Move,
+    UpDown,
+    LeftRight,
+};
+
+inline size_t qHash(CursorType type, size_t seed = 0) noexcept {
+    using Underlying = std::underlying_type_t<CursorType>;
+    return ::qHash(static_cast<Underlying>(type), seed);
+}
+
+struct DecodedCursor {
+    QImage image;
+    QPoint hotspot;
+};
+
+class CursorSet {
+public:
+    bool loadFromAssetsDir(const QString& assetsDir, QString* error = nullptr);
+
+    bool has(CursorType type) const;
+    const QCursor& cursor(CursorType type) const;
+
+private:
+    QHash<CursorType, QCursor> cursors_;
+};
 
 } // namespace asdex
+
+#endif  // ASDEX_CURSORS_H_

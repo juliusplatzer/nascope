@@ -1,52 +1,200 @@
-#pragma once
+#ifndef ASDEX_DCB_H_
+#define ASDEX_DCB_H_
 
-#include <QPainter>
-#include <QRect>
+#include "renderer/font.h"
+
+#include <QColor>
+#include <QPointF>
+#include <QRectF>
 #include <QSize>
+#include <QStringList>
+#include <QVector>
 
-#include "font.h"
+#include <cstdint>
+#include <optional>
 
-namespace asdex::dcb {
+namespace renderer {
+class CommandBuffer;
+class TextBuilder;
+}  // namespace renderer
 
-/**
- * Display Control Bar — the always-on-top toolbar around the scope edge. This
- * file contains only the foundational background-and-panel painter; buttons
- * land in a follow-up patch.
- *
- * Layout sits at the highest UI z-band: render after every other scope layer
- * (incl. the green window boundary). Logical z = -1.0; buttons would sit at
- * -0.99.
- */
+namespace asdex {
 
-enum class Position { Top, Bottom, Left, Right, Off };
-
-struct Config {
-    Position position     = Position::Top;
-    int      prefSize     = 2;     // user-preferred char size, clamped 1..3
-    int      brightness   = 95;    // 0..100, not yet applied to the colors
-    bool     show         = true;
-    int      scrollOffset = 0;     // px shift on the long axis when the panel doesn't fit
+enum class DcbPosition {
+    Top,
+    Bottom,
+    Left,
+    Right,
+    Off,
 };
 
-/**
- * Draws the DCB stripe + panel into the widget rect at `widget`. Caller owns
- * paint order — invoke this after everything else so the bar sits on top.
- *
- * The font reference is needed to derive button geometry from the chosen
- * char size; the render-time size is `min(largest-that-fits, cfg.prefSize)`,
- * starting at 3 and shrinking to 2 then 1 if the panel exceeds the widget on
- * its long axis.
- */
-void render(QPainter& p, BitmapFontRenderer& font,
-            const QSize& widget, const Config& cfg);
+enum class DcbMenu {
+    Main,
+    Off,
+};
 
-/**
- * Returns the dark background-stripe rect that the DCB occupies for the given
- * widget size and config — useful for hit-testing (e.g. swap the cursor when
- * the pointer is over the DCB). Returns an empty rect when the DCB is hidden
- * or in Off mode (no long stripe is drawn there).
- */
-QRect stripeRect(BitmapFontRenderer& font,
-                 const QSize& widget, const Config& cfg);
+enum class DcbButtonKind {
+    Normal,
+    Menu,
+    Toggle,
+    Value,
+    Error,
+    Vacant,
+};
 
-} // namespace asdex::dcb
+enum class DcbFunction {
+    Range,
+    MapReposition,
+    Rotate,
+    Undo,
+    Default,
+    Prefs,
+    DayNite,
+    Brightness,
+    CharSize,
+    SafetyLogic,
+    Tools,
+    VectorOnOff,
+    VectorLength,
+    TempData,
+    LeaderLength,
+    Local1,
+    Local2,
+    DataBlockArea,
+    DataBlockEdit,
+    DataBlocksOnOff,
+    InitControl,
+    TrackSuspend,
+    TermControl,
+    DcbOnOff,
+    MlatOff,
+    AsrOff,
+    OperationalMode,
+    Vacant,
+};
+
+struct DcbButtonSpec {
+    DcbFunction function = DcbFunction::Vacant;
+    DcbButtonKind kind = DcbButtonKind::Normal;
+    QStringList lines;
+    bool large = false;
+
+    int value = 0;
+    bool showValue = false;
+
+    bool toggleOn = false;
+    QString onLabel = QStringLiteral("ON");
+    QString offLabel = QStringLiteral("OFF");
+};
+
+struct DcbButtonLayout {
+    DcbButtonSpec spec;
+    QRectF bounds;
+};
+
+struct DcbLayout {
+    QSize menuSize;
+    QSize buttonSize;
+
+    QRectF dcbBounds;
+    QRectF menuBounds;
+
+    int autoSize = 1;
+    int renderFontSize = 1;
+
+    QVector<DcbButtonLayout> buttons;
+};
+
+struct DcbHit {
+    bool overDcb = false;
+    int buttonIndex = -1;
+    std::optional<DcbFunction> function;
+};
+
+struct DcbState {
+    int range = 100;
+    int rotation = 0;
+    int vectorLength = 5;
+    int leaderLength = 2;
+
+    bool nightMode = false;
+    bool showVectorLine = true;
+    bool showDataBlocks = true;
+    bool dcbOn = true;
+
+    bool networkConnected = true;
+};
+
+class Dcb {
+public:
+    Dcb();
+
+    void setVisible(bool visible) { visible_ = visible; }
+    bool visible() const { return visible_; }
+
+    void setPosition(DcbPosition position) { position_ = position; }
+    DcbPosition position() const { return position_; }
+
+    void setBrightness(int brightness);
+    int brightness() const { return brightness_; }
+
+    void setCharSize(int charSize);
+    int charSize() const { return dcbCharSize_; }
+
+    void setMenu(DcbMenu menu) { menu_ = menu; }
+    DcbMenu menu() const { return menu_; }
+
+    DcbLayout layout(QSize displaySize,
+                     const renderer::BitmapFont& font,
+                     const DcbState& state) const;
+
+    DcbHit hitTest(QPointF displayPoint,
+                   QSize displaySize,
+                   const renderer::BitmapFont& font,
+                   const DcbState& state) const;
+
+    bool contains(QPointF displayPoint,
+                  QSize displaySize,
+                  const renderer::BitmapFont& font,
+                  const DcbState& state) const;
+
+    void drawQuads(renderer::CommandBuffer* commandBuffer, const DcbLayout& layout) const;
+
+    void drawText(renderer::TextBuilder& textBuilder,
+                  const renderer::BitmapFont& font,
+                  std::uint32_t fontTextureId,
+                  const DcbLayout& layout,
+                  int hoveredButtonIndex = -1) const;
+
+    int reservedTopHeight(QSize displaySize,
+                          const renderer::BitmapFont& font,
+                          const DcbState& state) const;
+
+private:
+    static QVector<DcbButtonSpec> mainButtonSpecs(const DcbState& state);
+    static QVector<DcbButtonSpec> offButtonSpecs(const DcbState& state);
+    static bool isHorizontal(DcbPosition position);
+    static bool isLargeFunction(DcbFunction function);
+
+    static QSize buttonSizeForFont(const renderer::BitmapFont& font, int autoSize);
+    static QSize horizontalMenuSize(QSize buttonSize);
+    static QSize offMenuSize(QSize buttonSize);
+    static QColor applyDcbBrightness(QColor color, int brightness);
+
+    QColor backgroundColor() const;
+    QColor menuSlabColor() const;
+    QColor normalButtonColor(bool depressed = false) const;
+    QColor menuButtonColor(bool depressed = false) const;
+    QColor textColor(bool active = false, bool hover = false) const;
+
+    bool visible_ = true;
+    DcbPosition position_ = DcbPosition::Top;
+    DcbMenu menu_ = DcbMenu::Main;
+
+    int brightness_ = 95;
+    int dcbCharSize_ = 2;
+};
+
+}  // namespace asdex
+
+#endif  // ASDEX_DCB_H_

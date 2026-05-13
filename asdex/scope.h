@@ -1,143 +1,164 @@
-#pragma once
+#ifndef ASDEX_SCOPE_H_
+#define ASDEX_SCOPE_H_
 
-#include <QCursor>
+#include "asdex/atiscache.h"
+#include "asdex/cmdslew.h"
+#include "asdex/lists.h"
+#include "asdex/notamcache.h"
+#include "asdex/targetcache.h"
+#include "asdex/colors.h"
+#include "asdex/cursors.h"
+#include "asdex/dcb.h"
+#include "asdex/datablocks.h"
+#include "asdex/tempdata.h"
+#include "asdex/targets.h"
+#include "renderer/font.h"
+#include "asdex/videomaps.h"
+
+#include <QEvent>
 #include <QHash>
-#include <QPoint>
+#include <QKeyEvent>
+#include <QMatrix4x4>
+#include <QMouseEvent>
+#include <QOpenGLWidget>
 #include <QPointF>
-#include <QSet>
-#include <QString>
-#include <QWidget>
+#include <QTimer>
+#include <QVector>
+#include <QWheelEvent>
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <optional>
 
-#include "dcb.h"
-#include "font.h"
-#include "lists.h"
-#include "tempdata.h"
-#include "videomaps.h"
+namespace renderer {
+class Renderer;
+}
 
 namespace asdex {
 
-class TgtCache;
-
-/**
- * ASDE-X scope widget: teal surface background + an airport videomap rendered
- * to fit the widget, honoring Day/Night palette.
- *
- * Viewport is stored in local NM (centerNm_ = scope center in NM, halfRangeNm_
- * = half the visible extent on the limiting screen axis). Right-click-drag
- * pans in NM; the wheel zooms in discrete 100 ft steps anchored at the scope
- * center — matching VATSIM CRC behavior.
- */
-class Scope : public QWidget {
+class AsdexScopeWidget : public QOpenGLWidget {
 public:
-    explicit Scope(VideoMap map, TgtCache* cache, QWidget* parent = nullptr);
+    explicit AsdexScopeWidget(QString airport, QWidget* parent = nullptr);
+    ~AsdexScopeWidget() override;
 
-    void setMode(Mode m);
-    Mode mode() const { return mode_; }
-
-    /**
-     * Switches the displayed facility at runtime. Loads the new videomap,
-     * retargets the cache, resets the viewport to fit the new bounds, and
-     * drops any per-target UI state (hidden datablocks, hover, edit mode)
-     * tied to the previous airport. No-op when `icao` matches the current
-     * airport or when no videomap exists for it.
-     */
-    void setFacility(const QString& icao);
+    QString airport() const { return airport_; }
 
 protected:
-    void paintEvent(QPaintEvent*) override;
-    void mousePressEvent(QMouseEvent*)  override;
-    void mouseMoveEvent(QMouseEvent*)   override;
-    void mouseReleaseEvent(QMouseEvent*) override;
-    void wheelEvent(QWheelEvent*)       override;
-    void leaveEvent(QEvent*)            override;
-    void keyPressEvent(QKeyEvent*)      override;
+    void initializeGL() override;
+    void resizeGL(int width, int height) override;
+    void paintGL() override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
+    void leaveEvent(QEvent* event) override;
 
 private:
-    void applyBackground();
-
-    // Returns the cache key of the non-Unknown target whose center in NM is
-    // closest to `pxPos` (widget coords) within the 150 ft pick radius, or
-    // nullopt if no target qualifies. Used by the left-click toggle.
-    std::optional<QString> pickClosestTargetKey(QPointF pxPos) const;
-
-    // Picks the appropriate cursor for the current hover position — dcb_cursor
-    // when over the DCB stripe, scope_cursor otherwise.
-    void updateHoverCursor();
-
-    // F1 handler — spawns ui/build/menu as a child process, waits for the
-    // user to confirm or cancel, and on confirm calls setFacility() with
-    // the chosen ICAO. Blocks the scope's event loop while the dialog is
-    // up (matching the modal feel of the startup menu).
-    void showFacilityMenu();
-
-    VideoMap   map_;
-    TgtCache*  cache_ = nullptr;
-    Mode       mode_  = Mode::Day;
-
-    // Viewport in local NM.
-    QPointF  centerNm_    {0.0, 0.0};
-    double   halfRangeNm_ = 1.0;
-    int      wheelRemainder_ = 0;  // unconsumed angleDelta units
-
-    bool     panning_     = false;
-    QPointF  lastPanPos_  {0.0, 0.0};
-
-    // Cursor in widget coords; nullopt while the pointer is outside the widget.
-    // Used to pick the closest target for the highlight ring.
-    std::optional<QPointF> cursorPx_;
-
-    // Loaded once at startup; looked up by name for click/hover transitions.
-    QHash<QString, QCursor> cursors_;
-
-    // Bitmap font atlas + UI lists (coast, dep, arr, …).
-    BitmapFontRenderer fontRenderer_;
-    Lists              lists_;
-
-    // Display Control Bar — top-of-screen toolbar by default. Rendered last so
-    // it sits above everything (scope content, lists, the green border).
-    dcb::Config        dcbCfg_;
-
-    // Runway / closed-area cache. Owns the NOTAM scraper subprocess and joins
-    // its results with static airport surface data; emits changed() when the
-    // resolved closure list changes.
-    ClosureCache       closures_;
-
-    // Per-target leader-line + datablock visibility — keys with the symbol
-    // suppressed via a left-click toggle. Default for every non-Unknown
-    // target is "shown".
-    QSet<QString>      hiddenDatablocks_;
-
-    // Global datablock visibility (toggled by F6). When false, no leader/
-    // datablock is drawn regardless of `hiddenDatablocks_`. Per-target
-    // overrides are preserved across F6 presses.
-    bool               showAllDatablocks_ = true;
-
-    // ---- Datablock editor ---------------------------------------------------
-    // Right-click on a non-Unknown target opens a 7-line edit form in the
-    // preview area (A/C, BCN, CAT, TYP, FIX, SP1, SP2). Cursor cycles with
-    // wheel / arrow keys / Enter. Backspace clears, printable keys append.
-    // Enter on the last field exits edit mode. SP1/SP2 are visible but
-    // currently read-only — the cache doesn't carry scratchpad fields yet.
-    enum class EditField { Aircraft = 0, Beacon, Category, Type, Fix, Sp1, Sp2 };
-    static constexpr int kEditFieldCount = 7;
-
-    struct EditState {
-        bool       active = false;
-        QString    key;                     // target cache key being edited
-        EditField  field = EditField::Aircraft;
-        QString    values[kEditFieldCount]; // current edit buffers, indexed by EditField
+    enum class CursorMode {
+        Scope,
+        Dcb,
+        Captured,
+        Hidden,
     };
-    EditState edit_;
 
-    void enterEditMode(const QString& key);
-    void commitEdit();                           // writes edit_ buffers → cache and exits (Enter on SP2)
-    void exitEditMode();                         // cleanup only — no commit (Esc, target gone, etc.)
-    void cycleEditField(int delta);              // +1 = next, -1 = prev; clamps at boundaries
-    void clearCurrentEditField();                // Backspace handler
-    void appendToCurrentEditField(QChar c);      // printable-key handler (no-op for read-only fields)
-    void refreshPreviewFromEdit();               // pushes edit_ → lists_.preview() so the next paint reflects state
+    void fitMapToView();
+    void updateTargetsFromCache();
+    void updateHighlightedTarget(const QPointF& mouseLogical);
+    void clearHighlightedTarget();
+    bool handleDatablockEditKey(QKeyEvent* event);
+    AsdexTarget* highlightedTarget();
+    AsdexTarget* targetById(const QString& targetId);
+    void startDatablockEdit(const AsdexTarget& target);
+    void cancelCommand();
+    void submitDatablockEdit();
+    void submitDcbEntryCommand();
+    void applyEditedFields(AsdexTarget& target, const EditedDbFields& fields) const;
+    bool commandActive() const;
+    bool defaultDataBlockVisibleForTarget(const AsdexTarget& target) const;
+    bool isDataBlockVisible(const AsdexTarget& target) const;
+    void toggleDataBlockForTarget(const AsdexTarget& target);
+    void handleDcbButtonClicked(DcbFunction function);
+    void toggleDcbOnOff();
+    void toggleDayNite();
+    int currentRangeValue() const;
+    void setRangeValue(int range);
+    void startRangeCommand();
+    int currentRotationValue() const;
+    void setRotationValue(int degrees);
+    void rotateByDegrees(int deltaDegrees);
+    void startRotateCommand();
+    bool handleDcbEntryCommandKey(QKeyEvent* event);
+    QStringList activeCommandLines() const;
+    void renderScene(const QSize& renderSize);
+    DcbState makeDcbState() const;
+    QSize framebufferRenderSize() const;
+    std::uint32_t fontTextureId(int fontSize) const;
+    QMatrix4x4 screenProjection() const;
+    QMatrix4x4 viewProjection(const QSize& renderSize) const;
+    QPointF worldToScreenLogical(const QPointF& worldFeet, const QSize& renderSize) const;
+    QPointF worldToFramebufferTopLeft(const QPointF& worldFeet, const QSize& renderSize) const;
+    QPointF framebufferPoint(const QPointF& logicalPoint) const;
+    double pixelsPerFoot(const QSize& renderSize) const;
+    QPointF screenToWorldFeet(const QPointF& logicalPoint, const QSize& renderSize) const;
+    QPointF screenDeltaToWorldDelta(const QPointF& framebufferDelta,
+                                    const QSize& renderSize) const;
+    void zoomByFeet(double deltaFeet);
+    void zoomToCursorByFeet(double deltaFeet, const QPointF& cursorLogicalPoint);
+    bool isPointOverDcb(const QPointF& logicalPoint) const;
+    void clearDcbHover();
+    void updateDcbHover(const QPointF& logicalPoint);
+    void updateHoverCursor(const QPointF& logicalPoint);
+    void setAsdexCursor(CursorMode mode);
+    void setAsdexCursor(asdex::CursorType type);
+
+    QString airport_;
+    asdex::VideoMap map_;
+    ::asdex::TargetCache targetCache_;
+    ::asdex::AtisCache atisCache_;
+    ::asdex::RunwayClosureCache runwayClosureCache_;
+    asdex::CursorSet cursors_;
+    Dcb dcb_;
+    ::asdex::PreviewArea previewArea_;
+    renderer::BitmapFont asdexFont_;
+    std::unique_ptr<renderer::Renderer> renderer_;
+    QHash<int, std::uint32_t> fontTextureIds_;
+    RunwayClosureGeometry runwayClosureGeometry_;
+    TempAreaGeometry tempAreaGeometry_;
+    QVector<asdex::AsdexTarget> targets_;
+    QHash<QString, DataBlockVisibility> datablockVisibility_;
+    QHash<QString, EditedDbFields> pendingDatablockEdits_;
+    QVector<TempArea> restrictedTempAreas_;
+    CoastList coastList_;
+    QString highlightedTargetId_;
+    CommandType commandType_ = CommandType::None;
+    std::optional<DatablockEditCommand> datablockEdit_;
+    std::optional<DcbEntryCommand> dcbEntryCommand_;
+    QString editingTrackId_;
+    QPointF centerFeet_;
+    double halfRangeFeet_ = 1.0;
+    int rotationDegrees_ = 0;
+    asdex::Mode mode_ = asdex::Mode::Day;
+    bool showDataBlocks_ = true;
+    bool timesharePrimary_ = true;
+    QTimer datablockTimeshareTimer_;
+    QTimer coastClockTimer_;
+    bool panning_ = false;
+    bool rightDragMoved_ = false;
+    bool dcbMouseCaptured_ = false;
+    bool dcbOff_ = false;
+    int hoveredDcbButtonIndex_ = -1;
+    std::optional<DcbFunction> hoveredDcbFunction_;
+    QPointF panStartMouseFramebuffer_;
+    QPointF panStartCenterFeet_;
+
+    int targetVectorSeconds_ = 5;
+    CursorMode currentCursorMode_ = CursorMode::Hidden;
+    bool fontLoaded_ = false;
+    bool fontTexturesReady_ = false;
 };
 
 } // namespace asdex
+
+#endif  // ASDEX_SCOPE_H_

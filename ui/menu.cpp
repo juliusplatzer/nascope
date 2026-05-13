@@ -1,20 +1,26 @@
 #include <QAbstractItemView>
 #include <QApplication>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDialog>
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListView>
+#include <QMessageBox>
+#include <QProcess>
 #include <QPushButton>
 #include <QStyleFactory>
 #include <QVBoxLayout>
+
+#include "utils/resources.h"
 
 #include <iostream>
 
 namespace {
 
-constexpr char kAsdexVideomapsDir[] = "resources/videomaps/asdex";
 // With ~40px per item (28px min + padding + spacing), 5 items ≈ 200px popup.
 constexpr int  kDropdownMaxVisible = 5;
 
@@ -26,83 +32,51 @@ constexpr char kStatePast[]    = "past";
 constexpr char kStateCurrent[] = "current";
 [[maybe_unused]] constexpr char kStateFuture[]  = "future";
 
-constexpr char kStyleSheet[] = R"(
-QDialog {
-    background-color: rgb(55, 57, 68);
-}
-
-QLabel {
-    color: rgb(220, 220, 220);
-    font-weight: 600;
-    font-size: 13px;
-}
-
-QComboBox {
-    background-color: rgb(33, 35, 41);
-    color: rgb(230, 230, 230);
-    border: 1px solid rgb(159, 160, 162);
-    border-radius: 5px;
-    padding: 6px 10px;
-    min-height: 20px;
-    combobox-popup: 0;
-    font-size: 13px;
-}
-QComboBox:disabled {
-    color: rgb(160, 160, 160);
-}
-QComboBox[state="future"] {
-    background-color: rgb(104, 104, 112);
-}
-QComboBox::drop-down {
-    border: none;
-    width: 24px;
-    subcontrol-origin: padding;
-    subcontrol-position: center right;
-}
-QComboBox::down-arrow {
-    image: url(:/chevron.svg);
-    width: 10px;
-    height: 6px;
-}
-
-QComboBox QAbstractItemView {
-    background-color: rgb(33, 35, 41);
-    color: rgb(230, 230, 230);
-    border: 1px solid rgb(159, 160, 162);
-    border-radius: 5px;
-    outline: 0;
-    selection-background-color: rgb(70, 72, 82);
-    selection-color: white;
-    font-size: 13px;
-}
-QComboBox QAbstractItemView::item {
-    min-height: 28px;
-    padding: 0px 10px;
-}
-
-QPushButton {
-    background-color: rgb(33, 35, 41);
-    color: rgb(230, 230, 230);
-    border: 1px solid rgb(159, 160, 162);
-    border-radius: 5px;
-    padding: 6px 16px;
-    font-size: 13px;
-}
-QPushButton:hover    { background-color: rgb(45, 48, 56); }
-QPushButton:default  { border-color: rgb(200, 200, 205); }
-)";
-
 QStringList loadAsdexAirports() {
-    QDir dir(kAsdexVideomapsDir);
+    const QDir dir(utils::findProjectRelativeDir(QStringLiteral("resources/videomaps/asdex")));
     QStringList icaos;
-    for (const QString& name : dir.entryList(QStringList{"*.geojson.gz"}, QDir::Files, QDir::Name)) {
-        icaos << name.left(name.indexOf('.'));
+    for (const QString& name : dir.entryList(QStringList{QStringLiteral("*.geojson.gz")},
+                                             QDir::Files,
+                                             QDir::Name)) {
+        icaos << name.left(name.indexOf(QLatin1Char('.')));
     }
     return icaos;
 }
 
+QString executableSuffix() {
+#ifdef Q_OS_WIN
+    return QStringLiteral(".exe");
+#else
+    return QString();
+#endif
+}
+
+QString findAsdexScopeExecutable() {
+    const QString exeName = QStringLiteral("asdex_scope") + executableSuffix();
+    const QDir appDir(QCoreApplication::applicationDirPath());
+
+    const QStringList candidates = {
+        appDir.filePath(QStringLiteral("asdex/%1").arg(exeName)),
+        appDir.filePath(QStringLiteral("../asdex/%1").arg(exeName)),
+        appDir.filePath(QStringLiteral("../../asdex/%1").arg(exeName)),
+        QDir::current().filePath(QStringLiteral("build/asdex/%1").arg(exeName)),
+    };
+
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(candidate)) return QFileInfo(candidate).absoluteFilePath();
+    }
+
+    return exeName;
+}
+
 QLabel* makeLabel(const QString& text) {
     return new QLabel(text);
+}
+
+QString loadMenuStyleSheet() {
+    QFile file(QStringLiteral(":/menu.css"));
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    return QString::fromUtf8(file.readAll());
 }
 
 void configureDropdown(QComboBox* combo, const char* state) {
@@ -122,7 +96,7 @@ class Menu : public QDialog {
 public:
     explicit Menu(QWidget* parent = nullptr) : QDialog(parent) {
         setWindowTitle("nascope");
-        setStyleSheet(kStyleSheet);
+        setStyleSheet(loadMenuStyleSheet());
 
         auto* displayType = new QComboBox;
         displayType->addItems({"ASDE-X", "STARS"});
@@ -170,6 +144,19 @@ int main(int argc, char** argv) {
 
     Menu menu;
     if (menu.exec() != QDialog::Accepted) return 1;
-    std::cout << menu.selectedAirport().toStdString() << std::endl;
+
+    const QString airport = menu.selectedAirport();
+    std::cout << airport.toStdString() << std::endl;
+
+    if (QCoreApplication::arguments().contains(QStringLiteral("--select-only"))) return 0;
+
+    const QString executable = findAsdexScopeExecutable();
+    if (!QProcess::startDetached(executable, QStringList{airport}, QDir::currentPath())) {
+        QMessageBox::critical(nullptr,
+                              QStringLiteral("nascope"),
+                              QStringLiteral("Could not launch ASDE-X renderer."));
+        return 2;
+    }
+
     return 0;
 }

@@ -1,611 +1,1338 @@
-#include "scope.h"
+#include "asdex/scope.h"
 
-#include "cursors.h"
-#include "maths.h"
-#include "targets.h"
-#include "tgtcache.h"
-#include "utils.h"
+#include "asdex/datablocks.h"
+#include "asdex/tempdata.h"
+#include "asdex/targets.h"
+#include "asdex/videomaps.h"
+#include "utils/math.h"
+#include "utils/resources.h"
+#include "renderer/builders.h"
+#include "renderer/command_buffer.h"
+#include "renderer/renderer.h"
 
 #include <QDebug>
-#include <QKeyEvent>
-#include <QMouseEvent>
-#include <QPainter>
-#include <QPalette>
-#include <QProcess>
-#include <QTimer>
-#include <QWheelEvent>
+#include <QSurfaceFormat>
+#include <QtGlobal>
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
+#include <utility>
 
 namespace asdex {
-
 namespace {
 
-constexpr double kFtPerNm        = 6076.12;
-constexpr double kZoomStepNm     = 100.0 / kFtPerNm;   // 100 ft per discrete level
-constexpr double kMinHalfRangeNm = 6 * kZoomStepNm;    // 600 ft — tightest allowed zoom
-constexpr double kMaxHalfRangeNm = 10.0;
+constexpr double kMinHalfRangeFeet = 600.0;
+constexpr double kMaxHalfRangeFeet = 30000.0;
+constexpr double kWheelStepFeet = 400.0;
+constexpr double kCtrlWheelStepFeet = 1600.0;
+constexpr double kMaxHoverRangeFeet = 150.0;
+constexpr double kRightClickDragTolerancePx = 3.0;
+constexpr double kPi = 3.14159265358979323846;
 
-double snapZoom(double nm) {
-    const double snapped = std::round(nm / kZoomStepNm) * kZoomStepNm;
-    return std::clamp(snapped, kMinHalfRangeNm, kMaxHalfRangeNm);
+int normalizedDegrees(int degrees) {
+    return ((degrees % 360) + 360) % 360;
 }
 
-QColor backgroundFor(Mode m) {
-    // sColorBackgroundDay / sColorBackgroundNight
-    const QColor base = (m == Mode::Day) ? QColor(0, 96, 120) : QColor(60, 60, 60);
-    return applyBrightness(base, defaultBrightness());
+double radiansFromDegrees(int degrees) {
+    return double(normalizedDegrees(degrees)) * kPi / 180.0;
 }
 
-// CWT A-E (and legacy H/J) is the heavy classification used by the videomap
-// rendering — anything else with tgtType == "aircraft" draws as a normal jet.
 bool isHeavyWake(QStringView wake) {
     if (wake.size() != 1) return false;
-    const QChar c = wake.at(0).toUpper();
-    return c == 'A' || c == 'B' || c == 'C' || c == 'D' || c == 'E'
-        || c == 'H' || c == 'J';
-}
 
-TargetType classifyTarget(const TgtCache::Target& t) {
-    if (t.tgtType != QLatin1String("aircraft") || t.callsign.isEmpty())
-        return TargetType::Unknown;
-    return isHeavyWake(t.wake) ? TargetType::Heavy : TargetType::Normal;
+    const QChar c = wake.at(0).toUpper();
+    return c == QLatin1Char('A') || c == QLatin1Char('B') || c == QLatin1Char('C')
+        || c == QLatin1Char('D') || c == QLatin1Char('E');
 }
 
 } // namespace
 
-Scope::Scope(VideoMap map, TgtCache* cache, QWidget* parent)
-    : QWidget(parent), map_(std::move(map)), cache_(cache) {
-    setWindowTitle(QStringLiteral("nascope — ASDE-X"));
-    resize(1280, 800);
-    setAutoFillBackground(true);
-    setMouseTracking(true);   // hover events drive the highlight-ring pick
+AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
+    : QOpenGLWidget(parent),
+      airport_(std::move(airport)),
+      map_(asdex::VideoMap::load(airport_)),
+      targetCache_(airport_),
+      atisCache_(airport_),
+      runwayClosureCache_(airport_,
+                           utils::findProjectRelativeFile(QStringLiteral("asdex/notams.py"))) {
+    QSurfaceFormat fmt = format();
+    fmt.setSamples(0);
+    setFormat(fmt);
+
+    setMinimumSize(640, 480);
+    setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
-    applyBackground();
 
-    if (map_.isValid()) {
-        const QRectF b = map_.boundsNm();
-        centerNm_    = b.center();
-        halfRangeNm_ = snapZoom(0.5 * std::max(b.width(), b.height()));
+    datablockTimeshareTimer_.setInterval(2000);
+    connect(&datablockTimeshareTimer_, &QTimer::timeout, this, [this] {
+        timesharePrimary_ = !timesharePrimary_;
+        update();
+    });
+    datablockTimeshareTimer_.start();
+
+    coastClockTimer_.setInterval(1000);
+    connect(&coastClockTimer_, &QTimer::timeout, this, [this] {
+        update();
+    });
+    coastClockTimer_.start();
+
+    const QString assetsDir = utils::findProjectRelativeDir(QStringLiteral("asdex/assets"));
+    QString cursorError;
+    if (cursors_.loadFromAssetsDir(assetsDir, &cursorError)) {
+        setAsdexCursor(CursorMode::Scope);
+    } else {
+        qWarning().noquote() << "[renderer] cursor load failed:" << cursorError;
     }
 
-    QString err;
-    cursors_ = loadCursors(QStringLiteral("asdex/assets"), &err);
-    if (!err.isEmpty()) qWarning().noquote() << "[scope] cursor load:" << err;
-    if (const auto it = cursors_.constFind(QStringLiteral("scope_cursor"));
-        it != cursors_.constEnd()) {
-        setCursor(*it);
+    QString fontError;
+    fontLoaded_ =
+        asdexFont_.loadFromFile(utils::findProjectRelativeFile(QStringLiteral("asdex/assets/font.bin")),
+                                &fontError);
+    if (!fontLoaded_) {
+        qWarning().noquote() << "[renderer] font load failed:" << fontError;
     }
 
-    err.clear();
-    if (!fontRenderer_.load(QStringLiteral("asdex/assets/font.bin"), &err))
-        qWarning().noquote() << "[scope] font load:" << err;
-
-    // Tick the coast-list clock at 1 Hz.
-    auto* clockTimer = new QTimer(this);
-    connect(clockTimer, &QTimer::timeout, this, QOverload<>::of(&QWidget::update));
-    clockTimer->start(1000);
-
-    // Repaint whenever the cache changes; Qt coalesces multiple updates into
-    // a single paint per event-loop pass.
-    if (cache_) {
-        connect(cache_, &TgtCache::changed, this, QOverload<>::of(&QWidget::update));
+    QString listError;
+    if (!previewArea_.loadDefaultStateFromConfigFile(
+            utils::findProjectRelativeFile(
+                QStringLiteral("resources/configs/asdex/%1.json").arg(airport_.toUpper())),
+            &listError)) {
+        qWarning().noquote() << "[renderer] preview area config load failed:" << listError;
     }
 
-    // Same wiring for the closure cache, then kick its first scrape against
-    // the airport the target cache is already scoped to.
-    connect(&closures_, &ClosureCache::changed, this, QOverload<>::of(&QWidget::update));
-    if (cache_ && map_.isValid()) {
-        closures_.switchAirport(cache_->airport(), map_.anchorLonLat());
+    QString runwayClosureError;
+    const QString surfacePath = utils::findProjectRelativeFile(
+        QStringLiteral("asdex/surface/%1.json").arg(airport_.toUpper()));
+    if (!runwayClosureGeometry_.loadSurfaceFile(surfacePath,
+                                                map_.anchorLonLat(),
+                                                &runwayClosureError)) {
+        qWarning().noquote() << "[asdex] runway closure surface load failed:"
+                             << runwayClosureError;
     }
-}
-
-void Scope::setMode(Mode m) {
-    if (mode_ == m) return;
-    mode_ = m;
-    applyBackground();
-    update();
-}
-
-void Scope::applyBackground() {
-    QPalette pal = palette();
-    pal.setColor(QPalette::Window, backgroundFor(mode_));
-    setPalette(pal);
-}
-
-void Scope::setFacility(const QString& icao) {
-    if (!cache_ || icao.isEmpty() || icao == cache_->airport()) return;
-
-    // Load the new videomap before mutating any other state — if the asset
-    // is missing we want the scope to stay on the current facility.
-    VideoMap nextMap = VideoMap::load(icao);
-    if (!nextMap.isValid()) {
-        qWarning().noquote() << "[scope] no videomap for" << icao;
-        return;
+    QString closedAreaError;
+    if (!runwayClosureCache_.loadSurfaceFile(surfacePath, map_.anchorLonLat(), &closedAreaError)) {
+        qWarning().noquote() << "[asdex] closed temp area surface load failed:"
+                             << closedAreaError;
     }
 
-    map_ = std::move(nextMap);
-    cache_->setAirport(icao);
-    closures_.switchAirport(icao, map_.anchorLonLat());
+    connect(&targetCache_, &::asdex::TargetCache::changed, this, [this] {
+        updateTargetsFromCache();
+        update();
+    });
+    connect(&atisCache_, &::asdex::AtisCache::changed, this, [this] {
+        const ::asdex::AtisRunwayState& atis = atisCache_.state();
+        previewArea_.updateRunwayConfigFromRunways(atis.landingRunways, atis.departureRunways);
+        update();
+    });
+    connect(&runwayClosureCache_, &::asdex::RunwayClosureCache::changed, this, [this] {
+        runwayClosureGeometry_.setClosedRunways(runwayClosureCache_.closedRunways());
 
-    // Re-fit the viewport to the new airport's bounds and reset transient UI
-    // state that's tied to the previous facility's targets.
-    const QRectF b = map_.boundsNm();
-    centerNm_       = b.center();
-    halfRangeNm_    = snapZoom(0.5 * std::max(b.width(), b.height()));
-    wheelRemainder_ = 0;
-    panning_        = false;
-    hiddenDatablocks_.clear();
-    cursorPx_.reset();
-    if (edit_.active) exitEditMode();
+        QVector<TempArea> areas;
+        areas.reserve(runwayClosureCache_.closedTempAreas().size()
+                      + runwayClosureCache_.restrictedTempAreas().size()
+                      + restrictedTempAreas_.size());
 
-    update();
-}
-
-void Scope::showFacilityMenu() {
-    // Reuses the standalone menu binary — same dialog the user saw at
-    // startup, no in-process duplication. Working directory is the project
-    // root when launched via run.sh, so the relative path resolves there.
-    QProcess proc;
-    proc.start(QStringLiteral("ui/build/menu"), QStringList());
-    if (!proc.waitForStarted(2000)) {
-        qWarning().noquote() << "[scope] menu launch failed:" << proc.errorString();
-        return;
-    }
-    proc.waitForFinished(-1);
-    if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0)
-        return;  // user cancelled or the process aborted
-    const QString icao = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
-    if (!icao.isEmpty()) setFacility(icao);
-}
-
-// ---- Paint ------------------------------------------------------------------
-
-void Scope::paintEvent(QPaintEvent*) {
-    QPainter p(this);
-    p.setClipRect(rect());  // belt-and-braces against off-screen path overflow
-
-    if (map_.isValid()) {
-        p.setRenderHint(QPainter::Antialiasing);
-        const QTransform toScreen = nmToScreen(centerNm_, halfRangeNm_, size());
-        map_.render(p, toScreen, mode_);
-
-        // Closure overlays sit above the videomap surface and below targets,
-        // lists, and datablocks. Runway X markers are lower; closed areas are
-        // z=-6.9, so the red hatch is drawn after runway closures.
-        for (const QPolygonF& polyNm : closures_.runwayClosureItems()) {
-            drawRunwayClosure(p, polyNm, toScreen);
-        }
-        for (const QPolygonF& polyNm : closures_.closedAreaItems()) {
-            drawClosedAreas(p, polyNm, toScreen);
+        for (TempArea area : runwayClosureCache_.closedTempAreas()) {
+            area.type = TempAreaType::ClosedArea;
+            areas.push_back(area);
         }
 
-        if (cache_ && !cache_->targets().isEmpty()) {
-            const QTransform lonLatToNmT = lonLatToNm(map_.anchorLonLat());
+        for (TempArea area : runwayClosureCache_.restrictedTempAreas()) {
+            area.type = TempAreaType::RestrictedArea;
+            areas.push_back(area);
+        }
 
-            // Pick state — track the closest target whose NM position falls
-            // within 150 ft of the cursor. Skip while panning (cursor is
-            // hidden + the world is dragging under the pointer).
-            constexpr double kPickRadiusNm   = 150.0 / kFtPerNm;
-            constexpr double kPickRadiusSq  = kPickRadiusNm * kPickRadiusNm;
-            std::optional<QPointF> cursorNm;
-            if (cursorPx_ && !panning_) {
-                bool ok = false;
-                const QTransform screenToNm = toScreen.inverted(&ok);
-                if (ok) cursorNm = screenToNm.map(*cursorPx_);
+        for (TempArea area : restrictedTempAreas_) {
+            area.type = TempAreaType::RestrictedArea;
+            areas.push_back(area);
+        }
+
+        tempAreaGeometry_.setAreas(std::move(areas));
+        update();
+    });
+
+    fitMapToView();
+}
+
+AsdexScopeWidget::~AsdexScopeWidget() {
+    if (context()) {
+        makeCurrent();
+        if (renderer_) {
+            for (const std::uint32_t textureId : fontTextureIds_) {
+                renderer_->destroyTexture(textureId);
             }
-            QPointF    closestPosNm;
-            TargetType closestType  = TargetType::Normal;
-            double     closestDistSq = kPickRadiusSq;
-            bool       haveClosest  = false;
-
-            QList<QPointF> historyNm;
-            historyNm.reserve(7);
-            for (auto it = cache_->targets().constBegin(); it != cache_->targets().constEnd(); ++it) {
-                const QString&         key = it.key();
-                const TgtCache::Target& t  = it.value();
-                if (!t.lat || !t.lon) continue;
-                const QPointF posNm = lonLatToNmT.map(QPointF(*t.lon, *t.lat));
-
-                // History dots first → they sit behind the live symbol.
-                historyNm.clear();
-                for (const QPointF& lonLat : t.posHistory)
-                    historyNm.append(lonLatToNmT.map(lonLat));
-                drawHistoryDots(p, toScreen, historyNm);
-
-                const TargetType type = classifyTarget(t);
-                drawTarget(p, toScreen, posNm,
-                           t.heading.value_or(0.0),
-                           type,
-                           /*alert=*/false);
-
-                // Velocity vector — drawn right after the symbol so it lands
-                // on top of it, matching CRC's queue order. Skip for Unknown
-                // targets, and skip when track or speed is unknown (drawing
-                // a north-pointing zero-length line would be misleading).
-                if (type != TargetType::Unknown && t.heading && t.speed && *t.speed > 0.0) {
-                    drawVectorLine(p, toScreen, posNm, *t.heading, *t.speed);
-                }
-
-                // Leader line + datablock — only for identified targets, when
-                // the global F6 toggle is on, and the user hasn't toggled
-                // this specific target off via left-click. Leader sits above
-                // the symbol; datablock at the leader endpoint.
-                if (type != TargetType::Unknown && showAllDatablocks_
-                                                && !hiddenDatablocks_.contains(key)) {
-                    constexpr double kLeaderAngleDeg = 45.0;  // NE default
-                    const QPointF anchorPx = drawLeaderLine(p, toScreen, posNm, kLeaderAngleDeg);
-
-                    DatablockFields f;
-                    f.callsign      = t.callsign;
-                    f.beacon        = t.squawk;
-                    f.hasFlightPlan = !t.exitFix.isEmpty();
-                    if (t.altitude) f.altitudeFt = static_cast<int>(*t.altitude);
-                    f.acType        = t.acType;
-                    f.category      = t.wake;
-                    f.exitFix       = t.exitFix;
-                    if (t.speed) f.speedKt = static_cast<int>(*t.speed);
-                    f.sp1           = t.sp1;
-                    f.sp2           = t.sp2;
-
-                    if (fontRenderer_.isValid())
-                        drawDatablock(p, fontRenderer_, anchorPx, kLeaderAngleDeg, f);
-                }
-
-                if (cursorNm) {
-                    const double dx = posNm.x() - cursorNm->x();
-                    const double dy = posNm.y() - cursorNm->y();
-                    const double d2 = dx*dx + dy*dy;
-                    if (d2 <= closestDistSq) {
-                        closestDistSq = d2;
-                        closestPosNm  = posNm;
-                        closestType   = type;
-                        haveClosest   = true;
-                    }
-                }
-            }
-
-            if (haveClosest)
-                drawHighlightRing(p, toScreen, closestPosNm,
-                                  /*heavy=*/closestType == TargetType::Heavy);
+            fontTextureIds_.clear();
+            renderer_->deinitialize();
         }
-    }
-
-    // 4 px green scope boundary, drawn fully inside the widget so none of the
-    // stroke gets clipped at the window edge.
-    p.setRenderHint(QPainter::Antialiasing, false);
-    QPen borderPen(QColor(0, 255, 0), 4);
-    borderPen.setJoinStyle(Qt::MiterJoin);
-    p.setPen(borderPen);
-    p.setBrush(Qt::NoBrush);
-    p.drawRect(QRectF(rect()).adjusted(2, 2, -2, -2));
-
-    if (fontRenderer_.isValid())
-        lists_.draw(p, size(), fontRenderer_);
-
-    // Display Control Bar — last, so it sits above the scope, lists, and border.
-    dcb::render(p, fontRenderer_, size(), dcbCfg_);
-}
-
-// ---- Hover cursor ----------------------------------------------------------
-
-void Scope::updateHoverCursor() {
-    if (!cursorPx_) return;
-    const QRect dcbStripe = dcb::stripeRect(fontRenderer_, size(), dcbCfg_);
-    const bool overDcb = !dcbStripe.isEmpty() && dcbStripe.contains(cursorPx_->toPoint());
-    const QString want = overDcb ? QStringLiteral("dcb_cursor")
-                                 : QStringLiteral("scope_cursor");
-    if (const auto it = cursors_.constFind(want); it != cursors_.constEnd()) {
-        setCursor(*it);
+        doneCurrent();
     }
 }
 
-// ---- Click pick + datablock toggle -----------------------------------------
-
-std::optional<QString> Scope::pickClosestTargetKey(QPointF pxPos) const {
-    if (!cache_ || cache_->targets().isEmpty()) return std::nullopt;
-
-    const QTransform toScreen = nmToScreen(centerNm_, halfRangeNm_, size());
-    bool ok = false;
-    const QTransform screenToNm = toScreen.inverted(&ok);
-    if (!ok) return std::nullopt;
-
-    const QPointF cursorNm = screenToNm.map(pxPos);
-    const QTransform lonLatToNmT = lonLatToNm(map_.anchorLonLat());
-
-    constexpr double kPickRadiusNm = 150.0 / kFtPerNm;
-    constexpr double kPickRadiusSq = kPickRadiusNm * kPickRadiusNm;
-
-    std::optional<QString> bestKey;
-    double bestDistSq = kPickRadiusSq;
-
-    for (auto it = cache_->targets().constBegin(); it != cache_->targets().constEnd(); ++it) {
-        const TgtCache::Target& t = it.value();
-        if (!t.lat || !t.lon) continue;
-        if (classifyTarget(t) == TargetType::Unknown) continue;
-        const QPointF posNm = lonLatToNmT.map(QPointF(*t.lon, *t.lat));
-        const double dx = posNm.x() - cursorNm.x();
-        const double dy = posNm.y() - cursorNm.y();
-        const double d2 = dx*dx + dy*dy;
-        if (d2 <= bestDistSq) {
-            bestDistSq = d2;
-            bestKey    = it.key();
-        }
-    }
-    return bestKey;
-}
-
-// ---- Pan (right-click drag) -------------------------------------------------
-
-void Scope::mousePressEvent(QMouseEvent* ev) {
-    if (ev->button() == Qt::RightButton) {
-        // Right-click within 150 ft of a non-Unknown target → open the
-        // datablock editor for it. Otherwise fall through to pan-drag.
-        if (auto key = pickClosestTargetKey(ev->position())) {
-            enterEditMode(*key);
-            ev->accept();
-            return;
-        }
-        panning_    = true;
-        lastPanPos_ = ev->position();
-        setCursor(Qt::BlankCursor);
-        ev->accept();
+void AsdexScopeWidget::initializeGL() {
+    renderer_ = renderer::makeOpenGLRenderer();
+    QString rendererError;
+    if (!renderer_->initialize(&rendererError)) {
+        qWarning().noquote() << "[renderer] OpenGL renderer init failed:" << rendererError;
+        renderer_.reset();
         return;
     }
-    if (ev->button() == Qt::LeftButton) {
-        // Left-click within 150 ft of a non-Unknown target → toggle that
-        // target's leader line + datablock visibility.
-        if (auto key = pickClosestTargetKey(ev->position())) {
-            if (!hiddenDatablocks_.remove(*key)) hiddenDatablocks_.insert(*key);
+
+    if (fontLoaded_) {
+        const int fontSizes[] = {1, 2, 3};
+        for (const int fontSize : fontSizes) {
+            const renderer::BitmapFontSize* fontSizeData = asdexFont_.fontSize(fontSize);
+            if (!fontSizeData) continue;
+
+            const std::uint32_t textureId =
+                renderer_->createTextureR8(fontSizeData->atlasWidth,
+                                           fontSizeData->atlasHeight,
+                                           fontSizeData->atlasR8,
+                                           true);
+            if (textureId != 0) fontTextureIds_.insert(fontSize, textureId);
+        }
+        fontTexturesReady_ = !fontTextureIds_.isEmpty();
+    }
+}
+
+void AsdexScopeWidget::resizeGL(int width, int height) {
+    Q_UNUSED(width);
+    Q_UNUSED(height);
+}
+
+void AsdexScopeWidget::paintGL() {
+    const QSize renderSize = framebufferRenderSize();
+    renderScene(renderSize);
+}
+
+void AsdexScopeWidget::fitMapToView() {
+    if (!map_.isValid()) return;
+
+    const QRectF bounds = map_.boundsFeet();
+    centerFeet_ = bounds.center();
+    halfRangeFeet_ = 0.5 * std::max(bounds.width(), bounds.height());
+    halfRangeFeet_ = std::clamp(halfRangeFeet_, kMinHalfRangeFeet, kMaxHalfRangeFeet);
+    if (halfRangeFeet_ <= 0.0) halfRangeFeet_ = 1.0;
+}
+
+void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
+    setFocus(Qt::MouseFocusReason);
+
+    if (commandActive()) {
+        event->accept();
+        return;
+    }
+
+    if (isPointOverDcb(event->position())) {
+        clearHighlightedTarget();
+        updateDcbHover(event->position());
+        if (event->button() == Qt::LeftButton) {
+            dcbMouseCaptured_ = true;
+            setAsdexCursor(CursorMode::Captured);
+        } else {
+            setAsdexCursor(CursorMode::Dcb);
+        }
+        update();
+        event->accept();
+        return;
+    }
+
+    if (event->button() == Qt::RightButton) {
+        clearDcbHover();
+        panning_ = true;
+        rightDragMoved_ = false;
+        panStartMouseFramebuffer_ = framebufferPoint(event->position());
+        panStartCenterFeet_ = centerFeet_;
+        setAsdexCursor(CursorMode::Hidden);
+        grabMouse();
+        event->accept();
+        return;
+    }
+
+    QOpenGLWidget::mousePressEvent(event);
+}
+
+void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
+    if (commandActive()) {
+        clearHighlightedTarget();
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Hidden);
+        update();
+        event->accept();
+        return;
+    }
+
+    if (panning_) {
+        const QSize renderSize = framebufferRenderSize();
+        const double ppf = pixelsPerFoot(renderSize);
+
+        if (ppf > 0.0) {
+            const QPointF current = framebufferPoint(event->position());
+            const QPointF delta = current - panStartMouseFramebuffer_;
+            const double tolerance = kRightClickDragTolerancePx * devicePixelRatioF();
+            if (delta.x() * delta.x() + delta.y() * delta.y() > tolerance * tolerance)
+                rightDragMoved_ = true;
+            const QPointF worldDelta = screenDeltaToWorldDelta(delta, renderSize);
+            centerFeet_ = panStartCenterFeet_ - worldDelta;
             update();
-            ev->accept();
+        }
+
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Hidden);
+        event->accept();
+        return;
+    }
+
+    if (dcbMouseCaptured_) {
+        clearHighlightedTarget();
+        if (isPointOverDcb(event->position()))
+            updateDcbHover(event->position());
+        else
+            clearDcbHover();
+        setAsdexCursor(CursorMode::Captured);
+        event->accept();
+        return;
+    }
+
+    if (isPointOverDcb(event->position())) {
+        clearHighlightedTarget();
+        updateDcbHover(event->position());
+        setAsdexCursor(CursorMode::Dcb);
+        event->accept();
+        return;
+    }
+
+    clearDcbHover();
+    setAsdexCursor(CursorMode::Scope);
+    updateHighlightedTarget(event->position());
+    update();
+    QOpenGLWidget::mouseMoveEvent(event);
+}
+
+void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() == Qt::RightButton && panning_) {
+        const bool rightClick = !rightDragMoved_;
+        panning_ = false;
+        rightDragMoved_ = false;
+        releaseMouse();
+
+        if (rightClick) {
+            if (isPointOverDcb(event->position())) {
+                clearHighlightedTarget();
+                updateDcbHover(event->position());
+                updateHoverCursor(event->position());
+            } else {
+                clearDcbHover();
+                updateHighlightedTarget(event->position());
+                if (AsdexTarget* target = highlightedTarget()) {
+                    startDatablockEdit(*target);
+                } else {
+                    updateHoverCursor(event->position());
+                }
+            }
+        } else {
+            updateHoverCursor(event->position());
+        }
+
+        event->accept();
+        return;
+    }
+
+    if (datablockEdit_) {
+        clearDcbHover();
+        event->accept();
+        return;
+    }
+
+    if (dcbEntryCommand_) {
+        if (event->button() == Qt::LeftButton) submitDcbEntryCommand();
+
+        event->accept();
+        return;
+    }
+
+    if (dcbMouseCaptured_ && event->button() == Qt::LeftButton) {
+        dcbMouseCaptured_ = false;
+        clearHighlightedTarget();
+
+        const DcbHit hit = dcb_.hitTest(event->position(), size(), asdexFont_, makeDcbState());
+        if (hit.overDcb && hit.buttonIndex >= 0 && hit.function.has_value()) {
+            handleDcbButtonClicked(*hit.function);
+        }
+
+        if (commandActive()) {
+            clearDcbHover();
+            setAsdexCursor(CursorMode::Hidden);
+            update();
+            event->accept();
+            return;
+        }
+
+        if (isPointOverDcb(event->position())) {
+            updateDcbHover(event->position());
+            setAsdexCursor(CursorMode::Dcb);
+        } else {
+            clearDcbHover();
+            setAsdexCursor(CursorMode::Scope);
+        }
+        update();
+        event->accept();
+        return;
+    }
+
+    if (isPointOverDcb(event->position())) {
+        clearHighlightedTarget();
+        updateDcbHover(event->position());
+        setAsdexCursor(CursorMode::Dcb);
+        update();
+        event->accept();
+        return;
+    }
+
+    if (event->button() == Qt::LeftButton && event->modifiers() == Qt::NoModifier) {
+        clearDcbHover();
+        updateHighlightedTarget(event->position());
+        if (AsdexTarget* target = highlightedTarget()) {
+            toggleDataBlockForTarget(*target);
+            update();
+            event->accept();
             return;
         }
     }
-    QWidget::mousePressEvent(ev);
+
+    QOpenGLWidget::mouseReleaseEvent(event);
 }
 
-void Scope::mouseMoveEvent(QMouseEvent* ev) {
-    if (!panning_) {
-        cursorPx_ = ev->position();
-        updateHoverCursor();
+void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
+    const QPoint angleDelta = event->angleDelta();
+    const QPoint pixelDelta = event->pixelDelta();
+
+    int wheelY = angleDelta.y();
+    if (wheelY == 0) wheelY = pixelDelta.y();
+
+    if (wheelY == 0) {
+        QOpenGLWidget::wheelEvent(event);
+        return;
+    }
+
+    if (datablockEdit_) {
+        clearDcbHover();
+        if (wheelY > 0)
+            datablockEdit_->moveUp();
+        else
+            datablockEdit_->moveDown();
         update();
-        QWidget::mouseMoveEvent(ev);
+        event->accept();
         return;
     }
 
-    const QPointF now = ev->position();
-    const QPointF dPx = now - lastPanPos_;
-    lastPanPos_       = now;
-
-    // Convert pixel delta → NM delta using the active pxPerNm.
-    const double availW   = size().width()  * (1.0 - 2.0 * kViewportMargin);
-    const double availH   = size().height() * (1.0 - 2.0 * kViewportMargin);
-    const double radiusPx = 0.5 * std::min(availW, availH);
-    if (radiusPx <= 0.0) { ev->accept(); return; }
-    const double pxPerNm = radiusPx / halfRangeNm_;
-
-    // Dragging right moves the world right → scope center shifts west.
-    // Screen-y is flipped vs. NM-north, hence the sign flip on y.
-    centerNm_.rx() -= dPx.x() / pxPerNm;
-    centerNm_.ry() += dPx.y() / pxPerNm;
-
-    ev->accept();
-    update();
-}
-
-void Scope::mouseReleaseEvent(QMouseEvent* ev) {
-    if (panning_ && ev->button() == Qt::RightButton) {
-        panning_  = false;
-        cursorPx_ = ev->position();
-        // Re-evaluate hover so we land on dcb_cursor / scope_cursor as appropriate
-        // instead of leaving the BlankCursor from the pan in place.
-        updateHoverCursor();
-        ev->accept();
-        return;
-    }
-    QWidget::mouseReleaseEvent(ev);
-}
-
-void Scope::leaveEvent(QEvent* ev) {
-    cursorPx_.reset();
-    update();
-    QWidget::leaveEvent(ev);
-}
-
-// ---- Zoom (wheel / trackpad scroll) ----------------------------------------
-
-void Scope::wheelEvent(QWheelEvent* ev) {
-    // Ignore macOS trackpad momentum: those events fire after the user's
-    // fingers have left the pad and otherwise keep zooming silently.
-    if (ev->phase() == Qt::ScrollMomentum) { ev->ignore(); return; }
-
-    wheelRemainder_ += ev->angleDelta().y();
-    const int notches = wheelRemainder_ / 120;
-    if (notches == 0) { ev->accept(); return; }
-    wheelRemainder_ -= notches * 120;
-
-    // While the datablock editor is open the wheel cycles the active field
-    // (CRC: scroll up → previous field, scroll down → next field).
-    if (edit_.active) {
-        cycleEditField(-notches);
-        ev->accept();
-        return;
-    }
-
-    // Scroll up (positive) → zoom in → smaller halfRangeNm.
-    halfRangeNm_ = snapZoom(halfRangeNm_ - notches * kZoomStepNm);
-
-    ev->accept();
-    update();
-}
-
-// ---- Datablock editor ------------------------------------------------------
-
-void Scope::keyPressEvent(QKeyEvent* ev) {
-    // F1 — open the facility selection menu. Handled regardless of edit-mode
-    // state so the user can always reach it.
-    if (ev->key() == Qt::Key_F1) {
-        showFacilityMenu();
-        ev->accept();
-        return;
-    }
-    // F6 — global datablock toggle. Handled regardless of edit-mode state.
-    if (ev->key() == Qt::Key_F6) {
-        showAllDatablocks_ = !showAllDatablocks_;
-        update();
-        ev->accept();
-        return;
-    }
-    if (!edit_.active) { QWidget::keyPressEvent(ev); return; }
-
-    const int key = ev->key();
-    if (key == Qt::Key_Up) {
-        cycleEditField(-1);
-        ev->accept();
-        return;
-    }
-    if (key == Qt::Key_Down || key == Qt::Key_Tab) {
-        cycleEditField(+1);
-        ev->accept();
-        return;
-    }
-    if (key == Qt::Key_Return || key == Qt::Key_Enter) {
-        // Enter on the last field (SP2) saves and exits — see CRC docs:
-        // "Press Enter after scratchpad 2 to save."
-        if (edit_.field == EditField::Sp2) commitEdit();
-        else                               cycleEditField(+1);
-        ev->accept();
-        return;
-    }
-    if (key == Qt::Key_Backspace) {
-        clearCurrentEditField();
-        ev->accept();
-        return;
-    }
-    if (key == Qt::Key_Escape) {
-        // Not in CRC's docs but useful: cancel without saving.
-        exitEditMode();
-        ev->accept();
-        return;
-    }
-
-    const QString text = ev->text();
-    if (!text.isEmpty()) {
-        for (const QChar c : text) {
-            if (c.isPrint()) appendToCurrentEditField(c);
+    if (dcbEntryCommand_) {
+        const int steps = dcbEntryCommand_->type() == CommandType::Rotate
+            ? (wheelY > 0 ? 1 : -1)
+            : (wheelY > 0 ? -1 : 1);
+        dcbEntryCommand_->wheelDelta(steps);
+        if (dcbEntryCommand_->type() == CommandType::Rotate) {
+            int value = 0;
+            if (dcbEntryCommand_->valueInt(&value)) setRotationValue(value);
         }
-        ev->accept();
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Hidden);
+        update();
+        event->accept();
         return;
     }
-    QWidget::keyPressEvent(ev);
-}
 
-void Scope::enterEditMode(const QString& key) {
-    if (!cache_) return;
-    const auto it = cache_->targets().constFind(key);
-    if (it == cache_->targets().constEnd()) return;
-
-    edit_.active = true;
-    edit_.key    = key;
-    edit_.field  = EditField::Aircraft;
-
-    // Seed buffers from the cache; uppercase to match ATC convention.
-    const TgtCache::Target& t = it.value();
-    edit_.values[int(EditField::Aircraft)] = t.callsign.toUpper();
-    edit_.values[int(EditField::Beacon)]   = t.squawk;
-    edit_.values[int(EditField::Category)] = t.wake.toUpper();
-    edit_.values[int(EditField::Type)]     = t.acType.toUpper();
-    edit_.values[int(EditField::Fix)]      = t.exitFix.toUpper();
-    edit_.values[int(EditField::Sp1)]      = t.sp1.toUpper();
-    edit_.values[int(EditField::Sp2)]      = t.sp2.toUpper();
-
-    refreshPreviewFromEdit();
-}
-
-void Scope::commitEdit() {
-    if (!edit_.active) return;
-    if (cache_) {
-        cache_->applyDatablockEdit(edit_.key,
-                                   edit_.values[int(EditField::Aircraft)],
-                                   edit_.values[int(EditField::Beacon)],
-                                   edit_.values[int(EditField::Category)],
-                                   edit_.values[int(EditField::Type)],
-                                   edit_.values[int(EditField::Fix)],
-                                   edit_.values[int(EditField::Sp1)],
-                                   edit_.values[int(EditField::Sp2)]);
+    if (isPointOverDcb(event->position())) {
+        updateDcbHover(event->position());
+        setAsdexCursor(CursorMode::Dcb);
+        event->accept();
+        return;
     }
-    exitEditMode();
+
+    clearDcbHover();
+
+    if (event->modifiers().testFlag(Qt::ShiftModifier)) {
+        rotateByDegrees(wheelY > 0 ? 1 : -1);
+        event->accept();
+        return;
+    }
+
+    const bool ctrl = event->modifiers().testFlag(Qt::ControlModifier);
+    const bool alt = event->modifiers().testFlag(Qt::AltModifier);
+    const double step = ctrl ? kCtrlWheelStepFeet : kWheelStepFeet;
+    const double deltaFeet = (wheelY > 0) ? -step : step;
+
+    if (alt)
+        zoomToCursorByFeet(deltaFeet, event->position());
+    else
+        zoomByFeet(deltaFeet);
+
+    event->accept();
 }
 
-void Scope::exitEditMode() {
-    if (!edit_.active) return;
-    edit_ = {};
-    auto& pa = lists_.preview();
-    pa.commandLines.clear();
-    pa.showCursor = false;
+void AsdexScopeWidget::keyPressEvent(QKeyEvent* event) {
+    if (datablockEdit_ && handleDatablockEditKey(event)) return;
+    if (dcbEntryCommand_ && handleDcbEntryCommandKey(event)) return;
+
+    if (event->key() == Qt::Key_F6 && event->modifiers() == Qt::NoModifier) {
+        showDataBlocks_ = !showDataBlocks_;
+        datablockVisibility_.clear();
+        update();
+        event->accept();
+        return;
+    }
+
+    if (event->key() == Qt::Key_F10 && event->modifiers() == Qt::NoModifier) {
+        toggleDayNite();
+        event->accept();
+        return;
+    }
+
+    QOpenGLWidget::keyPressEvent(event);
+}
+
+void AsdexScopeWidget::leaveEvent(QEvent* event) {
+    if (!commandActive() && !panning_) {
+        dcbMouseCaptured_ = false;
+        clearHighlightedTarget();
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Scope);
+        update();
+    }
+
+    QOpenGLWidget::leaveEvent(event);
+}
+
+bool AsdexScopeWidget::handleDatablockEditKey(QKeyEvent* event) {
+    switch (event->key()) {
+        case Qt::Key_Escape:
+            cancelCommand();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+            if (datablockEdit_->enter())
+                submitDatablockEdit();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Left:
+            datablockEdit_->moveLeft();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Right:
+            datablockEdit_->moveRight();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Up:
+            datablockEdit_->moveUp();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Down:
+            datablockEdit_->moveDown();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Backspace:
+            datablockEdit_->backspace();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Delete:
+            datablockEdit_->deleteForward();
+            update();
+            event->accept();
+            return true;
+        default:
+            break;
+    }
+
+    if (event->modifiers().testFlag(Qt::ControlModifier)
+        || event->modifiers().testFlag(Qt::MetaModifier)) {
+        event->accept();
+        return true;
+    }
+
+    const QString text = event->text();
+    if (!text.isEmpty()) {
+        for (const QChar c : text) datablockEdit_->insert(c);
+        update();
+        event->accept();
+        return true;
+    }
+
+    event->accept();
+    return true;
+}
+
+bool AsdexScopeWidget::handleDcbEntryCommandKey(QKeyEvent* event) {
+    if (!dcbEntryCommand_) return false;
+
+    switch (event->key()) {
+        case Qt::Key_Escape:
+            cancelCommand();
+            event->accept();
+            return true;
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+            submitDcbEntryCommand();
+            event->accept();
+            return true;
+        case Qt::Key_Backspace:
+            dcbEntryCommand_->backspace();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Delete:
+            dcbEntryCommand_->deleteForward();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Left:
+            dcbEntryCommand_->moveLeft();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Right:
+            dcbEntryCommand_->moveRight();
+            update();
+            event->accept();
+            return true;
+        default:
+            break;
+    }
+
+    if (event->modifiers().testFlag(Qt::ControlModifier)
+        || event->modifiers().testFlag(Qt::MetaModifier)) {
+        event->accept();
+        return true;
+    }
+
+    const QString text = event->text();
+    if (text.size() == 1) {
+        dcbEntryCommand_->insert(text.at(0));
+        update();
+        event->accept();
+        return true;
+    }
+
+    event->accept();
+    return true;
+}
+
+void AsdexScopeWidget::updateTargetsFromCache() {
+    targets_.clear();
+    if (!map_.isValid()) return;
+
+    const QTransform toFeet = utils::lonLatToFeet(map_.anchorLonLat());
+    const QHash<QString, ::asdex::TargetCache::Target>& cachedTargets = targetCache_.targets();
+    targets_.reserve(cachedTargets.size());
+
+    for (auto it = cachedTargets.constBegin(); it != cachedTargets.constEnd(); ++it) {
+        const ::asdex::TargetCache::Target& cached = it.value();
+        if (!cached.lat || !cached.lon) continue;
+
+        asdex::AsdexTarget target;
+        target.id = it.key();
+        target.callsign = cached.callsign;
+        target.aircraftType = cached.acType;
+        target.category = cached.wake;
+        target.beaconCode = cached.squawk;
+        target.fix = cached.exitFix;
+        target.altitudeTrue = cached.altitude;
+        target.scratchpad1 = cached.scratchpad1;
+        target.scratchpad2 = cached.scratchpad2;
+        target.positionFeet = toFeet.map(QPointF(*cached.lon, *cached.lat));
+
+        const double heading = cached.heading.value_or(0.0);
+        target.headingDegrees = heading;
+        target.groundTrackDegrees = heading;
+        target.groundSpeedKnots = (cached.heading && cached.speed) ? *cached.speed : 0.0;
+
+        target.correlated = cached.tgtType == QLatin1String("aircraft") && !cached.callsign.isEmpty();
+        target.heavy = target.correlated && isHeavyWake(cached.wake);
+        target.duplicateBeaconCode = false;
+        target.coasting = false;
+        target.highlighted = target.id == highlightedTargetId_;
+
+        if (const auto pending = pendingDatablockEdits_.constFind(target.id);
+            pending != pendingDatablockEdits_.constEnd()) {
+            applyEditedFields(target, pending.value());
+        }
+
+        target.history.reserve(cached.positionHistoryLonLat.size());
+        for (const QPointF& lonLat : cached.positionHistoryLonLat) {
+            target.history.push_back(asdex::TargetHistoryPoint{toFeet.map(lonLat)});
+        }
+
+        targets_.push_back(std::move(target));
+    }
+
+    if (!highlightedTargetId_.isEmpty() && !highlightedTarget())
+        highlightedTargetId_.clear();
+}
+
+void AsdexScopeWidget::updateHighlightedTarget(const QPointF& mouseLogical) {
+    const QSize renderSize = framebufferRenderSize();
+    const QPointF mouseWorld = screenToWorldFeet(mouseLogical, renderSize);
+    const double maxDistance2 = kMaxHoverRangeFeet * kMaxHoverRangeFeet;
+
+    int bestIndex = -1;
+    double bestDistance2 = maxDistance2;
+
+    for (qsizetype i = 0; i < targets_.size(); ++i) {
+        targets_[i].highlighted = false;
+
+        const QPointF delta = targets_[i].positionFeet - mouseWorld;
+        const double distance2 = delta.x() * delta.x() + delta.y() * delta.y();
+        if (distance2 <= bestDistance2) {
+            bestDistance2 = distance2;
+            bestIndex = int(i);
+        }
+    }
+
+    highlightedTargetId_.clear();
+    if (bestIndex >= 0) {
+        targets_[bestIndex].highlighted = true;
+        highlightedTargetId_ = targets_[bestIndex].id;
+    }
+}
+
+void AsdexScopeWidget::clearHighlightedTarget() {
+    highlightedTargetId_.clear();
+    for (AsdexTarget& target : targets_) target.highlighted = false;
+}
+
+AsdexTarget* AsdexScopeWidget::highlightedTarget() {
+    if (highlightedTargetId_.isEmpty()) return nullptr;
+
+    return targetById(highlightedTargetId_);
+}
+
+AsdexTarget* AsdexScopeWidget::targetById(const QString& targetId) {
+    if (targetId.isEmpty()) return nullptr;
+
+    for (AsdexTarget& target : targets_) {
+        if (target.id == targetId) return &target;
+    }
+
+    return nullptr;
+}
+
+void AsdexScopeWidget::startDatablockEdit(const AsdexTarget& target) {
+    if (commandType_ != CommandType::None) return;
+    if (!target.correlated || target.coasting) {
+        setAsdexCursor(CursorMode::Scope);
+        return;
+    }
+
+    commandType_ = CommandType::EditDatablockFields;
+    datablockEdit_ = DatablockEditCommand::fromTarget(target);
+    editingTrackId_ = target.id;
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse({});
+    setAsdexCursor(CursorMode::Hidden);
     update();
 }
 
-void Scope::cycleEditField(int delta) {
-    if (!edit_.active || delta == 0) return;
-    const int next = std::clamp(int(edit_.field) + delta, 0, kEditFieldCount - 1);
-    edit_.field = static_cast<EditField>(next);
-    refreshPreviewFromEdit();
+void AsdexScopeWidget::cancelCommand() {
+    commandType_ = CommandType::None;
+    datablockEdit_.reset();
+    dcbEntryCommand_.reset();
+    editingTrackId_.clear();
+    previewArea_.setSystemResponse({});
+    clearDcbHover();
+    setAsdexCursor(CursorMode::Scope);
+    clearHighlightedTarget();
+    update();
 }
 
-void Scope::clearCurrentEditField() {
-    if (!edit_.active) return;
-    edit_.values[int(edit_.field)].clear();
-    refreshPreviewFromEdit();
-}
+void AsdexScopeWidget::submitDatablockEdit() {
+    if (!datablockEdit_) return;
 
-void Scope::appendToCurrentEditField(QChar c) {
-    if (!edit_.active) return;
-
-    QString& buf = edit_.values[int(edit_.field)];
-    const bool isScratchpad = (edit_.field == EditField::Sp1 || edit_.field == EditField::Sp2);
-
-    if (isScratchpad) {
-        // Free-form alphanumeric, 7 chars max — silently drop punctuation,
-        // whitespace, and any keystroke past the cap so the user sees the
-        // cursor stop advancing.
-        constexpr int kScratchpadMaxLen = 7;
-        if (!c.isLetterOrNumber()) return;
-        if (buf.size() >= kScratchpadMaxLen) return;
+    AsdexTarget* target = targetById(editingTrackId_);
+    if (!target) {
+        cancelCommand();
+        return;
     }
 
-    buf += c.toUpper();
-    refreshPreviewFromEdit();
+    QString error;
+    if (!datablockEdit_->validateForTarget(*target, &error)) {
+        previewArea_.setSystemResponse(error.isEmpty() ? QStringLiteral("INVALID ENTRY") : error);
+        return;
+    }
+
+    const EditedDbFields fields = datablockEdit_->values();
+    targetCache_.sendDatablockEdit(airport_,
+                                   editingTrackId_,
+                                   fields.callsign,
+                                   fields.beaconCode,
+                                   fields.category,
+                                   fields.aircraftType,
+                                   fields.fix,
+                                   fields.scratchpad1,
+                                   fields.scratchpad2);
+
+    pendingDatablockEdits_.insert(editingTrackId_, fields);
+    applyEditedFields(*target, fields);
+    cancelCommand();
 }
 
-void Scope::refreshPreviewFromEdit() {
-    auto& pa = lists_.preview();
-    if (!edit_.active) {
-        pa.commandLines.clear();
-        pa.showCursor = false;
+void AsdexScopeWidget::submitDcbEntryCommand() {
+    if (!dcbEntryCommand_) return;
+
+    int value = 0;
+    if (!dcbEntryCommand_->valueInt(&value)) {
+        previewArea_.setSystemResponse(dcbEntryCommand_->invalidMessage());
+        commandType_ = CommandType::None;
+        dcbEntryCommand_.reset();
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Scope);
         update();
         return;
     }
 
-    static constexpr const char* kLabels[kEditFieldCount] = {
-        "A/C", "BCN", "CAT", "TYP", "FIX", "SP1", "SP2",
-    };
-    constexpr int kLabelColumns = 5;  // "XYZ: " — label + colon + space, fixed cursor offset
-
-    pa.commandLines.clear();
-    pa.commandLines.reserve(kEditFieldCount);
-    for (int i = 0; i < kEditFieldCount; ++i) {
-        pa.commandLines << QStringLiteral("%1: %2")
-                               .arg(QString::fromLatin1(kLabels[i]),
-                                    edit_.values[i]);
+    switch (dcbEntryCommand_->type()) {
+        case CommandType::Range:
+            setRangeValue(value);
+            break;
+        case CommandType::Rotate:
+            setRotationValue(value);
+            break;
+        case CommandType::None:
+        case CommandType::EditDatablockFields:
+        default:
+            break;
     }
 
-    pa.showCursor   = true;
-    pa.cursorLine   = int(edit_.field);   // index within commandLines
-    pa.cursorColumn = kLabelColumns + edit_.values[int(edit_.field)].size();
+    previewArea_.setSystemResponse(QString());
+    commandType_ = CommandType::None;
+    dcbEntryCommand_.reset();
+    clearDcbHover();
+    setAsdexCursor(CursorMode::Scope);
     update();
+}
+
+void AsdexScopeWidget::applyEditedFields(AsdexTarget& target,
+                                         const EditedDbFields& fields) const {
+    target.callsign = fields.callsign;
+    target.beaconCode = fields.beaconCode;
+    target.category = fields.category;
+    target.aircraftType = fields.aircraftType;
+    target.fix = fields.fix;
+    target.scratchpad1 = fields.scratchpad1;
+    target.scratchpad2 = fields.scratchpad2;
+}
+
+bool AsdexScopeWidget::commandActive() const {
+    return datablockEdit_.has_value() || dcbEntryCommand_.has_value();
+}
+
+bool AsdexScopeWidget::defaultDataBlockVisibleForTarget(const AsdexTarget& target) const {
+    Q_UNUSED(target);
+    return showDataBlocks_;
+}
+
+bool AsdexScopeWidget::isDataBlockVisible(const AsdexTarget& target) const {
+    const DataBlockVisibility visibility =
+        datablockVisibility_.value(target.id, DataBlockVisibility::Inherit);
+
+    switch (visibility) {
+        case DataBlockVisibility::ForceOn:
+            return true;
+        case DataBlockVisibility::ForceOff:
+            return false;
+        case DataBlockVisibility::Inherit:
+            return defaultDataBlockVisibleForTarget(target);
+    }
+
+    return defaultDataBlockVisibleForTarget(target);
+}
+
+void AsdexScopeWidget::toggleDataBlockForTarget(const AsdexTarget& target) {
+    const DataBlockVisibility current =
+        datablockVisibility_.value(target.id, DataBlockVisibility::Inherit);
+
+    if (current == DataBlockVisibility::Inherit) {
+        datablockVisibility_[target.id] = defaultDataBlockVisibleForTarget(target)
+            ? DataBlockVisibility::ForceOff
+            : DataBlockVisibility::ForceOn;
+        return;
+    }
+
+    datablockVisibility_[target.id] = current == DataBlockVisibility::ForceOn
+        ? DataBlockVisibility::ForceOff
+        : DataBlockVisibility::ForceOn;
+}
+
+void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
+    switch (function) {
+        case DcbFunction::Range:
+            startRangeCommand();
+            return;
+        case DcbFunction::Rotate:
+            startRotateCommand();
+            return;
+        case DcbFunction::DayNite:
+            toggleDayNite();
+            return;
+        case DcbFunction::DcbOnOff:
+            toggleDcbOnOff();
+            return;
+        default:
+            return;
+    }
+}
+
+void AsdexScopeWidget::toggleDcbOnOff() {
+    dcbOff_ = !dcbOff_;
+    dcb_.setMenu(dcbOff_ ? DcbMenu::Off : DcbMenu::Main);
+    clearDcbHover();
+    update();
+}
+
+void AsdexScopeWidget::toggleDayNite() {
+    mode_ = (mode_ == Mode::Day) ? Mode::Night : Mode::Day;
+    clearDcbHover();
+    update();
+}
+
+int AsdexScopeWidget::currentRangeValue() const {
+    return std::clamp(int(std::round(halfRangeFeet_ / 100.0)), 6, 300);
+}
+
+void AsdexScopeWidget::setRangeValue(int range) {
+    range = std::clamp(range, 6, 300);
+    halfRangeFeet_ = std::clamp(double(range) * 100.0,
+                                kMinHalfRangeFeet,
+                                kMaxHalfRangeFeet);
+    update();
+}
+
+void AsdexScopeWidget::startRangeCommand() {
+    if (commandType_ != CommandType::None) return;
+
+    commandType_ = CommandType::Range;
+    dcbEntryCommand_ = DcbEntryCommand::range(currentRangeValue());
+    datablockEdit_.reset();
+    editingTrackId_.clear();
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Hidden);
+    update();
+}
+
+int AsdexScopeWidget::currentRotationValue() const {
+    return normalizedDegrees(rotationDegrees_);
+}
+
+void AsdexScopeWidget::setRotationValue(int degrees) {
+    rotationDegrees_ = normalizedDegrees(degrees);
+    update();
+}
+
+void AsdexScopeWidget::rotateByDegrees(int deltaDegrees) {
+    setRotationValue(rotationDegrees_ + deltaDegrees);
+}
+
+void AsdexScopeWidget::startRotateCommand() {
+    if (commandType_ != CommandType::None) return;
+
+    commandType_ = CommandType::Rotate;
+    dcbEntryCommand_ = DcbEntryCommand::rotate(currentRotationValue());
+    datablockEdit_.reset();
+    editingTrackId_.clear();
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Hidden);
+    update();
+}
+
+QStringList AsdexScopeWidget::activeCommandLines() const {
+    if (datablockEdit_) return datablockEdit_->displayLines();
+    if (dcbEntryCommand_) return dcbEntryCommand_->displayLines();
+    return {};
+}
+
+void AsdexScopeWidget::renderScene(const QSize& renderSize) {
+    if (!renderer_ || renderSize.isEmpty()) return;
+
+    renderer::CommandBuffer* commandBuffer = renderer::getCommandBuffer();
+    commandBuffer->resetState();
+    commandBuffer->viewport(0, 0, renderSize.width(), renderSize.height());
+    commandBuffer->clear(renderer::RGBA::fromQColor(backgroundColor(mode_)));
+
+    const QMatrix4x4 worldProjection = viewProjection(renderSize);
+    commandBuffer->loadProjectionMatrix(worldProjection);
+    drawVideoMap(map_, commandBuffer, mode_);
+    drawRunwayClosures(runwayClosureGeometry_, commandBuffer, worldProjection);
+    drawTempAreas(tempAreaGeometry_,
+                  commandBuffer,
+                  worldProjection,
+                  [this, &renderSize](QPointF worldFeet) {
+                      return worldToFramebufferTopLeft(worldFeet, renderSize);
+                  });
+    drawTargets(targets_, commandBuffer, worldProjection, mode_, targetVectorSeconds_);
+
+    const QMatrix4x4 projection = screenProjection();
+    commandBuffer->loadProjectionMatrix(projection);
+
+    const DcbState dcbState = makeDcbState();
+    const DcbLayout dcbLayout = dcb_.layout(size(), asdexFont_, dcbState);
+    dcb_.drawQuads(commandBuffer, dcbLayout);
+
+    const std::uint32_t dcbFontTexture = fontTextureId(dcbLayout.renderFontSize);
+    if (fontTexturesReady_ && dcbFontTexture != 0) {
+        const int dcbHoverIndex =
+            hoveredDcbButtonIndex_ >= 0 && hoveredDcbButtonIndex_ < dcbLayout.buttons.size()
+                ? hoveredDcbButtonIndex_
+                : -1;
+
+        renderer::TextBuilder* dcbTextBuilder = renderer::getTextBuilder();
+        dcbTextBuilder->setFont(&asdexFont_);
+        dcb_.drawText(*dcbTextBuilder,
+                      asdexFont_,
+                      dcbFontTexture,
+                      dcbLayout,
+                      dcbHoverIndex);
+        dcbTextBuilder->generateCommands(commandBuffer);
+        renderer::returnTextBuilder(dcbTextBuilder);
+    }
+
+    const std::uint32_t listFontTexture = fontTextureId(2);
+    if (fontTexturesReady_ && listFontTexture != 0) {
+        DataBlockSettings datablockSettings;
+        datablockSettings.fontSize = 2;
+        datablockSettings.brightness = 95;
+        datablockSettings.leaderLength = 2;
+        datablockSettings.leaderDirection = LeaderDirection::NE;
+        datablockSettings.timesharePrimary = timesharePrimary_;
+        datablockSettings.alertInProgress = false;
+
+        drawDatablocks(targets_,
+                       commandBuffer,
+                       projection,
+                       [this, &renderSize](QPointF worldFeet) {
+                           return worldToScreenLogical(worldFeet, renderSize);
+                       },
+                       [this](const AsdexTarget& target) {
+                           return isDataBlockVisible(target);
+                       },
+                       asdexFont_,
+                       listFontTexture,
+                       datablockSettings);
+
+        commandBuffer->loadProjectionMatrix(projection);
+
+        renderer::TextBuilder* textBuilder = renderer::getTextBuilder();
+        textBuilder->setFont(&asdexFont_);
+
+        coastList_.render(*textBuilder, asdexFont_, listFontTexture, size());
+
+        const QStringList commandLines = activeCommandLines();
+        previewArea_.render(*textBuilder, asdexFont_, listFontTexture, commandLines);
+        textBuilder->generateCommands(commandBuffer);
+        renderer::returnTextBuilder(textBuilder);
+
+        if (datablockEdit_ || dcbEntryCommand_) {
+            commandBuffer->setRgba(renderer::RGBA::fromQColor(previewArea_.textColor()));
+            commandBuffer->lineWidth(1.0f);
+
+            renderer::LinesBuilder* lineBuilder = renderer::getLinesBuilder();
+            if (datablockEdit_) {
+                previewArea_.renderCommandCursor(*lineBuilder,
+                                                 asdexFont_,
+                                                 *datablockEdit_,
+                                                 projection);
+            } else if (dcbEntryCommand_) {
+                previewArea_.renderCommandCursor(*lineBuilder,
+                                                 asdexFont_,
+                                                 dcbEntryCommand_->cursorLine(),
+                                                 dcbEntryCommand_->cursorColumn(),
+                                                 projection);
+            }
+            lineBuilder->generateCommands(commandBuffer);
+            renderer::returnLinesBuilder(lineBuilder);
+        }
+    }
+
+    renderer_->renderCommandBuffer(commandBuffer);
+    renderer::returnCommandBuffer(commandBuffer);
+}
+
+DcbState AsdexScopeWidget::makeDcbState() const {
+    DcbState state;
+    state.range = currentRangeValue();
+    state.rotation = currentRotationValue();
+    state.vectorLength = targetVectorSeconds_;
+    state.leaderLength = 2;
+    state.nightMode = mode_ == Mode::Night;
+    state.showVectorLine = true;
+    state.showDataBlocks = showDataBlocks_;
+    state.dcbOn = !dcbOff_;
+    state.networkConnected = true;
+    return state;
+}
+
+QSize AsdexScopeWidget::framebufferRenderSize() const {
+    const qreal ratio = devicePixelRatioF();
+    return QSize(qRound(width() * ratio), qRound(height() * ratio));
+}
+
+std::uint32_t AsdexScopeWidget::fontTextureId(int fontSize) const {
+    return fontTextureIds_.value(fontSize, 0);
+}
+
+QMatrix4x4 AsdexScopeWidget::screenProjection() const {
+    QMatrix4x4 projection;
+    projection.setToIdentity();
+    projection.ortho(0.0f,
+                     static_cast<float>(width()),
+                     static_cast<float>(height()),
+                     0.0f,
+                     -1.0f,
+                     1.0f);
+    return projection;
+}
+
+QPointF AsdexScopeWidget::worldToScreenLogical(const QPointF& worldFeet,
+                                               const QSize& renderSize) const {
+    const double ppf = pixelsPerFoot(renderSize);
+    const double theta = radiansFromDegrees(currentRotationValue());
+    const double c = std::cos(theta);
+    const double s = std::sin(theta);
+
+    const double dx = worldFeet.x() - centerFeet_.x();
+    const double dy = worldFeet.y() - centerFeet_.y();
+    const double rx = c * dx - s * dy;
+    const double ry = s * dx + c * dy;
+
+    const double framebufferX = renderSize.width() * 0.5 + rx * ppf;
+    const double framebufferY = renderSize.height() * 0.5 - ry * ppf;
+
+    const qreal dpr = devicePixelRatioF();
+    return QPointF(framebufferX / dpr, framebufferY / dpr);
+}
+
+QPointF AsdexScopeWidget::worldToFramebufferTopLeft(const QPointF& worldFeet,
+                                                    const QSize& renderSize) const {
+    const double ppf = pixelsPerFoot(renderSize);
+    const double theta = radiansFromDegrees(currentRotationValue());
+    const double c = std::cos(theta);
+    const double s = std::sin(theta);
+
+    const double dx = worldFeet.x() - centerFeet_.x();
+    const double dy = worldFeet.y() - centerFeet_.y();
+    const double rx = c * dx - s * dy;
+    const double ry = s * dx + c * dy;
+
+    return QPointF(renderSize.width() * 0.5 + rx * ppf,
+                   renderSize.height() * 0.5 - ry * ppf);
+}
+
+QPointF AsdexScopeWidget::framebufferPoint(const QPointF& logicalPoint) const {
+    const qreal ratio = devicePixelRatioF();
+    return QPointF(logicalPoint.x() * ratio, logicalPoint.y() * ratio);
+}
+
+double AsdexScopeWidget::pixelsPerFoot(const QSize& renderSize) const {
+    if (renderSize.isEmpty() || halfRangeFeet_ <= 0.0) return 1.0;
+
+    const double availW = renderSize.width() * (1.0 - 2.0 * utils::kViewportMargin);
+    const double availH = renderSize.height() * (1.0 - 2.0 * utils::kViewportMargin);
+    const double radiusPx = 0.5 * std::min(availW, availH);
+    return radiusPx / halfRangeFeet_;
+}
+
+QPointF AsdexScopeWidget::screenToWorldFeet(const QPointF& logicalPoint,
+                                            const QSize& renderSize) const {
+    const QPointF point = framebufferPoint(logicalPoint);
+    const double ppf = pixelsPerFoot(renderSize);
+
+    if (ppf <= 0.0) return centerFeet_;
+
+    const double rx = (point.x() - renderSize.width() * 0.5) / ppf;
+    const double ry = (renderSize.height() * 0.5 - point.y()) / ppf;
+
+    const double theta = radiansFromDegrees(currentRotationValue());
+    const double c = std::cos(theta);
+    const double s = std::sin(theta);
+
+    const double dx = c * rx + s * ry;
+    const double dy = -s * rx + c * ry;
+
+    return QPointF(centerFeet_.x() + dx, centerFeet_.y() + dy);
+}
+
+QPointF AsdexScopeWidget::screenDeltaToWorldDelta(const QPointF& framebufferDelta,
+                                                  const QSize& renderSize) const {
+    const double ppf = pixelsPerFoot(renderSize);
+    if (ppf <= 0.0) return QPointF();
+
+    const double rx = framebufferDelta.x() / ppf;
+    const double ry = -framebufferDelta.y() / ppf;
+
+    const double theta = radiansFromDegrees(currentRotationValue());
+    const double c = std::cos(theta);
+    const double s = std::sin(theta);
+
+    const double dx = c * rx + s * ry;
+    const double dy = -s * rx + c * ry;
+    return QPointF(dx, dy);
+}
+
+void AsdexScopeWidget::zoomByFeet(double deltaFeet) {
+    const double nextRange = std::clamp(halfRangeFeet_ + deltaFeet,
+                                        kMinHalfRangeFeet,
+                                        kMaxHalfRangeFeet);
+    if (qFuzzyCompare(halfRangeFeet_, nextRange)) return;
+
+    halfRangeFeet_ = nextRange;
+    update();
+}
+
+void AsdexScopeWidget::zoomToCursorByFeet(double deltaFeet, const QPointF& cursorLogicalPoint) {
+    const QSize renderSize = framebufferRenderSize();
+    const QPointF worldBefore = screenToWorldFeet(cursorLogicalPoint, renderSize);
+    const double oldRange = halfRangeFeet_;
+    const double newRange = std::clamp(oldRange + deltaFeet,
+                                       kMinHalfRangeFeet,
+                                       kMaxHalfRangeFeet);
+
+    if (qFuzzyCompare(oldRange, newRange)) return;
+
+    halfRangeFeet_ = newRange;
+    const QPointF worldAfter = screenToWorldFeet(cursorLogicalPoint, renderSize);
+    centerFeet_ += worldBefore - worldAfter;
+    update();
+}
+
+bool AsdexScopeWidget::isPointOverDcb(const QPointF& logicalPoint) const {
+    if (!fontLoaded_) return false;
+
+    return dcb_.contains(logicalPoint, size(), asdexFont_, makeDcbState());
+}
+
+void AsdexScopeWidget::clearDcbHover() {
+    if (hoveredDcbButtonIndex_ == -1 && !hoveredDcbFunction_.has_value()) return;
+
+    hoveredDcbButtonIndex_ = -1;
+    hoveredDcbFunction_.reset();
+    update();
+}
+
+void AsdexScopeWidget::updateDcbHover(const QPointF& logicalPoint) {
+    if (!fontLoaded_) {
+        clearDcbHover();
+        return;
+    }
+
+    const DcbHit hit = dcb_.hitTest(logicalPoint, size(), asdexFont_, makeDcbState());
+    const int oldIndex = hoveredDcbButtonIndex_;
+    const std::optional<DcbFunction> oldFunction = hoveredDcbFunction_;
+
+    if (hit.overDcb && hit.buttonIndex >= 0) {
+        hoveredDcbButtonIndex_ = hit.buttonIndex;
+        hoveredDcbFunction_ = hit.function;
+    } else {
+        hoveredDcbButtonIndex_ = -1;
+        hoveredDcbFunction_.reset();
+    }
+
+    if (hoveredDcbButtonIndex_ != oldIndex || hoveredDcbFunction_ != oldFunction) update();
+}
+
+void AsdexScopeWidget::updateHoverCursor(const QPointF& logicalPoint) {
+    if (commandActive() || panning_) {
+        setAsdexCursor(CursorMode::Hidden);
+        return;
+    }
+
+    if (dcbMouseCaptured_) {
+        setAsdexCursor(CursorMode::Captured);
+        return;
+    }
+
+    if (isPointOverDcb(logicalPoint)) {
+        setAsdexCursor(CursorMode::Dcb);
+        return;
+    }
+
+    setAsdexCursor(CursorMode::Scope);
+}
+
+void AsdexScopeWidget::setAsdexCursor(asdex::CursorType type) {
+    if (cursors_.has(type)) setCursor(cursors_.cursor(type));
+}
+
+void AsdexScopeWidget::setAsdexCursor(CursorMode mode) {
+    if (currentCursorMode_ == mode) return;
+
+    currentCursorMode_ = mode;
+
+    switch (mode) {
+        case CursorMode::Scope:
+            if (cursors_.has(asdex::CursorType::Scope))
+                setCursor(cursors_.cursor(asdex::CursorType::Scope));
+            else
+                unsetCursor();
+            break;
+        case CursorMode::Dcb:
+            if (cursors_.has(asdex::CursorType::Dcb))
+                setCursor(cursors_.cursor(asdex::CursorType::Dcb));
+            else if (cursors_.has(asdex::CursorType::Scope))
+                setCursor(cursors_.cursor(asdex::CursorType::Scope));
+            else
+                unsetCursor();
+            break;
+        case CursorMode::Captured:
+            if (cursors_.has(asdex::CursorType::Captured))
+                setCursor(cursors_.cursor(asdex::CursorType::Captured));
+            else if (cursors_.has(asdex::CursorType::Dcb))
+                setCursor(cursors_.cursor(asdex::CursorType::Dcb));
+            else if (cursors_.has(asdex::CursorType::Scope))
+                setCursor(cursors_.cursor(asdex::CursorType::Scope));
+            else
+                unsetCursor();
+            break;
+        case CursorMode::Hidden:
+            setCursor(Qt::BlankCursor);
+            break;
+    }
+}
+
+QMatrix4x4 AsdexScopeWidget::viewProjection(const QSize& renderSize) const {
+    QMatrix4x4 matrix;
+    matrix.setToIdentity();
+    if (renderSize.isEmpty() || halfRangeFeet_ <= 0.0) return matrix;
+
+    const double availW = renderSize.width() * (1.0 - 2.0 * utils::kViewportMargin);
+    const double availH = renderSize.height() * (1.0 - 2.0 * utils::kViewportMargin);
+    const double radiusPx = 0.5 * std::min(availW, availH);
+    const double pxPerFoot = radiusPx / halfRangeFeet_;
+    const double sx = 2.0 * pxPerFoot / renderSize.width();
+    const double sy = 2.0 * pxPerFoot / renderSize.height();
+
+    const double theta = radiansFromDegrees(currentRotationValue());
+    const double c = std::cos(theta);
+    const double s = std::sin(theta);
+    const double cx = centerFeet_.x();
+    const double cy = centerFeet_.y();
+
+    matrix(0, 0) = static_cast<float>(sx * c);
+    matrix(0, 1) = static_cast<float>(-sx * s);
+    matrix(0, 3) = static_cast<float>(sx * (-c * cx + s * cy));
+    matrix(1, 0) = static_cast<float>(sy * s);
+    matrix(1, 1) = static_cast<float>(sy * c);
+    matrix(1, 3) = static_cast<float>(sy * (-s * cx - c * cy));
+    return matrix;
 }
 
 } // namespace asdex

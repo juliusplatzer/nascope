@@ -1,24 +1,38 @@
-cmake_minimum_required(VERSION 3.16)
-project(nascope_scope CXX)
-
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_AUTOMOC ON)
-
-find_package(Qt6 REQUIRED COMPONENTS Widgets WebSockets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network OpenGLWidgets WebSockets)
 find_package(ZLIB REQUIRED)
 
-add_executable(scope
-    main.cpp
-    scope.cpp
-    videomaps.cpp
-    maths.cpp
+add_library(nascope_asdex STATIC
+    window.cpp
+    atiscache.cpp
+    notamcache.cpp
+    cmdslew.cpp
     cursors.cpp
-    font.cpp
-    lists.cpp
-    targets.cpp
-    tempdata.cpp
-    tgtcache.cpp
     dcb.cpp
+    videomaps.cpp
+    tempdata.cpp
+    targets.cpp
+    datablocks.cpp
+    scope.cpp
+    lists.cpp
+    targetcache.cpp
 )
-target_link_libraries(scope PRIVATE Qt6::Widgets Qt6::WebSockets ZLIB::ZLIB)
+
+target_include_directories(nascope_asdex
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(nascope_asdex
+    PUBLIC
+        Qt6::Widgets
+        Qt6::Network
+        Qt6::OpenGLWidgets
+        Qt6::WebSockets
+        nascope_renderer
+        nascope_utils
+    PRIVATE
+        ZLIB::ZLIB
+)
+
+add_executable(asdex_scope main.cpp)
+target_link_libraries(asdex_scope PRIVATE nascope_asdex)

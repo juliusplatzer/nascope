@@ -1,83 +1,174 @@
-#pragma once
+#ifndef ASDEX_LISTS_H_
+#define ASDEX_LISTS_H_
 
+#include <QColor>
+#include <QDateTime>
+#include <QMatrix4x4>
 #include <QPointF>
 #include <QSize>
+#include <QSizeF>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
-class QPainter;
+#include <cstdint>
+#include <utility>
+#include <vector>
+
+namespace renderer {
+class BitmapFont;
+class LinesBuilder;
+class TextBuilder;
+}
 
 namespace asdex {
 
-class BitmapFontRenderer;
+class DatablockEditCommand;
 
-/**
- * Draws the ASDE-X radar-scope lists (coast / preview area / dep / arr / …).
- * Anchors are defined against a fixed 1300x900 reference layout and scaled to
- * the current widget size at draw time.
- *
- * Currently implemented:
- *   - coast list (date/time header)
- *   - preview area (RWY CFG / TWR CFG status lines + command cursor framework)
- */
-class Lists {
+struct TextFragment {
+    QString text;
+    QColor foreground;
+    QColor background = Qt::transparent;
+    bool underlined = false;
+    bool newLine = true;
+};
+
+struct TextBlock {
+    std::vector<TextFragment> fragments;
+    int lineSpacing = 0;
+};
+
+struct ScreenListStyle {
+    QPointF location = QPointF(50.0, 150.0);
+    QSizeF repositionSize = QSizeF(300.0, 500.0);
+
+    int fontSize = 2;
+    int brightness = 95;
+    int minBrightness = 20;
+    int lineSpacing = 3;
+
+    QColor baseTextColor = QColor(0, 248, 0);
+};
+
+class ScreenList {
 public:
-    static constexpr int kReferenceWidth  = 1300;
-    static constexpr int kReferenceHeight = 900;
+    explicit ScreenList(ScreenListStyle style);
 
-    /**
-     * Mutable state for the preview area (top-left status / command preview
-     * block — known internally as a "list" in ASDE-X parlance even though it
-     * doesn't actually look like one).
-     *
-     * Lines 0..2 are always present (RWY CFG / TWR CFG / SystemResponse) — an
-     * empty SystemResponse still reserves its vertical slot so that warning
-     * and command-preview lines below it stay on a fixed grid (CRC's `num2`
-     * = 3 + warnings convention).
-     */
-    struct PreviewArea {
-        QPointF location {50.0, 150.0};   // 1300×900 reference anchor
-        int     fontSize     = 2;
-        int     lineSpacing  = 3;
+    void setLocation(QPointF location) { style_.location = location; }
+    QPointF location() const { return style_.location; }
 
-        // Fixed status lines.
-        QString rwyConfig    = QStringLiteral("LIMITED");  // line 0 — placeholder
-        QString twrConfig    = QStringLiteral("GC");       // line 1 — placeholder ("GC" or "LC")
-        QString systemResponse;                            // line 2 — usually empty
+    const ScreenListStyle& style() const { return style_; }
 
-        // Optional warning lines (each adds 1 to `num2`).
-        bool    arrAlertsOff = false;
-        QString arrAlertsOffPositions;
-        bool    trkAlertInhib = false;
-
-        // Command-driven lines + cursor — populated by a future input manager.
-        QStringList commandLines;
-        bool        showCursor   = false;
-        int         cursorLine   = 0;  // index within commandLines
-        int         cursorColumn = 0;  // char column on that line
-    };
-
-    Lists() = default;
-
-    // Render every list onto `p` using `fonts` for glyphs.
-    void draw(QPainter& p, const QSize& widgetSize, BitmapFontRenderer& fonts) const;
-
-    // Left anchor of the coast list, in the 1300x900 reference layout.
-    // Repositionable at runtime — reserved for a future drag-to-move UI.
-    QPointF coastListLocation() const { return coastListLocation_; }
-    void    setCoastListLocation(QPointF p) { coastListLocation_ = p; }
-
-    // Mutable access to the preview-area state (RWY CFG / TWR CFG strings,
-    // optional warnings, command-driven lines + cursor).
-    PreviewArea&       preview()       { return preview_; }
-    const PreviewArea& preview() const { return preview_; }
+    void render(renderer::TextBuilder& textBuilder,
+                const renderer::BitmapFont& font,
+                std::uint32_t fontTextureId,
+                const TextBlock& block) const;
 
 private:
-    QPointF     coastListLocation_ {1000.0, 150.0};
-    PreviewArea preview_;
+    ScreenListStyle style_;
+};
 
-    void drawCoastList  (QPainter& p, const QSize& widgetSize, BitmapFontRenderer& fonts) const;
-    void drawPreviewArea(QPainter& p, const QSize& widgetSize, BitmapFontRenderer& fonts) const;
+QColor applyCrcBrightness(QColor color, int brightness, int minBrightness = 20);
+
+enum class CoastListEntryStatus {
+    Coasting,
+    Suspended,
+    Dropped,
+};
+
+struct CoastListEntry {
+    CoastListEntryStatus status = CoastListEntryStatus::Coasting;
+
+    QString trackId;
+    QString callsign;
+    QString beaconCode;
+
+    double timeoutSeconds = 0.0;
+    bool selected = false;
+};
+
+class CoastList {
+public:
+    CoastList();
+
+    void setVisible(bool visible) { visible_ = visible; }
+    bool visible() const { return visible_; }
+
+    void setEntries(QVector<CoastListEntry> entries) { entries_ = std::move(entries); }
+
+    void render(renderer::TextBuilder& textBuilder,
+                const renderer::BitmapFont& font,
+                std::uint32_t fontTextureId,
+                QSize displaySize) const;
+
+private:
+    QPointF locationForDisplay(QSize displaySize) const;
+    TextBlock buildHeaderBlock(QDateTime utcNow) const;
+
+    TextBlock buildFullBlock(QDateTime utcNow) const;
+    QString entryLine(const CoastListEntry& entry) const;
+    QChar entryChar(CoastListEntryStatus status) const;
+
+    bool visible_ = true;
+    bool expanded_ = false;
+    int offset_ = 0;
+
+    ScreenListStyle style_;
+    QVector<CoastListEntry> entries_;
+};
+
+struct PreviewAreaState {
+    QString runwayConfigName = QStringLiteral("WEST");
+    QStringList towerPositions = {QStringLiteral("LC"), QStringLiteral("GC")};
+    QString systemResponse;
+};
+
+class PreviewArea {
+public:
+    PreviewArea();
+
+    void setState(PreviewAreaState state) { state_ = std::move(state); }
+    const PreviewAreaState& state() const { return state_; }
+    bool setRunwayConfigName(QString name);
+    bool updateRunwayConfigFromRunways(const QStringList& landingRunways,
+                                       const QStringList& departureRunways);
+    void setSystemResponse(QString response);
+
+    bool loadDefaultStateFromConfigFile(const QString& path, QString* error = nullptr);
+    QColor textColor() const;
+
+    void render(renderer::TextBuilder& textBuilder,
+                const renderer::BitmapFont& font,
+                std::uint32_t fontTextureId,
+                const QStringList& commandLines = {}) const;
+    void renderCommandCursor(renderer::LinesBuilder& lineBuilder,
+                             const renderer::BitmapFont& font,
+                             const DatablockEditCommand& command,
+                             const QMatrix4x4& screenProjection) const;
+    void renderCommandCursor(renderer::LinesBuilder& lineBuilder,
+                             const renderer::BitmapFont& font,
+                             int cursorLine,
+                             int cursorColumn,
+                             const QMatrix4x4& screenProjection) const;
+
+private:
+    struct RunwayConfiguration {
+        QString name;
+        QStringList arrivalRunwayIds;
+        QStringList departureRunwayIds;
+    };
+
+    TextBlock buildTextBlock(const QStringList& commandLines) const;
+    QString matchedRunwayConfigName(const QStringList& landingRunways,
+                                    const QStringList& departureRunways) const;
+    int baseLineCount() const;
+
+    ScreenList list_;
+    PreviewAreaState state_;
+    QString defaultRunwayConfigName_;
+    QVector<RunwayConfiguration> runwayConfigurations_;
 };
 
 } // namespace asdex
+
+#endif  // ASDEX_LISTS_H_

@@ -1,354 +1,265 @@
-#include "targets.h"
+#include "asdex/targets.h"
 
-#include <QColor>
-#include <QDateTime>
-#include <QLatin1Char>
-#include <QPolygonF>
-#include <QString>
+#include "utils/math.h"
+#include "renderer/builders.h"
+#include "renderer/command_buffer.h"
+#include "renderer/geometry/tessellator.h"
 
-#include <array>
+#include <algorithm>
 #include <cmath>
 
-#include "utils.h"
-
 namespace asdex {
-
 namespace {
 
-struct GeoPoint { double x, y; };
+constexpr double kFeetPerDegree = 364560.0;
+constexpr int kMinTargetVectorSeconds = 1;
+constexpr int kMaxTargetVectorSeconds = 20;
+constexpr int kHistoryColors[] = {219, 187, 161, 138, 118, 101, 87};
 
-// Aircraft target outline, in *degrees* of lat/lon from the aircraft ref point
-// (despite the source's NM labeling — the magnitudes only make sense as
-// degrees; see kDegToNm). Nose at +Y (north) at heading 0.
-constexpr double kDegToNm = 60.0;  // 1° of latitude ≈ 60 NM
+QColor normalTargetColor() { return applyBrightness(QColor(248, 248, 248)); }
+QColor heavyTargetColor() { return applyBrightness(QColor(248, 128, 0)); }
+QColor unknownTargetColor() { return applyBrightness(QColor(0, 255, 255)); }
+QColor vectorColor() { return applyBrightness(QColor(140, 140, 140)); }
+QColor highlightColor() { return applyBrightness(QColor(255, 255, 255)); }
 
-constexpr std::array<GeoPoint, 23> kPolygonTgt = {{
-    {  0.0,          -0.000142545  },
-    {  0.0000209625, -0.0001607125 },
-    {  0.000069875,  -0.0001607125 },
-    {  0.000069875,  -0.000142545  },
-    {  0.00002795,   -0.0001118    },
-    {  0.00002795,   -0.0000559    },
-    {  0.000151293,  -0.00008385   },
-    {  0.000151293,  -0.0000559    },
-    {  0.00002795,    0.000013975  },
-    {  0.0000238175,  0.000120185  },
-    {  0.0000153625,  0.000137155  },
-    {  0.000008385,   0.0001439425 },
-    { -0.000008385,   0.0001439425 },
-    { -0.0000153625,  0.000137155  },
-    { -0.0000238175,  0.000120185  },
-    { -0.00002795,    0.000013975  },
-    { -0.000151293,  -0.0000559    },
-    { -0.000151293,  -0.00008385   },
-    { -0.00002795,   -0.0000559    },
-    { -0.00002795,   -0.0001118    },
-    { -0.000069875,  -0.000142545  },
-    { -0.000069875,  -0.0001607125 },
-    { -0.0000209625, -0.0001607125 },
-}};
-
-// Unknown / non-aircraft target — kite pointing at +Y (north) at heading 0.
-constexpr std::array<GeoPoint, 4> kPolygonUnkTgt = {{
-    {  0.000075, -0.000025 },
-    {  0.0,      -0.000125 },
-    { -0.000075, -0.000025 },
-    {  0.0,       0.000175 },
-}};
-
-constexpr double kHeavyScale       = 1.5;
-constexpr qint64 kAlertPeriodMs    = 1000;  // full flash cycle
-constexpr qint64 kTimeShareCycleMs = 8000;  // line-2 SP ↕ F/G/H/I cycle (4 s each phase)
-
-// Wall-clock derived so all alert targets rendered in the same frame (and
-// across widgets, in case we ever render more than one) see the same phase.
-bool alertRedPhase() {
-    const qint64 ms = QDateTime::currentMSecsSinceEpoch();
-    return (ms % kAlertPeriodMs) < (kAlertPeriodMs / 2);
+QPointF transformPoint(const QPointF& point,
+                       const QPointF& translate,
+                       double rotationDegrees,
+                       double scale) {
+    const double radians = rotationDegrees * M_PI / 180.0;
+    const double c = std::cos(radians);
+    const double s = std::sin(radians);
+    const double x = point.x() * scale;
+    const double y = point.y() * scale;
+    return QPointF(translate.x() + x * c - y * s,
+                   translate.y() + x * s + y * c);
 }
 
-// True during the "scratchpad" half of the line-2 cycle. Same wall-clock
-// trick as alertRedPhase so every datablock on screen flips in unison.
-bool scratchpadPhase() {
-    const qint64 ms = QDateTime::currentMSecsSinceEpoch();
-    return (ms % kTimeShareCycleMs) >= (kTimeShareCycleMs / 2);
+QPointF vectorEndFeet(const QPointF& start,
+                      double groundSpeedKnots,
+                      double trackDegrees,
+                      double vectorSeconds) {
+    const double distanceNm = groundSpeedKnots * vectorSeconds / 3600.0;
+    const double distanceFeet = distanceNm * utils::kFeetPerNm;
+    const double rad = trackDegrees * M_PI / 180.0;
+    return QPointF(start.x() + distanceFeet * std::sin(rad),
+                   start.y() + distanceFeet * std::cos(rad));
 }
 
-template <std::size_t N>
-QPolygonF rotatedPolygonNm(const std::array<GeoPoint, N>& pts,
-                           const QPointF& posNm, double headingDeg, double scale) {
-    const double h = headingDeg * M_PI / 180.0;
-    const double c = std::cos(h);
-    const double s = std::sin(h);
-    const double k = kDegToNm * scale;
-    // Heading is CW from north; for a point (x, y) in the target's local NM
-    // frame (nose at +Y), the world NM coords are:
-    //   xw = xt + x*cos(h) + y*sin(h)
-    //   yw = yt - x*sin(h) + y*cos(h)
-    QPolygonF out;
-    out.reserve(pts.size());
-    for (const auto& pt : pts) {
-        const double x = pt.x * k;
-        const double y = pt.y * k;
-        const double xw = posNm.x() + x * c + y * s;
-        const double yw = posNm.y() - x * s + y * c;
-        out << QPointF(xw, yw);
+QVector<QPointF> aircraftShapeFeet() {
+    const std::pair<double, double> points[] = {
+        {-0.000142545, 0.0},        {-0.0001607125, 2.09625E-05},
+        {-0.0001607125, 6.9875E-05},{-0.000142545, 6.9875E-05},
+        {-0.0001118, 2.795E-05},   {-5.59E-05, 2.795E-05},
+        {-8.385E-05, 0.000151293}, {-5.59E-05, 0.000151293},
+        {1.3975E-05, 2.795E-05},   {0.000120185, 2.38175E-05},
+        {0.000137155, 1.53625E-05},{0.0001439425, 8.385E-06},
+        {0.0001439425, -8.385E-06},{0.000137155, -1.53625E-05},
+        {0.000120185, -2.38175E-05},{1.3975E-05, -2.795E-05},
+        {-5.59E-05, -0.000151293},{-8.385E-05, -0.000151293},
+        {-5.59E-05, -2.795E-05},  {-0.0001118, -2.795E-05},
+        {-0.000142545, -6.9875E-05},{-0.0001607125, -6.9875E-05},
+        {-0.0001607125, -2.09625E-05},
+    };
+
+    QVector<QPointF> vertices;
+    vertices.reserve(int(std::size(points)));
+    for (const auto& [x, y] : points) {
+        vertices.push_back(QPointF(x * kFeetPerDegree, y * kFeetPerDegree));
     }
-    return out;
+    return vertices;
 }
 
-} // namespace
+QVector<QPointF> unknownShapeFeet() {
+    const std::pair<double, double> points[] = {
+        {-2.5E-05, 7.5E-05},
+        {-0.000125, 0.0},
+        {-2.5E-05, -7.5E-05},
+        {0.000175, 0.0},
+    };
 
-void drawHistoryDots(QPainter& p, const QTransform& nmToScreen,
-                     const QList<QPointF>& historyPosNm) {
-    constexpr double kHistRadiusNm = 0.003;   // ~18 ft — distinctly smaller than a target symbol
-    constexpr int    kMaxDots      = 7;
-    // Grey gradient indexed by *age*: kGrays[0] is the newest (lightest), kGrays[6]
-    // the oldest (dimmest). With fewer than 7 dots we use only the bright end.
-    static constexpr int kGrays[kMaxDots] = { 219, 187, 161, 138, 118, 101, 87 };
-
-    const int n = std::min(static_cast<int>(historyPosNm.size()), kMaxDots);
-    if (n == 0) return;
-
-    p.save();
-    p.setRenderHint(QPainter::Antialiasing, true);
-    p.setPen(Qt::NoPen);
-    for (int i = 0; i < n; ++i) {
-        // historyPosNm[0] = oldest, [n-1] = newest. Color is by distance-from-newest
-        // so the just-dropped point gets kGrays[0] and the trail darkens going back.
-        const int g = kGrays[(n - 1) - i];
-        const QPointF& posNm = historyPosNm.at(i);
-        const QPointF centerPx = nmToScreen.map(posNm);
-        const QPointF edgePx   = nmToScreen.map(posNm + QPointF(kHistRadiusNm, 0));
-        const double  radiusPx = std::hypot(edgePx.x() - centerPx.x(),
-                                            edgePx.y() - centerPx.y());
-        p.setBrush(applyBrightness(QColor(g, g, g), defaultBrightness()));
-        p.drawEllipse(centerPx, radiusPx, radiusPx);
+    QVector<QPointF> vertices;
+    vertices.reserve(int(std::size(points)));
+    for (const auto& [x, y] : points) {
+        vertices.push_back(QPointF(x * kFeetPerDegree, y * kFeetPerDegree));
     }
-    p.restore();
+    return vertices;
 }
 
-void drawVectorLine(QPainter& p, const QTransform& nmToScreen,
-                    const QPointF& targetPosNm,
-                    double headingDeg, double speedKts, int vectorSeconds) {
-    if (speedKts <= 0.0) return;
-    vectorSeconds = std::clamp(vectorSeconds, 1, 20);
-
-    const double lengthNm = speedKts * vectorSeconds / 3600.0;
-
-    // Compass heading θ (CW from north) → NM unit vector (sin θ, cos θ),
-    // since +y in NM is north (cf. nmToScreen's `scale(pxPerNm, -pxPerNm)`).
-    const double rad = headingDeg * M_PI / 180.0;
-    const double dx  = std::sin(rad);
-    const double dy  = std::cos(rad);
-    const QPointF endNm = targetPosNm + QPointF(dx * lengthNm, dy * lengthNm);
-
-    p.save();
-    p.setRenderHint(QPainter::Antialiasing, true);
-    QPen pen(applyBrightness(QColor(140, 140, 140), defaultBrightness()), 1.0);
-    pen.setStyle(Qt::SolidLine);
-    p.setPen(pen);
-    p.setBrush(Qt::NoBrush);
-    p.drawLine(nmToScreen.map(targetPosNm), nmToScreen.map(endNm));
-    p.restore();
+QVector<std::uint32_t> triangleFanIndices(int vertexCount) {
+    QVector<std::uint32_t> indices;
+    for (int i = 1; i + 1 < vertexCount; ++i) {
+        indices.push_back(0);
+        indices.push_back(std::uint32_t(i));
+        indices.push_back(std::uint32_t(i + 1));
+    }
+    return indices;
 }
 
-QPointF drawLeaderLine(QPainter& p, const QTransform& nmToScreen,
-                       const QPointF& targetPosNm,
-                       double angleDeg, int lengthSteps) {
-    constexpr double kStartOffsetPx      = 7.0;
-    constexpr double kStepLengthPx       = 15.0;
-    constexpr double kZeroLengthAnchorPx = 10.0;
+QVector<QPointF> circleShapeFeet(double radiusFeet, int segments) {
+    QVector<QPointF> vertices;
+    vertices.reserve(segments + 1);
+    vertices.push_back(QPointF(0.0, 0.0));
+    for (int i = 0; i <= segments; ++i) {
+        const double a = 2.0 * M_PI * double(i) / double(segments);
+        vertices.push_back(QPointF(radiusFeet * std::cos(a), radiusFeet * std::sin(a)));
+    }
+    return vertices;
+}
 
-    // Compass bearing → screen unit vector. Screen y grows downward, north is up.
-    const double rad = angleDeg * M_PI / 180.0;
-    const double dx  =  std::sin(rad);
-    const double dy  = -std::cos(rad);
+QVector<std::uint32_t> circleFanIndices(int segments) {
+    QVector<std::uint32_t> indices;
+    for (int i = 1; i <= segments; ++i) {
+        indices.push_back(0);
+        indices.push_back(std::uint32_t(i));
+        indices.push_back(std::uint32_t(i + 1));
+    }
+    return indices;
+}
 
-    const QPointF targetPx = nmToScreen.map(targetPosNm);
+QVector<QPointF> regularRingFeet(int sides, double radiusFeet) {
+    QVector<QPointF> points;
+    points.reserve(sides + 1);
+    for (int i = 0; i <= sides; ++i) {
+        const double a = 2.0 * M_PI * double(i) / double(sides);
+        points.push_back(QPointF(radiusFeet * std::cos(a), radiusFeet * std::sin(a)));
+    }
+    return points;
+}
 
-    if (lengthSteps <= 0) {
-        return targetPx + QPointF(dx * kZeroLengthAnchorPx, dy * kZeroLengthAnchorPx);
+void addTransformedIndexed(renderer::TrianglesBuilder& builder,
+                           const QVector<QPointF>& points,
+                           const QVector<std::uint32_t>& indices,
+                           const QPointF& position,
+                           double heading,
+                           double scale) {
+    QVector<QPointF> transformed;
+    transformed.reserve(points.size());
+    for (const QPointF& point : points) {
+        transformed.push_back(transformPoint(point, position, 90.0 - heading, scale));
+    }
+    builder.addIndexed(transformed, indices);
+}
+
+void addTargetSymbols(const QVector<AsdexTarget>& targets, renderer::CommandBuffer* cb) {
+    const QVector<QPointF> aircraftPoints = aircraftShapeFeet();
+    renderer::TessellatedPolygon aircraftTess = renderer::tessellateSimplePolygon(aircraftPoints);
+    if (aircraftTess.indices.isEmpty()) {
+        aircraftTess.vertices = aircraftPoints;
+        aircraftTess.indices = triangleFanIndices(aircraftPoints.size());
     }
 
-    const double endDist  = kStartOffsetPx + lengthSteps * kStepLengthPx;
-    const QPointF startPx = targetPx + QPointF(dx * kStartOffsetPx, dy * kStartOffsetPx);
-    const QPointF endPx   = targetPx + QPointF(dx * endDist,        dy * endDist);
+    const QVector<QPointF> unknownPoints = unknownShapeFeet();
+    const QVector<std::uint32_t> unknownIndices = triangleFanIndices(unknownPoints.size());
 
-    p.save();
-    p.setRenderHint(QPainter::Antialiasing, true);
-    QPen pen(applyBrightness(QColor(0, 208, 0), defaultBrightness()), 1.0);
-    pen.setStyle(Qt::SolidLine);
-    p.setPen(pen);
-    p.setBrush(Qt::NoBrush);
-    p.drawLine(startPx, endPx);
-    p.restore();
+    renderer::TrianglesBuilder* normalBuilder = renderer::getTrianglesBuilder();
+    renderer::TrianglesBuilder* heavyBuilder = renderer::getTrianglesBuilder();
+    renderer::TrianglesBuilder* unknownBuilder = renderer::getTrianglesBuilder();
 
-    return endPx;
-}
-
-void drawHighlightRing(QPainter& p, const QTransform& nmToScreen,
-                       const QPointF& posNm, bool heavy) {
-    constexpr double kHighlightRadiusNm = 0.012;  // ~73 ft — matches the 150 ft pick radius
-    const double radiusNm = heavy ? kHighlightRadiusNm * kHeavyScale : kHighlightRadiusNm;
-
-    // Derive the on-screen radius from the transform itself so any future
-    // rotation / non-uniform scale in nmToScreen stays consistent.
-    const QPointF centerPx = nmToScreen.map(posNm);
-    const QPointF edgePx   = nmToScreen.map(posNm + QPointF(radiusNm, 0));
-    const double  radiusPx = std::hypot(edgePx.x() - centerPx.x(),
-                                        edgePx.y() - centerPx.y());
-
-    p.save();
-    p.setRenderHint(QPainter::Antialiasing, true);
-    p.setPen(QPen(applyBrightness(QColor(255, 255, 255), defaultBrightness()), 1));
-    p.setBrush(Qt::NoBrush);
-    p.drawEllipse(centerPx, radiusPx, radiusPx);
-    p.restore();
-}
-
-void drawTarget(QPainter& p, const QTransform& nmToScreen,
-                const QPointF& posNm, double headingDeg, TargetType type, bool alert) {
-    QPolygonF screen;
-    QColor    typeFill;
-    switch (type) {
-        case TargetType::Normal:
-            screen   = nmToScreen.map(rotatedPolygonNm(kPolygonTgt, posNm, headingDeg, 1.0));
-            typeFill = QColor(248, 248, 248);
-            break;
-        case TargetType::Heavy:
-            screen   = nmToScreen.map(rotatedPolygonNm(kPolygonTgt, posNm, headingDeg, kHeavyScale));
-            typeFill = QColor(248, 128, 0);
-            break;
-        case TargetType::Unknown:
-            screen   = nmToScreen.map(rotatedPolygonNm(kPolygonUnkTgt, posNm, headingDeg, 1.0));
-            typeFill = QColor(0, 255, 255);
-            break;
-    }
-
-    const QColor fill = (alert && alertRedPhase()) ? QColor(255, 0, 0) : typeFill;
-
-    p.save();
-    p.setRenderHint(QPainter::Antialiasing, true);
-    p.setPen(Qt::NoPen);
-    p.setBrush(applyBrightness(fill, defaultBrightness()));
-    p.drawPolygon(screen);
-    p.restore();
-}
-
-namespace {
-
-// CRC-style: append " <token>" only if `token` is non-empty.
-void appendField(QString& sb, const QString& token) {
-    if (!token.isEmpty()) sb += QLatin1Char(' ') + token;
-}
-
-QString formatHundreds(std::optional<int> ft) {
-    if (!ft) return QStringLiteral("XXX");
-    const int hund = std::clamp(*ft / 100, 0, 999);
-    return QStringLiteral("%1").arg(hund, 3, 10, QLatin1Char('0'));
-}
-
-QString formatTens(std::optional<int> kt) {
-    if (!kt) return QString();
-    const int tens = std::clamp(*kt / 10, 0, 99);
-    return QStringLiteral("%1").arg(tens, 2, 10, QLatin1Char('0'));
-}
-
-bool isLeftLeader(double angleDeg) {
-    // Round to the nearest 45 ° step and check against SW/W/NW.
-    const int rounded = ((static_cast<int>(std::round(angleDeg)) % 360) + 360) % 360;
-    return rounded == 225 || rounded == 270 || rounded == 315;
-}
-
-} // namespace
-
-void drawDatablock(QPainter& p, BitmapFontRenderer& font,
-                   const QPointF& anchorPx, double leaderAngleDeg,
-                   const DatablockFields& f,
-                   DatablockKind kind, int fontSize) {
-    if (!font.isValid()) return;
-
-    const bool full = (kind == DatablockKind::Full);
-
-    // ---- Build line strings ------------------------------------------------
-    // Each line builds a StringBuilder-style buffer with leading spaces between
-    // fields, then trims — disabled / missing fields collapse without leaving
-    // placeholder gaps.
-
-    QString line0;
-    if (f.dupBeacon) line0 = QStringLiteral("DUP BCN");
-
-    QString line1 = f.hasFlightPlan ? f.callsign : f.beacon;  // fieldB or fieldC
-    if (full) {
-        line1 += QLatin1Char(' ') + formatHundreds(f.altitudeFt);          // fieldD
-        line1 += f.coasted ? QStringLiteral(" CST") : QStringLiteral(" FUS");  // fieldE
-    }
-    line1 = line1.trimmed();
-
-    // Build both candidates for line 2 (F/G/H/I set vs. SP1 SP2). When both
-    // halves are populated, the wall-clock phase picks which one this frame
-    // shows; when only one side has content, that side wins unconditionally
-    // (no "blink to blank" if the user has set scratchpads on a target with
-    // no aircraft type / wake / fix / speed).
-    QString line2Fields;
-    appendField(line2Fields, f.acType);                              // fieldF (always)
-    if (full) appendField(line2Fields, f.category);                  // fieldG (Full only)
-    appendField(line2Fields, f.exitFix);                             // fieldH (always)
-    if (full) appendField(line2Fields, formatTens(f.speedKt));       // fieldI (Full only)
-    line2Fields = line2Fields.trimmed();
-
-    QString line2Sp;
-    appendField(line2Sp, f.sp1);                                     // fieldJ (scratchpad 1)
-    appendField(line2Sp, f.sp2);                                     // fieldK (scratchpad 2)
-    line2Sp = line2Sp.trimmed();
-
-    QString line2;
-    if (line2Sp.isEmpty())          line2 = line2Fields;
-    else if (line2Fields.isEmpty()) line2 = line2Sp;
-    else                            line2 = scratchpadPhase() ? line2Sp : line2Fields;
-
-    const QString lines[3] = { line0, line1, line2 };
-
-    // ---- Measure -----------------------------------------------------------
-    const int height = font.lineHeight(fontSize);
-    int widths[3] = {0, 0, 0};
-    int maxLineWidth   = 0;
-    int longestLineIdx = 0;  // ties keep the topmost (CRC's "longestHighest" path)
-    for (int i = 0; i < 3; ++i) {
-        widths[i] = font.measureText(lines[i], fontSize).width();
-        if (widths[i] > maxLineWidth) {
-            maxLineWidth   = widths[i];
-            longestLineIdx = i;
+    for (const AsdexTarget& target : targets) {
+        if (target.correlated) {
+            renderer::TrianglesBuilder& builder = target.heavy ? *heavyBuilder : *normalBuilder;
+            addTransformedIndexed(builder,
+                                  aircraftTess.vertices,
+                                  aircraftTess.indices,
+                                  target.positionFeet,
+                                  target.headingDegrees,
+                                  target.heavy ? 1.5 : 1.0);
+        } else {
+            addTransformedIndexed(*unknownBuilder,
+                                  unknownPoints,
+                                  unknownIndices,
+                                  target.positionFeet,
+                                  target.groundTrackDegrees,
+                                  1.0);
         }
     }
-    if (maxLineWidth == 0) return;  // nothing to draw
 
-    // ---- Position ----------------------------------------------------------
-    constexpr int kLineSpacingPx = 2;     // gap between datablock lines (lists use 5)
-    const     int lineStep       = height + kLineSpacingPx;
+    cb->setRgba(renderer::RGBA::fromQColor(normalTargetColor()));
+    normalBuilder->generateCommands(cb);
+    cb->setRgba(renderer::RGBA::fromQColor(heavyTargetColor()));
+    heavyBuilder->generateCommands(cb);
+    cb->setRgba(renderer::RGBA::fromQColor(unknownTargetColor()));
+    unknownBuilder->generateCommands(cb);
 
-    const bool isLeft = isLeftLeader(leaderAngleDeg);
+    renderer::returnTrianglesBuilder(unknownBuilder);
+    renderer::returnTrianglesBuilder(heavyBuilder);
+    renderer::returnTrianglesBuilder(normalBuilder);
+}
 
-    // Right-default: leader endpoint sits at the centre of line 1 (middle).
-    int x = static_cast<int>(std::round(anchorPx.x() + 2));
-    int y = static_cast<int>(std::round(anchorPx.y() - height * 3.0 / 2.0 - kLineSpacingPx));
+} // namespace
 
-    if (isLeft) {
-        x = static_cast<int>(std::round(anchorPx.x() - 2 - maxLineWidth));
-        // Vertical correction so the longest line aligns with the leader endpoint
-        // (CRC's `num4`). Only the != N branch is reachable here — we never
-        // produce a left datablock for a north-pointing leader.
-        const int verticalCorrection = lineStep * (-1 + longestLineIdx);
-        y -= verticalCorrection;
+int clampedTargetVectorSeconds(int seconds) {
+    return std::clamp(seconds, kMinTargetVectorSeconds, kMaxTargetVectorSeconds);
+}
+
+void drawTargets(const QVector<AsdexTarget>& targets,
+                 renderer::CommandBuffer* commandBuffer,
+                 const QMatrix4x4& worldProjection,
+                 Mode mode,
+                 int vectorSeconds) {
+    Q_UNUSED(mode);
+    if (!commandBuffer) return;
+
+    commandBuffer->loadProjectionMatrix(worldProjection);
+    vectorSeconds = clampedTargetVectorSeconds(vectorSeconds);
+
+    constexpr int kHistoryColorCount = int(sizeof(kHistoryColors) / sizeof(kHistoryColors[0]));
+    const QVector<QPointF> dotPoints = circleShapeFeet(0.003 * utils::kFeetPerNm, 12);
+    const QVector<std::uint32_t> dotIndices = circleFanIndices(12);
+
+    for (int colorIndex = 0; colorIndex < kHistoryColorCount; ++colorIndex) {
+        renderer::TrianglesBuilder* builder = renderer::getTrianglesBuilder();
+        for (const AsdexTarget& target : targets) {
+            const int count = std::min(int(target.history.size()), kHistoryColorCount);
+            for (int i = 0; i < count; ++i) {
+                const int ageFromNewest = count - 1 - i;
+                if (ageFromNewest != colorIndex) continue;
+
+                QVector<QPointF> translated;
+                translated.reserve(dotPoints.size());
+                for (const QPointF& point : dotPoints)
+                    translated.push_back(point + target.history[i].positionFeet);
+                builder->addIndexed(translated, dotIndices);
+            }
+        }
+        const int value = kHistoryColors[colorIndex];
+        commandBuffer->setRgba(renderer::RGBA::fromQColor(applyBrightness(QColor(value, value, value))));
+        builder->generateCommands(commandBuffer);
+        renderer::returnTrianglesBuilder(builder);
     }
 
-    // ---- Render ------------------------------------------------------------
-    const QColor color = applyBrightness(QColor(0, 208, 0), defaultBrightness());
-    for (int i = 0; i < 3; ++i) {
-        if (lines[i].isEmpty()) continue;
-        font.drawTextTopLeft(p, x, y + i * lineStep, lines[i], fontSize, color);
+    renderer::LinesBuilder* ringBuilder = renderer::getLinesBuilder();
+    const QVector<QPointF> ring = regularRingFeet(20, 0.012 * utils::kFeetPerNm);
+    for (const AsdexTarget& target : targets) {
+        if (!target.highlighted) continue;
+
+        QVector<QPointF> transformed;
+        transformed.reserve(ring.size());
+        for (const QPointF& point : ring)
+            transformed.push_back(target.positionFeet + point * (target.heavy ? 1.5 : 1.0));
+        ringBuilder->addLineStrip(transformed);
     }
+    commandBuffer->setRgba(renderer::RGBA::fromQColor(highlightColor()));
+    commandBuffer->lineWidth(1.0f);
+    ringBuilder->generateCommands(commandBuffer);
+    renderer::returnLinesBuilder(ringBuilder);
+
+    addTargetSymbols(targets, commandBuffer);
+
+    renderer::LinesBuilder* vectorBuilder = renderer::getLinesBuilder();
+    for (const AsdexTarget& target : targets) {
+        if (target.groundSpeedKnots <= 0.0) continue;
+        vectorBuilder->addLine(target.positionFeet,
+                               vectorEndFeet(target.positionFeet,
+                                             target.groundSpeedKnots,
+                                             target.groundTrackDegrees,
+                                             vectorSeconds));
+    }
+    commandBuffer->setRgba(renderer::RGBA::fromQColor(vectorColor()));
+    commandBuffer->lineWidth(1.0f);
+    vectorBuilder->generateCommands(commandBuffer);
+    renderer::returnLinesBuilder(vectorBuilder);
 }
 
 } // namespace asdex

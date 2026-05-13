@@ -1,35 +1,32 @@
+#include "asdex/window.h"
+
 #include <QApplication>
 #include <QCommandLineParser>
-#include <QDebug>
-
-#include "scope.h"
-#include "tgtcache.h"
-#include "videomaps.h"
+#include <QSurfaceFormat>
 
 int main(int argc, char** argv) {
+    QSurfaceFormat format;
+    format.setVersion(3, 3);
+    format.setProfile(QSurfaceFormat::CoreProfile);
+    format.setSamples(0);
+    format.setDepthBufferSize(24);
+    format.setStencilBufferSize(8);
+    QSurfaceFormat::setDefaultFormat(format);
+
     QApplication app(argc, argv);
+    QApplication::setApplicationName(QStringLiteral("nascope-asdex"));
 
     QCommandLineParser parser;
-    parser.setApplicationDescription("nascope ASDE-X scope");
+    parser.setApplicationDescription(QStringLiteral("nascope ASDE-X shell"));
     parser.addHelpOption();
-    parser.addPositionalArgument("icao", "ICAO code of the airport videomap to render.");
+    parser.addPositionalArgument(QStringLiteral("airport"),
+                                 QStringLiteral("ICAO airport code to load."));
     parser.process(app);
 
-    const QStringList pos = parser.positionalArguments();
-    if (pos.isEmpty()) {
-        qCritical().noquote() << "usage: scope <ICAO>";
-        return 2;
-    }
+    const QStringList args = parser.positionalArguments();
+    if (args.isEmpty()) return 2;
 
-    const QString icao = pos.first();
-    asdex::VideoMap map = asdex::VideoMap::load(icao);
-    if (!map.isValid()) {
-        qCritical().noquote() << "no videomap for" << icao;
-        return 3;
-    }
-
-    asdex::TgtCache cache(icao);
-    asdex::Scope    scope(std::move(map), &cache);
-    scope.show();
+    asdex::AsdexShell shell(args.first().toUpper());
+    shell.show();
     return app.exec();
 }

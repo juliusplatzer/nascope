@@ -1,805 +1,512 @@
-#include "tempdata.h"
+#include "asdex/tempdata.h"
 
-#include "maths.h"
-#include "utils.h"
+#include "asdex/colors.h"
+#include "utils/math.h"
+#include "renderer/builders.h"
+#include "renderer/command_buffer.h"
+#include "renderer/geometry/tessellator.h"
 
-#include <QColor>
-#include <QDebug>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QJsonParseError>
-#include <QJsonValue>
-#include <QLineF>
-#include <QPainterPath>
-#include <QPen>
-#include <QPointF>
-#include <QProcess>
-#include <QRectF>
-#include <QSet>
-#include <QVector>
-#include <QtMath>
+#include <QRegularExpression>
+#include <QStringList>
+#include <QTransform>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
-#include <functional>
-#include <limits>
-#include <queue>
+#include <optional>
+#include <utility>
 #include <vector>
 
 namespace asdex {
-
 namespace {
 
-// applyBrightness is on the 1..99 integer scale (kBrightnessMax = 99). 95
-// = the kBrightnessDefault — same brightness the videomap, targets, and
-// vector lines pick up via defaultBrightness() so the closure overlays
-// match the rest of the scope.
-constexpr int kTempDataBrightness = 95;
+constexpr int kTempMapAreasBrightness = 95;
+constexpr int kTempMapAreasMinBrightness = 20;
+constexpr double kAdjacentEdgeMaxDistanceFeet = 20.0;
+constexpr double kAdjacentEdgeMaxAngleDegrees = 5.0;
+constexpr double kAdjacentEdgeMinLengthRatio = 0.85;
+constexpr double kAdjacentEdgeMinOverlapRatio = 0.85;
 
-// Hatch parameters — match CRC's fragment shader literally so the visual
-// cadence (slope, stripe thickness, gap) is identical.
-constexpr int kHatchYScale  = 4;   // x-pixels of slant per y-pixel
-constexpr int kHatchSpacing = 50;  // distance between successive stripes
-constexpr int kHatchWidth   = 5;   // thickness of each stripe (along x)
-
-QColor tempDataColor() {
-    return applyBrightness(QColor(255, 0, 0), kTempDataBrightness);
+double dot(const QPointF& a, const QPointF& b) {
+    return a.x() * b.x() + a.y() * b.y();
 }
 
-} // namespace
-
-void drawClosedAreas(QPainter& p, const QPolygonF& polyNm, const QTransform& nmToScreen) {
-    if (polyNm.size() < 3) return;
-
-    const QPolygonF poly  = nmToScreen.map(polyNm);
-    const QColor    color = tempDataColor();
-
-    p.save();
-    // CRC's hatch is per-pixel discard; aliased rendering here keeps the
-    // stripe edges crisp instead of fading them.
-    p.setRenderHint(QPainter::Antialiasing, false);
-
-    // Outline pass — 1px red around the polygon's outer ring.
-    QPen pen(color);
-    pen.setCosmetic(true);
-    pen.setWidthF(1.0);
-    p.setPen(pen);
-    p.setBrush(Qt::NoBrush);
-    p.drawPolygon(poly);
-
-    // Hatch pass — clip to the polygon, then sweep parallelogram bands across
-    // its screen-space bbox. Each band corresponds to one filled stripe of
-    // CRC's shader: { (x,y) : 50k ≤ offset + x − 4y ≤ 50k + 5 }.
-    QPainterPath clipPath;
-    clipPath.addPolygon(poly);
-    clipPath.closeSubpath();
-    p.setClipPath(clipPath, Qt::IntersectClip);
-
-    // Per-area phase, anchored at the first polygon point in screen coords.
-    // The phase scalar must match the stripe equation below
-    // (`offset + x - 4y`), otherwise the clipped hatch behaves like a static
-    // screen layer under a moving polygon-shaped mask.
-    const QPointF p0 = poly.first();
-    const double  offset = -std::fmod(p0.x() - kHatchYScale * p0.y(), kHatchSpacing);
-
-    const QRectF bbox    = poly.boundingRect();
-    const double yTop    = bbox.top();
-    const double yBottom = bbox.bottom();
-    const double xLeft   = bbox.left();
-    const double xRight  = bbox.right();
-
-    // Range of stripe indices whose band intersects the bbox. At y=yTop the
-    // band's leading edge is xMin = 50k − offset + 4·yTop, which must be
-    // ≤ xRight; at y=yBottom the trailing edge xMax = 50k − offset + 5 +
-    // 4·yBottom must be ≥ xLeft. Solving for k:
-    const int kMin = static_cast<int>(std::floor(
-        (xLeft  - kHatchYScale * yBottom - kHatchWidth + offset) / kHatchSpacing));
-    const int kMax = static_cast<int>(std::ceil(
-        (xRight - kHatchYScale * yTop                  + offset) / kHatchSpacing));
-
-    p.setPen(Qt::NoPen);
-    p.setBrush(color);
-
-    for (int k = kMin; k <= kMax; ++k) {
-        const double base = static_cast<double>(k) * kHatchSpacing - offset;
-        QPolygonF band;
-        band << QPointF(base                + kHatchYScale * yTop,    yTop)
-             << QPointF(base + kHatchWidth  + kHatchYScale * yTop,    yTop)
-             << QPointF(base + kHatchWidth  + kHatchYScale * yBottom, yBottom)
-             << QPointF(base                + kHatchYScale * yBottom, yBottom);
-        p.drawPolygon(band);
-    }
-
-    p.restore();
+double cross(const QPointF& a, const QPointF& b) {
+    return a.x() * b.y() - a.y() * b.x();
 }
 
-namespace {
-
-// Long-axis direction for a 4-corner runway rectangle. Among the 6 pairwise
-// distances of 4 corners, sorted ascending we expect (W, W, L, L, D, D);
-// index 2 is one of the two long edges, whose direction = the runway axis.
-// Robust against magnetic-vs-true heading mismatch and arbitrary corner
-// ordering, which a heading-driven axis at e.g. KSFO (~14° declination)
-// gets badly wrong — the perp projection there gets dominated by length
-// instead of width and the segment length explodes.
-QPointF longAxisDir(const QPolygonF& c) {
-    if (c.size() != 4) return QPointF(0.0, 1.0);
-
-    struct Edge { int i, j; double distSq; };
-    Edge edges[6];
-    int k = 0;
-    for (int i = 0; i < 4; ++i) {
-        for (int j = i + 1; j < 4; ++j) {
-            const QPointF d = c[j] - c[i];
-            edges[k++] = { i, j, d.x() * d.x() + d.y() * d.y() };
-        }
-    }
-    std::sort(edges, edges + 6,
-              [](const Edge& a, const Edge& b) { return a.distSq < b.distSq; });
-
-    // edges[0..1] are the short edges (W), [2..3] long (L), [4..5] diagonals.
-    const QPointF v   = c[edges[2].j] - c[edges[2].i];
-    const double  len = std::hypot(v.x(), v.y());
-    return (len > 0.0) ? QPointF(v.x() / len, v.y() / len) : QPointF(0.0, 1.0);
+double length(const QPointF& v) {
+    return std::hypot(v.x(), v.y());
 }
 
-} // namespace
-
-void drawRunwayClosure(QPainter& p,
-                       const QPolygonF& cornersNm,
-                       const QTransform& nmToScreen) {
-    if (cornersNm.size() != 4) return;
-
-    constexpr double kClosureAngleDeg = 15.0;
-
-    const QPointF axis = longAxisDir(cornersNm);
-    const QPointF perp(axis.y(), -axis.x());  // 90° to the right of axis
-
-    // With exactly 4 corners + an axis derived from the polygon's own long
-    // edge, each (±axis, ±perp) extremum picks a unique, real corner.
-    auto findCorner = [&](double axisSign, double perpSign) {
-        QPointF best;
-        double  bestScore = -std::numeric_limits<double>::infinity();
-        for (const QPointF& v : cornersNm) {
-            const double score = axisSign * QPointF::dotProduct(v, axis)
-                               + perpSign * QPointF::dotProduct(v, perp);
-            if (score > bestScore) { bestScore = score; best = v; }
-        }
-        return best;
-    };
-    const QPointF cornerFL = findCorner(+1, -1);  // front, left of axis
-    const QPointF cornerFR = findCorner(+1, +1);  // front, right
-    const QPointF cornerBL = findCorner(-1, -1);  // back,  left
-    const QPointF cornerBR = findCorner(-1, +1);  // back,  right
-
-    // Runway width (perpendicular extent) — also the perp distance each X arm
-    // has to cover from its corner to the opposite long edge.
-    double perpMin =  std::numeric_limits<double>::infinity();
-    double perpMax = -std::numeric_limits<double>::infinity();
-    for (const QPointF& v : cornersNm) {
-        const double pp = QPointF::dotProduct(v, perp);
-        perpMin = std::min(perpMin, pp);
-        perpMax = std::max(perpMax, pp);
-    }
-    const double width = perpMax - perpMin;
-    if (width <= 0.0) return;
-
-    // Each arm leaves its corner at ±15° to axis, going inward, and stops
-    // when it crosses the opposite long edge. With angle 15° to axis the
-    // segment length is `width / sin(15°)` — total path length to traverse
-    // the full perpendicular extent at that slant.
-    const double aRad   = qDegreesToRadians(kClosureAngleDeg);
-    const double cosA   = std::cos(aRad);
-    const double sinA   = std::sin(aRad);
-    const double segLen = width / sinA;
-
-    auto inward = [&](double signAxis, double signPerp) {
-        return signAxis * cosA * axis + signPerp * sinA * perp;
-    };
-
-    struct Seg { QPointF start; QPointF dir; };
-    const Seg segs[4] = {
-        { cornerFL, inward(-1, +1) },  // FL → back-right (crosses FR's arm at front-end midline)
-        { cornerFR, inward(-1, -1) },  // FR → back-left
-        { cornerBL, inward(+1, +1) },  // BL → front-right (crosses BR's arm at rollout-end midline)
-        { cornerBR, inward(+1, -1) },  // BR → front-left
-    };
-
-    p.save();
-    // Pure white, no brightness scaling — closure markings are spec'd at
-    // 100% intensity to stay legible against the runway fill.
-    QPen pen(QColor(255, 255, 255));
-    pen.setCosmetic(true);
-    pen.setWidthF(1.0);
-    p.setPen(pen);
-    p.setBrush(Qt::NoBrush);
-
-    for (const Seg& s : segs) {
-        const QPointF endNm = s.start + s.dir * segLen;
-        p.drawLine(nmToScreen.map(s.start), nmToScreen.map(endNm));
-    }
-
-    p.restore();
+double distanceSquared(const QPointF& a, const QPointF& b) {
+    const QPointF d = b - a;
+    return dot(d, d);
 }
 
-namespace {
+bool samePoint(const QPointF& a, const QPointF& b, double toleranceFeet = 1e-4) {
+    return distanceSquared(a, b) <= toleranceFeet * toleranceFeet;
+}
 
-constexpr double kTaxiwayAdjacencyToleranceM = 2.0;
-constexpr double kEarthRadiusM = 6371008.8;
+QVector<QPointF> normalizedRing(const QVector<QPointF>& polygonFeet) {
+    QVector<QPointF> ring;
+    ring.reserve(polygonFeet.size());
 
-struct LocalMeterProjector {
-    double lon0 = 0.0;
-    double lat0 = 0.0;
-    double cosLat0 = 1.0;
-
-    QPointF map(double lon, double lat) const {
-        const double degToRad = M_PI / 180.0;
-        return QPointF((lon - lon0) * degToRad * kEarthRadiusM * cosLat0,
-                       (lat - lat0) * degToRad * kEarthRadiusM);
+    for (const QPointF& point : polygonFeet) {
+        if (!ring.isEmpty() && samePoint(ring.last(), point)) continue;
+        ring.push_back(point);
     }
+
+    if (ring.size() > 1 && samePoint(ring.first(), ring.last())) ring.removeLast();
+    return ring;
+}
+
+struct EdgeRecord {
+    int meshIndex = -1;
+    QPointF a;
+    QPointF b;
 };
 
-struct TaxiwayClosureNode {
-    int          nodeIndex = -1;
-    int          originalIndex = -1;
-    QString      id;
-    QString      name;
-    QSet<QString> tokens;
-    QPolygonF    geomM;
-    QPointF      centroidM;
-    QRectF       boundsM;
+struct DisjointSet {
+    explicit DisjointSet(int size)
+        : parent(size),
+          rank(size, 0) {
+        for (int i = 0; i < size; ++i) parent[i] = i;
+    }
+
+    int find(int value) {
+        if (parent[value] != value) parent[value] = find(parent[value]);
+        return parent[value];
+    }
+
+    void unite(int a, int b) {
+        int rootA = find(a);
+        int rootB = find(b);
+        if (rootA == rootB) return;
+        if (rank[rootA] < rank[rootB]) std::swap(rootA, rootB);
+        parent[rootB] = rootA;
+        if (rank[rootA] == rank[rootB]) ++rank[rootA];
+    }
+
+    std::vector<int> parent;
+    std::vector<int> rank;
 };
 
-QString normalizedTaxiwayToken(QString s) {
-    s = s.trimmed().toUpper();
-    if (s.startsWith(QStringLiteral("TWY "))) {
-        s = s.mid(4).trimmed();
-    }
-    return s;
+bool edgesAreAdjacent(const EdgeRecord& first, const EdgeRecord& second) {
+    const QPointF firstVector = first.b - first.a;
+    const QPointF secondVector = second.b - second.a;
+    const double firstLength = length(firstVector);
+    const double secondLength = length(secondVector);
+    if (firstLength <= 1e-6 || secondLength <= 1e-6) return false;
+
+    const double lengthRatio =
+        std::min(firstLength, secondLength) / std::max(firstLength, secondLength);
+    if (lengthRatio < kAdjacentEdgeMinLengthRatio) return false;
+
+    const double cosMaxAngle =
+        std::cos(kAdjacentEdgeMaxAngleDegrees * M_PI / 180.0);
+    const double parallel =
+        std::abs(dot(firstVector, secondVector) / (firstLength * secondLength));
+    if (parallel < cosMaxAngle) return false;
+
+    const QPointF unitFirst(firstVector.x() / firstLength, firstVector.y() / firstLength);
+    const QPointF unitSecond(secondVector.x() / secondLength, secondVector.y() / secondLength);
+
+    const double firstStart = dot(first.a, unitFirst);
+    const double firstEnd = dot(first.b, unitFirst);
+    const double secondStart = dot(second.a, unitFirst);
+    const double secondEnd = dot(second.b, unitFirst);
+    const double overlap = std::min(std::max(firstStart, firstEnd),
+                                    std::max(secondStart, secondEnd))
+                         - std::max(std::min(firstStart, firstEnd),
+                                    std::min(secondStart, secondEnd));
+    if (overlap < std::min(firstLength, secondLength) * kAdjacentEdgeMinOverlapRatio)
+        return false;
+
+    const double firstLineDistanceA = std::abs(cross(unitFirst, second.a - first.a));
+    const double firstLineDistanceB = std::abs(cross(unitFirst, second.b - first.a));
+    if (std::max(firstLineDistanceA, firstLineDistanceB) > kAdjacentEdgeMaxDistanceFeet)
+        return false;
+
+    const double secondLineDistanceA = std::abs(cross(unitSecond, first.a - second.a));
+    const double secondLineDistanceB = std::abs(cross(unitSecond, first.b - second.a));
+    return std::max(secondLineDistanceA, secondLineDistanceB) <= kAdjacentEdgeMaxDistanceFeet;
 }
 
-QSet<QString> idTokens(const QString& id) {
-    QSet<QString> tokens;
-    const QStringList parts = id.split(QLatin1Char('_'), Qt::SkipEmptyParts);
+QColor areaColor(TempAreaType type, bool highlighted) {
+    QColor base;
+    if (highlighted)
+        base = QColor(0, 0, 255);
+    else if (type == TempAreaType::ClosedArea)
+        base = QColor(255, 0, 0);
+    else
+        base = QColor(255, 255, 0);
+
+    return applyBrightness(base, kTempMapAreasBrightness, kTempMapAreasMinBrightness);
+}
+
+constexpr double kCrossAngleDegrees = 15.0;
+
+QString normalizeRunwayId(QString id) {
+    id = id.trimmed().toUpper();
+    id.replace(QStringLiteral("-"), QStringLiteral("/"));
+
+    static const QRegularExpression shortRwy(QStringLiteral("^(\\d)([LCR]?)$"));
+    const QRegularExpressionMatch match = shortRwy.match(id);
+    if (match.hasMatch()) return QStringLiteral("0%1%2").arg(match.captured(1), match.captured(2));
+    return id;
+}
+
+QSet<QString> runwayTokens(QString id) {
+    id = normalizeRunwayId(id);
+    QSet<QString> out;
+    out.insert(id);
+
+    const QStringList parts = id.split(QLatin1Char('/'), Qt::SkipEmptyParts);
     for (const QString& part : parts) {
-        const QString token = part.trimmed().toUpper();
-        if (!token.isEmpty()) tokens.insert(token);
+        const QString normalized = normalizeRunwayId(part);
+        out.insert(normalized);
+        if (normalized.size() >= 2 && normalized.at(0) == QLatin1Char('0'))
+            out.insert(normalized.mid(1));
     }
-    return tokens;
+    return out;
 }
 
-bool chooseTaxiwayProjector(const QJsonArray& twys, LocalMeterProjector* projector) {
-    double lonSum = 0.0;
-    double latSum = 0.0;
-    int    count  = 0;
+QPointF rotateStandard(const QPointF& v, double degrees) {
+    const double radians = degrees * M_PI / 180.0;
+    const double c = std::cos(radians);
+    const double s = std::sin(radians);
+    return QPointF(v.x() * c - v.y() * s, v.x() * s + v.y() * c);
+}
 
-    for (const QJsonValue& v : twys) {
-        const QJsonArray pts = v.toObject().value(QStringLiteral("polygon")).toArray();
-        for (const QJsonValue& p : pts) {
-            const QJsonArray a = p.toArray();
-            if (a.size() < 2) continue;
-            lonSum += a.at(0).toDouble();
-            latSum += a.at(1).toDouble();
-            ++count;
+QPointF rotateBearing(const QPointF& v, double bearingDegrees) {
+    return rotateStandard(v, -bearingDegrees);
+}
+
+std::optional<QPointF> lineIntersection(const QPointF& a,
+                                        const QPointF& dirA,
+                                        const QPointF& b,
+                                        const QPointF& c) {
+    const QPointF dirB = c - b;
+    const double det = dirA.x() * dirB.y() - dirA.y() * dirB.x();
+    if (std::abs(det) < 1e-9) return std::nullopt;
+
+    const QPointF delta = b - a;
+    const double t = (delta.x() * dirB.y() - delta.y() * dirB.x()) / det;
+    return a + dirA * t;
+}
+
+std::optional<std::array<QPointF, 4>> canonicalRunwayQuadForCrc(const QVector<QPointF>& polygon) {
+    if (polygon.size() < 4) return std::nullopt;
+
+    const std::array<QPointF, 4> p = {polygon[0], polygon[1], polygon[2], polygon[3]};
+    const auto edgeLength2 = [&p](int i) {
+        const QPointF d = p[(i + 1) % 4] - p[i];
+        return d.x() * d.x() + d.y() * d.y();
+    };
+
+    int longestEdge = 0;
+    double best = edgeLength2(0);
+    for (int i = 1; i < 4; ++i) {
+        const double length2 = edgeLength2(i);
+        if (length2 > best) {
+            best = length2;
+            longestEdge = i;
         }
     }
 
-    if (count == 0) return false;
+    return std::array<QPointF, 4>{p[(longestEdge + 3) % 4],
+                                  p[longestEdge],
+                                  p[(longestEdge + 1) % 4],
+                                  p[(longestEdge + 2) % 4]};
+}
 
-    projector->lon0 = lonSum / count;
-    projector->lat0 = latSum / count;
-    projector->cosLat0 = std::cos(projector->lat0 * M_PI / 180.0);
+void appendLine(QVector<QPointF>& lines, const QPointF& a, const QPointF& b) {
+    lines.push_back(a);
+    lines.push_back(b);
+}
+
+void appendClosedRunwayCross(QVector<QPointF>& lines, const QVector<QPointF>& polygon) {
+    const auto quad = canonicalRunwayQuadForCrc(polygon);
+    if (!quad) return;
+
+    const QPointF p0 = (*quad)[0];
+    const QPointF p1 = (*quad)[1];
+    const QPointF p2 = (*quad)[2];
+    const QPointF p3 = (*quad)[3];
+
+    const QPointF rawBasis = p2 - p1;
+    const double len = std::hypot(rawBasis.x(), rawBasis.y());
+    if (len <= 1e-6) return;
+
+    const QPointF basis(rawBasis.x() / len, rawBasis.y() / len);
+    const QPointF plus15 = rotateBearing(basis, kCrossAngleDegrees);
+    const QPointF minus15 = rotateBearing(basis, -kCrossAngleDegrees);
+
+    const auto i0 = lineIntersection(p0, plus15, p1, p2);
+    const auto i1 = lineIntersection(p1, minus15, p3, p0);
+    const auto i2 = lineIntersection(p2, plus15, p3, p0);
+    const auto i3 = lineIntersection(p3, minus15, p1, p2);
+
+    if (i0) appendLine(lines, p0, *i0);
+    if (i1) appendLine(lines, p1, *i1);
+    if (i2) appendLine(lines, p2, *i2);
+    if (i3) appendLine(lines, p3, *i3);
+}
+
+} // namespace
+
+bool RunwayClosureGeometry::loadSurfaceFile(const QString& path,
+                                            const QPointF& anchorLonLat,
+                                            QString* error) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error) *error = QStringLiteral("cannot open %1: %2").arg(path, file.errorString());
+        return false;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        if (error) {
+            *error = QStringLiteral("invalid runway surface JSON %1: %2")
+                         .arg(path, parseError.errorString());
+        }
+        return false;
+    }
+
+    const QTransform toFeet = utils::lonLatToFeet(anchorLonLat);
+    const QJsonArray runways = document.object().value(QStringLiteral("rwys")).toArray();
+    runways_.clear();
+    runways_.reserve(runways.size());
+
+    for (const QJsonValue& value : runways) {
+        const QJsonObject object = value.toObject();
+        Runway runway;
+        runway.id = object.value(QStringLiteral("id")).toString().trimmed().toUpper();
+
+        const QJsonArray polygon = object.value(QStringLiteral("polygon")).toArray();
+        runway.polygonFeet.reserve(polygon.size());
+        for (const QJsonValue& pointValue : polygon) {
+            const QJsonArray point = pointValue.toArray();
+            if (point.size() < 2) continue;
+            runway.polygonFeet.push_back(toFeet.map(QPointF(point.at(0).toDouble(),
+                                                            point.at(1).toDouble())));
+        }
+
+        if (!runway.id.isEmpty() && runway.polygonFeet.size() >= 4)
+            runways_.push_back(std::move(runway));
+    }
+
+    dirty_ = true;
     return true;
 }
 
-QPolygonF projectedTaxiwayPolygon(const QJsonArray& pts, const LocalMeterProjector& projector) {
-    QPolygonF poly;
-    poly.reserve(pts.size());
-
-    for (const QJsonValue& p : pts) {
-        const QJsonArray a = p.toArray();
-        if (a.size() < 2) continue;
-        poly << projector.map(a.at(0).toDouble(), a.at(1).toDouble());
+void RunwayClosureGeometry::setClosedRunways(const QSet<QString>& runwayIds) {
+    QSet<QString> normalized;
+    for (const QString& id : runwayIds) {
+        const QSet<QString> tokens = runwayTokens(id);
+        for (const QString& token : tokens) normalized.insert(token);
     }
 
-    return poly;
+    if (closedRunways_ == normalized) return;
+    closedRunways_ = normalized;
+    dirty_ = true;
 }
 
-QPointF polygonCentroid(const QPolygonF& poly) {
-    double twiceArea = 0.0;
-    double cx = 0.0;
-    double cy = 0.0;
+bool RunwayClosureGeometry::runwayMatches(const Runway& runway,
+                                          const QSet<QString>& requested) const {
+    const QSet<QString> tokens = runwayTokens(runway.id);
+    for (const QString& token : tokens) {
+        if (requested.contains(token)) return true;
+    }
+    return false;
+}
 
-    for (int i = 0; i < poly.size(); ++i) {
-        const QPointF a = poly.at(i);
-        const QPointF b = poly.at((i + 1) % poly.size());
-        const double cross = a.x() * b.y() - b.x() * a.y();
-        twiceArea += cross;
-        cx += (a.x() + b.x()) * cross;
-        cy += (a.y() + b.y()) * cross;
+void RunwayClosureGeometry::rebuildSegments() const {
+    lineVertices_.clear();
+    for (const Runway& runway : runways_) {
+        if (runwayMatches(runway, closedRunways_))
+            appendClosedRunwayCross(lineVertices_, runway.polygonFeet);
+    }
+    dirty_ = false;
+}
+
+const QVector<QPointF>& RunwayClosureGeometry::lineVertices() const {
+    if (dirty_) rebuildSegments();
+    return lineVertices_;
+}
+
+void drawRunwayClosures(const RunwayClosureGeometry& geometry,
+                        renderer::CommandBuffer* commandBuffer,
+                        const QMatrix4x4& worldProjection) {
+    if (!commandBuffer) return;
+
+    const QVector<QPointF>& vertices = geometry.lineVertices();
+    if (vertices.size() < 2) return;
+
+    commandBuffer->loadProjectionMatrix(worldProjection);
+    commandBuffer->setRgba(renderer::RGBA::fromQColor(QColor(255, 255, 255)));
+    commandBuffer->lineWidth(1.0f);
+
+    renderer::LinesBuilder* builder = renderer::getLinesBuilder();
+    for (int i = 0; i + 1 < vertices.size(); i += 2) {
+        builder->addLine(vertices.at(i), vertices.at(i + 1));
+    }
+    builder->generateCommands(commandBuffer);
+    renderer::returnLinesBuilder(builder);
+}
+
+void TempAreaGeometry::setAreas(QVector<TempArea> areas) {
+    areas_ = std::move(areas);
+    dirty_ = true;
+}
+
+void TempAreaGeometry::rebuild() const {
+    meshes_.clear();
+    groups_.clear();
+
+    meshes_.reserve(areas_.size());
+    for (const TempArea& area : areas_) {
+        if (area.polygonFeet.size() < 3) continue;
+
+        const renderer::TessellatedPolygon fill =
+            renderer::tessellateSimplePolygon(area.polygonFeet);
+        if (fill.indices.isEmpty()) continue;
+
+        AreaMesh mesh;
+        mesh.id = area.id;
+        mesh.type = area.type;
+        mesh.polygonFeet = area.polygonFeet;
+        mesh.highlighted = area.highlighted;
+        mesh.fillVertices = fill.vertices;
+        mesh.fillIndices = fill.indices;
+        meshes_.push_back(std::move(mesh));
     }
 
-    if (std::abs(twiceArea) > 1e-9) {
-        return QPointF(cx / (3.0 * twiceArea), cy / (3.0 * twiceArea));
-    }
+    const int meshCount = meshes_.size();
+    QVector<EdgeRecord> edges;
+    for (int meshIndex = 0; meshIndex < meshCount; ++meshIndex) {
+        const QVector<QPointF> ring = normalizedRing(meshes_[meshIndex].polygonFeet);
+        if (ring.size() < 3) continue;
 
-    QPointF avg;
-    for (const QPointF& p : poly) avg += p;
-    return poly.isEmpty() ? QPointF() : avg / poly.size();
-}
-
-bool bboxesNear(const QRectF& a, const QRectF& b, double toleranceM) {
-    return !(a.right() + toleranceM < b.left()
-          || b.right() + toleranceM < a.left()
-          || a.bottom() + toleranceM < b.top()
-          || b.bottom() + toleranceM < a.top());
-}
-
-double pointSegmentDistance(const QPointF& p, const QPointF& a, const QPointF& b) {
-    const QPointF ab = b - a;
-    const double lenSq = QPointF::dotProduct(ab, ab);
-    if (lenSq <= 0.0) return std::hypot(p.x() - a.x(), p.y() - a.y());
-
-    const double t = std::clamp(QPointF::dotProduct(p - a, ab) / lenSq, 0.0, 1.0);
-    const QPointF q = a + ab * t;
-    return std::hypot(p.x() - q.x(), p.y() - q.y());
-}
-
-double segmentDistance(const QPointF& a1,
-                       const QPointF& a2,
-                       const QPointF& b1,
-                       const QPointF& b2) {
-    QPointF ignored;
-    if (QLineF(a1, a2).intersects(QLineF(b1, b2), &ignored) == QLineF::BoundedIntersection) {
-        return 0.0;
-    }
-
-    return std::min({
-        pointSegmentDistance(a1, b1, b2),
-        pointSegmentDistance(a2, b1, b2),
-        pointSegmentDistance(b1, a1, a2),
-        pointSegmentDistance(b2, a1, a2),
-    });
-}
-
-double polygonDistance(const QPolygonF& a, const QPolygonF& b) {
-    if (a.isEmpty() || b.isEmpty()) return std::numeric_limits<double>::infinity();
-    if (a.containsPoint(b.first(), Qt::OddEvenFill)
-        || b.containsPoint(a.first(), Qt::OddEvenFill)) {
-        return 0.0;
-    }
-
-    double best = std::numeric_limits<double>::infinity();
-    for (int i = 0; i < a.size(); ++i) {
-        const QPointF a1 = a.at(i);
-        const QPointF a2 = a.at((i + 1) % a.size());
-        for (int j = 0; j < b.size(); ++j) {
-            const double d = segmentDistance(a1, a2, b.at(j), b.at((j + 1) % b.size()));
-            best = std::min(best, d);
-            if (best <= 0.0) return 0.0;
+        for (int i = 0; i < ring.size(); ++i) {
+            edges.push_back(EdgeRecord{meshIndex, ring.at(i), ring.at((i + 1) % ring.size())});
         }
     }
-    return best;
-}
 
-QVector<int> endpointNodeIndices(const QVector<TaxiwayClosureNode>& nodes,
-                                 const QString& closedTwy,
-                                 const QString& endpointTwy,
-                                 const QString& otherEndpointTwy) {
-    QVector<int> preferred;
-    for (const TaxiwayClosureNode& node : nodes) {
-        if (node.tokens.contains(closedTwy)
-            && node.tokens.contains(endpointTwy)
-            && !node.tokens.contains(otherEndpointTwy)) {
-            preferred << node.nodeIndex;
+    DisjointSet disjointSet(meshCount);
+    std::vector<bool> internalEdges(std::size_t(edges.size()), false);
+
+    for (qsizetype i = 0; i < edges.size(); ++i) {
+        for (qsizetype j = i + 1; j < edges.size(); ++j) {
+            const EdgeRecord& first = edges.at(i);
+            const EdgeRecord& second = edges.at(j);
+            if (first.meshIndex == second.meshIndex) continue;
+
+            const AreaMesh& firstMesh = meshes_.at(first.meshIndex);
+            const AreaMesh& secondMesh = meshes_.at(second.meshIndex);
+            if (firstMesh.type != secondMesh.type) continue;
+            if (firstMesh.highlighted != secondMesh.highlighted) continue;
+            if (!edgesAreAdjacent(first, second)) continue;
+
+            disjointSet.unite(first.meshIndex, second.meshIndex);
+            internalEdges[std::size_t(i)] = true;
+            internalEdges[std::size_t(j)] = true;
         }
     }
-    if (!preferred.isEmpty()) return preferred;
 
-    QVector<int> fallback;
-    for (const TaxiwayClosureNode& node : nodes) {
-        if (node.tokens.contains(closedTwy) && node.tokens.contains(endpointTwy)) {
-            fallback << node.nodeIndex;
+    std::vector<int> roots;
+    std::vector<int> groupForMesh(std::size_t(meshCount), -1);
+    for (int meshIndex = 0; meshIndex < meshCount; ++meshIndex) {
+        const int root = disjointSet.find(meshIndex);
+        auto it = std::find(roots.begin(), roots.end(), root);
+        int groupIndex = -1;
+
+        if (it == roots.end()) {
+            groupIndex = int(roots.size());
+            roots.push_back(root);
+            groups_.push_back(AreaGroup{});
+        } else {
+            groupIndex = int(std::distance(roots.begin(), it));
         }
+
+        groupForMesh[std::size_t(meshIndex)] = groupIndex;
+        meshes_[meshIndex].groupIndex = groupIndex;
+
+        AreaGroup& group = groups_[groupIndex];
+        group.type = meshes_[meshIndex].type;
+        group.meshIndices.push_back(meshIndex);
+        group.highlighted = group.highlighted || meshes_[meshIndex].highlighted;
+        if (group.meshIndices.size() == 1 && !meshes_[meshIndex].polygonFeet.isEmpty())
+            group.hatchOriginFeet = meshes_[meshIndex].polygonFeet.first();
     }
-    return fallback;
+
+    for (qsizetype edgeIndex = 0; edgeIndex < edges.size(); ++edgeIndex) {
+        if (internalEdges[std::size_t(edgeIndex)]) continue;
+
+        const EdgeRecord& edge = edges.at(edgeIndex);
+        const int groupIndex = groupForMesh[std::size_t(edge.meshIndex)];
+        if (groupIndex < 0) continue;
+        groups_[groupIndex].outlineVertices.push_back(edge.a);
+        groups_[groupIndex].outlineVertices.push_back(edge.b);
+    }
+
+    dirty_ = false;
 }
 
-} // namespace
+void TempAreaGeometry::draw(
+    renderer::CommandBuffer* commandBuffer,
+    const QMatrix4x4& worldProjection,
+    const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft) const {
+    if (!commandBuffer) return;
+    if (dirty_) rebuild();
+    if (groups_.isEmpty()) return;
 
-QJsonArray getClosedTwysFromNotam(const QJsonObject& airportJson,
-                                  const QString& closedTwyId,
-                                  const QString& fromTwyId,
-                                  const QString& toTwyId) {
-    const QString closedTwy = normalizedTaxiwayToken(closedTwyId);
-    const QString fromTwy   = normalizedTaxiwayToken(fromTwyId);
-    const QString toTwy     = normalizedTaxiwayToken(toTwyId);
+    commandBuffer->loadProjectionMatrix(worldProjection);
 
-    const QJsonArray twys = airportJson.value(QStringLiteral("twys")).toArray();
-    if (twys.isEmpty() || closedTwy.isEmpty() || fromTwy.isEmpty() || toTwy.isEmpty()) {
-        return {};
-    }
+    auto drawType = [&](TempAreaType type) {
+        for (const AreaGroup& group : groups_) {
+            if (group.meshIndices.isEmpty() || group.type != type) continue;
 
-    LocalMeterProjector projector;
-    if (!chooseTaxiwayProjector(twys, &projector)) return {};
+            const QColor color = areaColor(group.type, group.highlighted);
+            const QPointF firstScreen = worldToFramebufferTopLeft(group.hatchOriginFeet);
+            const float offset =
+                -std::fmod(float(firstScreen.x() + 4.0 * firstScreen.y()), 50.0f);
 
-    QVector<TaxiwayClosureNode> nodes;
-    nodes.reserve(twys.size());
+            commandBuffer->setRgba(renderer::RGBA::fromQColor(color));
+            commandBuffer->lineWidth(1.0f);
 
-    for (int originalIndex = 0; originalIndex < twys.size(); ++originalIndex) {
-        const QJsonObject twy = twys.at(originalIndex).toObject();
-        const QString id = twy.value(QStringLiteral("id")).toString().trimmed().toUpper();
-        const QSet<QString> tokens = idTokens(id);
-        if (!tokens.contains(closedTwy)) continue;
+            renderer::LinesBuilder* lines = renderer::getLinesBuilder();
+            for (int i = 0; i + 1 < group.outlineVertices.size(); i += 2)
+                lines->addLine(group.outlineVertices.at(i), group.outlineVertices.at(i + 1));
+            lines->generateCommands(commandBuffer);
+            renderer::returnLinesBuilder(lines);
 
-        const QJsonArray polygonJson = twy.value(QStringLiteral("polygon")).toArray();
-        if (polygonJson.size() < 3) continue;
-
-        const QPolygonF geomM = projectedTaxiwayPolygon(polygonJson, projector);
-        if (geomM.size() < 3) continue;
-
-        TaxiwayClosureNode node;
-        node.nodeIndex = nodes.size();
-        node.originalIndex = originalIndex;
-        node.id = id;
-        node.name = twy.value(QStringLiteral("name")).toString().trimmed().toUpper();
-        node.tokens = tokens;
-        node.geomM = geomM;
-        node.centroidM = polygonCentroid(geomM);
-        node.boundsM = geomM.boundingRect();
-        nodes << node;
-    }
-
-    if (nodes.isEmpty()) return {};
-
-    const QVector<int> startNodes = endpointNodeIndices(nodes, closedTwy, fromTwy, toTwy);
-    const QVector<int> endNodeList = endpointNodeIndices(nodes, closedTwy, toTwy, fromTwy);
-    QSet<int> endNodes;
-    for (const int nodeIndex : endNodeList) endNodes.insert(nodeIndex);
-    if (startNodes.isEmpty() || endNodes.isEmpty()) return {};
-
-    QVector<QVector<std::pair<int, double>>> graph(nodes.size());
-    for (int i = 0; i < nodes.size(); ++i) {
-        for (int j = i + 1; j < nodes.size(); ++j) {
-            if (!bboxesNear(nodes.at(i).boundsM, nodes.at(j).boundsM, kTaxiwayAdjacencyToleranceM)) {
-                continue;
+            renderer::TrianglesBuilder* triangles = renderer::getTrianglesBuilder();
+            for (const int meshIndex : group.meshIndices) {
+                if (meshIndex < 0 || meshIndex >= meshes_.size()) continue;
+                triangles->addIndexed(meshes_.at(meshIndex).fillVertices,
+                                      meshes_.at(meshIndex).fillIndices);
             }
-            if (polygonDistance(nodes.at(i).geomM, nodes.at(j).geomM) > kTaxiwayAdjacencyToleranceM) {
-                continue;
-            }
-
-            const QPointF dc = nodes.at(i).centroidM - nodes.at(j).centroidM;
-            const double weight = std::hypot(dc.x(), dc.y());
-            graph[i].append({j, weight});
-            graph[j].append({i, weight});
+            triangles->generateCommands(commandBuffer, renderer::DrawMode::Hatched, offset);
+            renderer::returnTrianglesBuilder(triangles);
         }
-    }
+    };
 
-    QVector<double> dist(nodes.size(), std::numeric_limits<double>::infinity());
-    QVector<int> prev(nodes.size(), -1);
-    using QueueItem = std::pair<double, int>;
-    std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<QueueItem>> heap;
-
-    for (const int nodeIndex : startNodes) {
-        dist[nodeIndex] = 0.0;
-        heap.push({0.0, nodeIndex});
-    }
-
-    int target = -1;
-    while (!heap.empty()) {
-        const auto [curDist, u] = heap.top();
-        heap.pop();
-        if (curDist != dist.at(u)) continue;
-
-        if (endNodes.contains(u)) {
-            target = u;
-            break;
-        }
-
-        for (const auto& [v, weight] : graph.at(u)) {
-            const double newDist = curDist + weight;
-            if (newDist < dist.at(v)) {
-                dist[v] = newDist;
-                prev[v] = u;
-                heap.push({newDist, v});
-            }
-        }
-    }
-
-    if (target < 0) return {};
-
-    QVector<int> pathNodes;
-    for (int u = target; u >= 0; u = prev.at(u)) {
-        pathNodes.prepend(u);
-        if (startNodes.contains(u)) break;
-    }
-
-    QJsonArray result;
-    if (pathNodes.size() <= 2) return result;
-
-    for (int i = 1; i < pathNodes.size() - 1; ++i) {
-        const TaxiwayClosureNode& node = nodes.at(pathNodes.at(i));
-        QJsonObject item;
-        item.insert(QStringLiteral("index"), node.originalIndex);
-        item.insert(QStringLiteral("id"), node.id);
-        if (!node.name.isEmpty()) item.insert(QStringLiteral("name"), node.name);
-        result.append(item);
-    }
-
-    return result;
+    drawType(TempAreaType::RestrictedArea);
+    drawType(TempAreaType::ClosedArea);
 }
 
-// ===========================================================================
-// ClosureCache — drives the NOTAM scraper subprocess, parses its compact
-// JSON output, joins it with the static airport surface data, and exposes a
-// list of NM-space render items the scope's paintEvent feeds into the helpers
-// above. Supported taxiway closed areas are resolved from the scraper's
-// closedAreas list; restrictionAreas are intentionally ignored here for now.
-// ===========================================================================
-
-namespace {
-
-constexpr int kRefreshIntervalMs = 30 * 60 * 1000;  // 30 min
-constexpr char kSurfaceDirRel[]  = "asdex/surface";
-constexpr char kScraperRel[]     = "reader/notams/scrape.py";
-
-QString surfacePathFor(const QString& icao) {
-    return QStringLiteral("%1/%2.json").arg(QString::fromLatin1(kSurfaceDirRel), icao);
-}
-
-QString normalizedSurfaceId(const QString& id) {
-    return id.trimmed().toUpper();
-}
-
-QPolygonF polygonNmFromJson(const QJsonArray& pts, const QTransform& lonLatToNmT) {
-    QPolygonF lonLat;
-    lonLat.reserve(pts.size());
-    for (const QJsonValue& p : pts) {
-        const QJsonArray a = p.toArray();
-        if (a.size() < 2) continue;
-        lonLat << QPointF(a.at(0).toDouble(), a.at(1).toDouble());
-    }
-    return lonLatToNmT.map(lonLat);
-}
-
-bool isSupportedClosedArea(const QJsonObject& obj) {
-    const QString btnFrom = obj.value(QStringLiteral("btnFrom")).toString().trimmed();
-    const QString btnTo   = obj.value(QStringLiteral("btnTo")).toString().trimmed();
-
-    if (btnFrom.isEmpty() && btnTo.isEmpty()) return true;
-    if (btnFrom.isEmpty() || btnTo.isEmpty()) return false;
-
-    return btnFrom.contains(QStringLiteral("TWY"), Qt::CaseInsensitive)
-        && btnTo.contains(QStringLiteral("TWY"), Qt::CaseInsensitive);
-}
-
-} // namespace
-
-ClosureCache::ClosureCache(QObject* parent)
-    : QObject(parent) {
-    refreshTimer_.setInterval(kRefreshIntervalMs);
-    connect(&refreshTimer_, &QTimer::timeout, this, &ClosureCache::kickScrape);
-}
-
-void ClosureCache::switchAirport(const QString& icao, QPointF anchorLonLat) {
-    icao_         = icao;
-    anchorLonLat_ = anchorLonLat;
-
-    rwys_.clear();
-    rwyClosures_.clear();
-    closedAreaClosures_.clear();
-    items_.clear();
-    closedAreaItems_.clear();
-    fetchedAt_.clear();
-    surfaceJson_ = {};
-    twysByIndex_.clear();
-    exactTwyIndices_.clear();
-
-    if (icao.isEmpty()) {
-        emit changed();
-        return;
-    }
-
-    loadSurface(icao, anchorLonLat);
-    // No on-disk cache: we just have an empty closure list until the first
-    // scrape completes (~15 s after switchAirport). Emit changed() now so
-    // the scope repaints with the new airport's surface in scope, and
-    // again from onScrapeFinished when closures arrive.
-    emit changed();
-
-    refreshTimer_.start();
-    kickScrape();
-}
-
-void ClosureCache::loadSurface(const QString& icao, QPointF anchorLonLat) {
-    const QString path = surfacePathFor(icao);
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly)) {
-        qWarning().noquote() << "[closures] no surface data for" << icao
-                             << "—" << f.errorString();
-        return;
-    }
-
-    QJsonParseError err{};
-    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
-    if (err.error != QJsonParseError::NoError) {
-        qWarning().noquote() << "[closures] surface json parse:" << err.errorString();
-        return;
-    }
-
-    surfaceJson_ = doc.object();
-
-    const QTransform lonLatT = lonLatToNm(anchorLonLat);
-    const QJsonArray rwys    = surfaceJson_.value(QStringLiteral("rwys")).toArray();
-    for (const QJsonValue& v : rwys) {
-        const QJsonObject obj = v.toObject();
-        const QString     id  = obj.value(QStringLiteral("id")).toString();
-        const QJsonArray  pts = obj.value(QStringLiteral("polygon")).toArray();
-        if (id.isEmpty() || pts.size() != 4) continue;  // expect exactly 4 corners
-
-        QPolygonF lonLat;
-        lonLat.reserve(4);
-        for (const QJsonValue& p : pts) {
-            const QJsonArray a = p.toArray();
-            if (a.size() < 2) continue;
-            lonLat << QPointF(a.at(0).toDouble(), a.at(1).toDouble());
-        }
-        if (lonLat.size() != 4) continue;
-
-        rwys_.insert(id, lonLatT.map(lonLat));
-    }
-
-    const QJsonArray twys = surfaceJson_.value(QStringLiteral("twys")).toArray();
-    twysByIndex_.resize(twys.size());
-    for (int i = 0; i < twys.size(); ++i) {
-        const QJsonObject obj = twys.at(i).toObject();
-        const QString id = normalizedSurfaceId(obj.value(QStringLiteral("id")).toString());
-        const QJsonArray pts = obj.value(QStringLiteral("polygon")).toArray();
-        if (id.isEmpty() || pts.size() < 3) continue;
-
-        const QPolygonF polyNm = polygonNmFromJson(pts, lonLatT);
-        if (polyNm.size() < 3) continue;
-
-        twysByIndex_[i] = polyNm;
-        exactTwyIndices_[id].append(i);
-    }
-
-    qDebug().noquote() << "[closures]" << icao << "surface loaded:"
-                       << rwys_.size() << "runway(s),"
-                       << exactTwyIndices_.size() << "taxiway id(s)";
-}
-
-void ClosureCache::parseScrapeOutput(const QByteArray& bytes) {
-    QJsonParseError err{};
-    const QJsonDocument doc = QJsonDocument::fromJson(bytes, &err);
-    if (err.error != QJsonParseError::NoError) {
-        qWarning().noquote() << "[closures] scrape json parse:" << err.errorString();
-        return;
-    }
-
-    const QJsonObject root = doc.object();
-    QStringList nextRwyClosures;
-    QList<ClosedAreaClosure> nextClosedAreaClosures;
-
-    const QJsonArray rwys = root.value(QStringLiteral("rwyClosures")).toArray();
-    for (const QJsonValue& v : rwys) {
-        const QString id = v.toString();
-        if (!id.isEmpty()) nextRwyClosures << id;
-    }
-
-    QJsonArray closedAreas = root.value(QStringLiteral("closedAreas")).toArray();
-    if (closedAreas.isEmpty() && root.contains(QStringLiteral("twyClosures"))) {
-        closedAreas = root.value(QStringLiteral("twyClosures")).toArray();
-    }
-
-    for (const QJsonValue& v : closedAreas) {
-        const QJsonObject obj = v.toObject();
-        const QString id = normalizedTaxiwayToken(obj.value(QStringLiteral("id")).toString());
-        if (id.isEmpty() || !isSupportedClosedArea(obj)) continue;
-
-        ClosedAreaClosure cl;
-        cl.id = id;
-        cl.btnFrom = obj.value(QStringLiteral("btnFrom")).toString().trimmed();
-        cl.btnTo = obj.value(QStringLiteral("btnTo")).toString().trimmed();
-        nextClosedAreaClosures.append(cl);
-    }
-
-    fetchedAt_ = root.value(QStringLiteral("fetchedAt")).toString();
-    rwyClosures_ = nextRwyClosures;
-    closedAreaClosures_ = nextClosedAreaClosures;
-}
-
-void ClosureCache::rebuildItems() {
-    QList<QPolygonF> nextRunwayItems;
-    nextRunwayItems.reserve(rwyClosures_.size());
-    for (const QString& id : rwyClosures_) {
-        const auto it = rwys_.constFind(id);
-        if (it == rwys_.constEnd()) {
-            qDebug().noquote() << "[closures] no surface match for runway closure" << id;
-            continue;
-        }
-        nextRunwayItems.append(it.value());
-    }
-
-    QSet<int> closedTwyIndices;
-    for (const ClosedAreaClosure& cl : closedAreaClosures_) {
-        if (cl.btnFrom.isEmpty() && cl.btnTo.isEmpty()) {
-            const auto it = exactTwyIndices_.constFind(cl.id);
-            if (it == exactTwyIndices_.constEnd()) {
-                qDebug().noquote() << "[closures] no exact surface match for closed area" << cl.id;
-                continue;
-            }
-            for (const int index : it.value()) closedTwyIndices.insert(index);
-            continue;
-        }
-
-        const QJsonArray hits = getClosedTwysFromNotam(surfaceJson_, cl.id, cl.btnFrom, cl.btnTo);
-        if (hits.isEmpty()) {
-            qDebug().noquote() << "[closures] no surface path for closed area"
-                               << cl.id << "between" << cl.btnFrom << "and" << cl.btnTo;
-            continue;
-        }
-
-        for (const QJsonValue& v : hits) {
-            const int index = v.toObject().value(QStringLiteral("index")).toInt(-1);
-            if (index >= 0) closedTwyIndices.insert(index);
-        }
-    }
-
-    QList<QPolygonF> nextClosedAreaItems;
-    nextClosedAreaItems.reserve(closedTwyIndices.size());
-    QList<int> sortedClosedIndices = closedTwyIndices.values();
-    std::sort(sortedClosedIndices.begin(), sortedClosedIndices.end());
-    for (const int index : sortedClosedIndices) {
-        if (index < 0 || index >= twysByIndex_.size() || twysByIndex_.at(index).isEmpty()) {
-            continue;
-        }
-        nextClosedAreaItems.append(twysByIndex_.at(index));
-    }
-
-    items_ = nextRunwayItems;
-    closedAreaItems_ = nextClosedAreaItems;
-}
-
-void ClosureCache::kickScrape() {
-    if (icao_.isEmpty()) return;
-
-    auto* proc = new QProcess(this);
-    proc->setProgram(QStringLiteral("python3"));
-    // `--output -` writes the compact JSON payload to stdout; we read it
-    // back in onScrapeFinished and parse without ever touching the disk.
-    proc->setArguments({
-        QString::fromLatin1(kScraperRel),
-        icao_,
-        QStringLiteral("--output"),
-        QStringLiteral("-"),
-    });
-
-    connect(proc, &QProcess::finished, this,
-            [this, proc](int exitCode, QProcess::ExitStatus /*status*/) {
-                onScrapeFinished(proc, exitCode);
-            });
-
-    proc->start();
-}
-
-void ClosureCache::onScrapeFinished(QProcess* proc, int exitCode) {
-    if (exitCode == 0) {
-        parseScrapeOutput(proc->readAllStandardOutput());
-        rebuildItems();
-        emit changed();
-        qDebug().noquote() << "[closures]" << icao_ << "scrape ok:"
-                           << items_.size() << "runway closure(s),"
-                           << closedAreaItems_.size() << "closed area polygon(s)";
-    } else {
-        const QByteArray serr = proc->readAllStandardError().trimmed();
-        qWarning().noquote() << "[closures]" << icao_
-                             << "scrape failed (exit" << exitCode << ")"
-                             << QString::fromLocal8Bit(serr);
-    }
-    proc->deleteLater();
+void drawTempAreas(const TempAreaGeometry& geometry,
+                   renderer::CommandBuffer* commandBuffer,
+                   const QMatrix4x4& worldProjection,
+                   const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft) {
+    geometry.draw(commandBuffer, worldProjection, worldToFramebufferTopLeft);
 }
 
 } // namespace asdex
