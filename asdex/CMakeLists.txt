@@ -7,6 +7,7 @@ add_library(nascope_asdex STATIC
     notamcache.cpp
     cmdslew.cpp
     cursors.cpp
+    dcb.cpp
     videomaps.cpp
     tempdata.cpp
     targets.cpp

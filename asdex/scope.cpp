@@ -170,7 +170,7 @@ void AsdexScopeWidget::initializeGL() {
     }
 
     if (fontLoaded_) {
-        const int fontSizes[] = {2, 3};
+        const int fontSizes[] = {1, 2, 3};
         for (const int fontSize : fontSizes) {
             const renderer::BitmapFontSize* fontSizeData = asdexFont_.fontSize(fontSize);
             if (!fontSizeData) continue;
@@ -214,6 +214,14 @@ void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
         return;
     }
 
+    if (isPointOverDcb(event->position())) {
+        clearHighlightedTarget();
+        setAsdexCursor(CursorMode::Dcb);
+        update();
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::RightButton) {
         panning_ = true;
         rightDragMoved_ = false;
@@ -231,6 +239,7 @@ void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
 void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
     if (datablockEdit_) {
         clearHighlightedTarget();
+        setAsdexCursor(CursorMode::Hidden);
         update();
         event->accept();
         return;
@@ -251,10 +260,20 @@ void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
             update();
         }
 
+        setAsdexCursor(CursorMode::Hidden);
         event->accept();
         return;
     }
 
+    if (isPointOverDcb(event->position())) {
+        clearHighlightedTarget();
+        setAsdexCursor(CursorMode::Dcb);
+        update();
+        event->accept();
+        return;
+    }
+
+    setAsdexCursor(CursorMode::Scope);
     updateHighlightedTarget(event->position());
     update();
     QOpenGLWidget::mouseMoveEvent(event);
@@ -268,14 +287,19 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
         releaseMouse();
 
         if (rightClick) {
-            updateHighlightedTarget(event->position());
-            if (AsdexTarget* target = highlightedTarget()) {
-                startDatablockEdit(*target);
+            if (isPointOverDcb(event->position())) {
+                clearHighlightedTarget();
+                updateHoverCursor(event->position());
             } else {
-                setAsdexCursor(CursorMode::Scope);
+                updateHighlightedTarget(event->position());
+                if (AsdexTarget* target = highlightedTarget()) {
+                    startDatablockEdit(*target);
+                } else {
+                    updateHoverCursor(event->position());
+                }
             }
         } else {
-            setAsdexCursor(CursorMode::Scope);
+            updateHoverCursor(event->position());
         }
 
         event->accept();
@@ -283,6 +307,23 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
     }
 
     if (datablockEdit_) {
+        event->accept();
+        return;
+    }
+
+    if (dcbMouseCaptured_ && event->button() == Qt::LeftButton) {
+        dcbMouseCaptured_ = false;
+        clearHighlightedTarget();
+        updateHoverCursor(event->position());
+        update();
+        event->accept();
+        return;
+    }
+
+    if (isPointOverDcb(event->position())) {
+        clearHighlightedTarget();
+        setAsdexCursor(CursorMode::Dcb);
+        update();
         event->accept();
         return;
     }
@@ -322,6 +363,12 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
         return;
     }
 
+    if (isPointOverDcb(event->position())) {
+        setAsdexCursor(CursorMode::Dcb);
+        event->accept();
+        return;
+    }
+
     const bool ctrl = event->modifiers().testFlag(Qt::ControlModifier);
     const bool alt = event->modifiers().testFlag(Qt::AltModifier);
     const double step = ctrl ? kCtrlWheelStepFeet : kWheelStepFeet;
@@ -347,6 +394,17 @@ void AsdexScopeWidget::keyPressEvent(QKeyEvent* event) {
     }
 
     QOpenGLWidget::keyPressEvent(event);
+}
+
+void AsdexScopeWidget::leaveEvent(QEvent* event) {
+    if (!datablockEdit_ && !panning_) {
+        dcbMouseCaptured_ = false;
+        clearHighlightedTarget();
+        setAsdexCursor(CursorMode::Scope);
+        update();
+    }
+
+    QOpenGLWidget::leaveEvent(event);
 }
 
 bool AsdexScopeWidget::handleDatablockEditKey(QKeyEvent* event) {
@@ -639,10 +697,24 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
                   });
     drawTargets(targets_, commandBuffer, worldProjection, mode_, targetVectorSeconds_);
 
+    const QMatrix4x4 projection = screenProjection();
+    commandBuffer->loadProjectionMatrix(projection);
+
+    const DcbState dcbState = makeDcbState();
+    const DcbLayout dcbLayout = dcb_.layout(size(), asdexFont_, dcbState);
+    dcb_.drawQuads(commandBuffer, dcbLayout);
+
+    const std::uint32_t dcbFontTexture = fontTextureId(dcbLayout.renderFontSize);
+    if (fontTexturesReady_ && dcbFontTexture != 0) {
+        renderer::TextBuilder* dcbTextBuilder = renderer::getTextBuilder();
+        dcbTextBuilder->setFont(&asdexFont_);
+        dcb_.drawText(*dcbTextBuilder, asdexFont_, dcbFontTexture, dcbLayout);
+        dcbTextBuilder->generateCommands(commandBuffer);
+        renderer::returnTextBuilder(dcbTextBuilder);
+    }
+
     const std::uint32_t listFontTexture = fontTextureId(2);
     if (fontTexturesReady_ && listFontTexture != 0) {
-        const QMatrix4x4 projection = screenProjection();
-
         DataBlockSettings datablockSettings;
         datablockSettings.fontSize = 2;
         datablockSettings.brightness = 95;
@@ -694,6 +766,20 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
 
     renderer_->renderCommandBuffer(commandBuffer);
     renderer::returnCommandBuffer(commandBuffer);
+}
+
+DcbState AsdexScopeWidget::makeDcbState() const {
+    DcbState state;
+    state.range = int(std::round(halfRangeFeet_ / 100.0));
+    state.rotation = 0;
+    state.vectorLength = targetVectorSeconds_;
+    state.leaderLength = 2;
+    state.nightMode = mode_ == Mode::Night;
+    state.showVectorLine = true;
+    state.showDataBlocks = showDataBlocks_;
+    state.showDcb = true;
+    state.networkConnected = true;
+    return state;
 }
 
 QSize AsdexScopeWidget::framebufferRenderSize() const {
@@ -787,14 +873,61 @@ void AsdexScopeWidget::zoomToCursorByFeet(double deltaFeet, const QPointF& curso
     update();
 }
 
+bool AsdexScopeWidget::isPointOverDcb(const QPointF& logicalPoint) const {
+    if (!fontLoaded_) return false;
+
+    return dcb_.contains(logicalPoint, size(), asdexFont_, makeDcbState());
+}
+
+void AsdexScopeWidget::updateHoverCursor(const QPointF& logicalPoint) {
+    if (datablockEdit_ || panning_) {
+        setAsdexCursor(CursorMode::Hidden);
+        return;
+    }
+
+    if (dcbMouseCaptured_) {
+        setAsdexCursor(CursorMode::Captured);
+        return;
+    }
+
+    if (isPointOverDcb(logicalPoint)) {
+        setAsdexCursor(CursorMode::Dcb);
+        return;
+    }
+
+    setAsdexCursor(CursorMode::Scope);
+}
+
 void AsdexScopeWidget::setAsdexCursor(asdex::CursorType type) {
     if (cursors_.has(type)) setCursor(cursors_.cursor(type));
 }
 
 void AsdexScopeWidget::setAsdexCursor(CursorMode mode) {
+    if (currentCursorMode_ == mode) return;
+
+    currentCursorMode_ = mode;
+
     switch (mode) {
         case CursorMode::Scope:
             if (cursors_.has(asdex::CursorType::Scope))
+                setCursor(cursors_.cursor(asdex::CursorType::Scope));
+            else
+                unsetCursor();
+            break;
+        case CursorMode::Dcb:
+            if (cursors_.has(asdex::CursorType::Dcb))
+                setCursor(cursors_.cursor(asdex::CursorType::Dcb));
+            else if (cursors_.has(asdex::CursorType::Scope))
+                setCursor(cursors_.cursor(asdex::CursorType::Scope));
+            else
+                unsetCursor();
+            break;
+        case CursorMode::Captured:
+            if (cursors_.has(asdex::CursorType::Captured))
+                setCursor(cursors_.cursor(asdex::CursorType::Captured));
+            else if (cursors_.has(asdex::CursorType::Dcb))
+                setCursor(cursors_.cursor(asdex::CursorType::Dcb));
+            else if (cursors_.has(asdex::CursorType::Scope))
                 setCursor(cursors_.cursor(asdex::CursorType::Scope));
             else
                 unsetCursor();

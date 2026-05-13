@@ -8,15 +8,17 @@
 #include "asdex/targetcache.h"
 #include "asdex/colors.h"
 #include "asdex/cursors.h"
+#include "asdex/dcb.h"
 #include "asdex/datablocks.h"
 #include "asdex/tempdata.h"
 #include "asdex/targets.h"
 #include "renderer/font.h"
 #include "asdex/videomaps.h"
 
-#include <QMatrix4x4>
+#include <QEvent>
 #include <QHash>
 #include <QKeyEvent>
+#include <QMatrix4x4>
 #include <QMouseEvent>
 #include <QOpenGLWidget>
 #include <QPointF>
@@ -51,10 +53,13 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void leaveEvent(QEvent* event) override;
 
 private:
     enum class CursorMode {
         Scope,
+        Dcb,
+        Captured,
         Hidden,
     };
 
@@ -73,6 +78,7 @@ private:
     bool isDataBlockVisible(const AsdexTarget& target) const;
     void toggleDataBlockForTarget(const AsdexTarget& target);
     void renderScene(const QSize& renderSize);
+    DcbState makeDcbState() const;
     QSize framebufferRenderSize() const;
     std::uint32_t fontTextureId(int fontSize) const;
     QMatrix4x4 screenProjection() const;
@@ -84,6 +90,8 @@ private:
     QPointF screenToWorldFeet(const QPointF& logicalPoint, const QSize& renderSize) const;
     void zoomByFeet(double deltaFeet);
     void zoomToCursorByFeet(double deltaFeet, const QPointF& cursorLogicalPoint);
+    bool isPointOverDcb(const QPointF& logicalPoint) const;
+    void updateHoverCursor(const QPointF& logicalPoint);
     void setAsdexCursor(CursorMode mode);
     void setAsdexCursor(asdex::CursorType type);
 
@@ -93,6 +101,7 @@ private:
     ::asdex::AtisCache atisCache_;
     ::asdex::RunwayClosureCache runwayClosureCache_;
     asdex::CursorSet cursors_;
+    Dcb dcb_;
     ::asdex::PreviewArea previewArea_;
     renderer::BitmapFont asdexFont_;
     std::unique_ptr<renderer::Renderer> renderer_;
@@ -117,10 +126,12 @@ private:
     QTimer coastClockTimer_;
     bool panning_ = false;
     bool rightDragMoved_ = false;
+    bool dcbMouseCaptured_ = false;
     QPointF panStartMouseFramebuffer_;
     QPointF panStartCenterFeet_;
 
     int targetVectorSeconds_ = 5;
+    CursorMode currentCursorMode_ = CursorMode::Hidden;
     bool fontLoaded_ = false;
     bool fontTexturesReady_ = false;
 };
