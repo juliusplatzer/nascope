@@ -93,6 +93,13 @@ private:
     int currentVectorLengthValue() const;
     void setVectorLengthValue(int seconds);
     void startVectorLengthCommand();
+    void startMapRepositionCommand();
+    void commitMapRepositionCommand();
+    void cancelMapRepositionCommand();
+    bool isMapRepositionCommandActive() const;
+    void moveMapRepositionCursorToBoxCenter();
+    QPointF mapRepositionBoxCenterLogical() const;
+    void handleMapRepositionMouseMove(const QPointF& logicalPoint);
     bool handleDcbEntryCommandKey(QKeyEvent* event);
     QStringList activeCommandLines() const;
     void renderScene(const QSize& renderSize);
@@ -139,6 +146,7 @@ private:
     CommandType commandType_ = CommandType::None;
     std::optional<DatablockEditCommand> datablockEdit_;
     std::optional<DcbEntryCommand> dcbEntryCommand_;
+    std::optional<QPointF> mapRepositionOriginalCenter_;
     QString editingTrackId_;
     QPointF centerFeet_;
     double halfRangeFeet_ = 1.0;
@@ -154,6 +162,9 @@ private:
     bool dcbOff_ = false;
     int hoveredDcbButtonIndex_ = -1;
     std::optional<DcbFunction> hoveredDcbFunction_;
+    QPointF mapRepositionLastMouseFramebuffer_;
+    bool suppressNextMapRepositionMove_ = false;
+    bool suppressNextMapRepositionRelease_ = false;
     QPointF panStartMouseFramebuffer_;
     QPointF panStartCenterFeet_;
 
