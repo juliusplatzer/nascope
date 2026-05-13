@@ -160,7 +160,8 @@ public:
     void drawText(renderer::TextBuilder& textBuilder,
                   const renderer::BitmapFont& font,
                   std::uint32_t fontTextureId,
-                  const DcbLayout& layout) const;
+                  const DcbLayout& layout,
+                  int hoveredButtonIndex = -1) const;
 
     int reservedTopHeight(QSize displaySize,
                           const renderer::BitmapFont& font,

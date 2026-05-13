@@ -330,18 +330,22 @@ void Dcb::drawQuads(renderer::CommandBuffer* commandBuffer, const DcbLayout& lay
 void Dcb::drawText(renderer::TextBuilder& textBuilder,
                    const renderer::BitmapFont& font,
                    std::uint32_t fontTextureId,
-                   const DcbLayout& layout) const {
+                   const DcbLayout& layout,
+                   int hoveredButtonIndex) const {
     if (layout.buttons.isEmpty() || fontTextureId == 0) return;
-
-    renderer::TextStyle style;
-    style.size = layout.renderFontSize;
-    style.color = textColor(false, false);
-    style.background = Qt::transparent;
 
     const int lineHeight = font.lineHeight(layout.renderFontSize);
     if (lineHeight <= 0) return;
 
-    for (const DcbButtonLayout& button : layout.buttons) {
+    for (int buttonIndex = 0; buttonIndex < layout.buttons.size(); ++buttonIndex) {
+        const DcbButtonLayout& button = layout.buttons[buttonIndex];
+        const bool hovered = buttonIndex == hoveredButtonIndex;
+
+        renderer::TextStyle style;
+        style.size = layout.renderFontSize;
+        style.color = textColor(false, hovered);
+        style.background = Qt::transparent;
+
         const QStringList lines = displayLinesForButton(button.spec);
         if (lines.isEmpty()) continue;
 

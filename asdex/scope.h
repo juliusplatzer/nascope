@@ -91,6 +91,8 @@ private:
     void zoomByFeet(double deltaFeet);
     void zoomToCursorByFeet(double deltaFeet, const QPointF& cursorLogicalPoint);
     bool isPointOverDcb(const QPointF& logicalPoint) const;
+    void clearDcbHover();
+    void updateDcbHover(const QPointF& logicalPoint);
     void updateHoverCursor(const QPointF& logicalPoint);
     void setAsdexCursor(CursorMode mode);
     void setAsdexCursor(asdex::CursorType type);
@@ -127,6 +129,8 @@ private:
     bool panning_ = false;
     bool rightDragMoved_ = false;
     bool dcbMouseCaptured_ = false;
+    int hoveredDcbButtonIndex_ = -1;
+    std::optional<DcbFunction> hoveredDcbFunction_;
     QPointF panStartMouseFramebuffer_;
     QPointF panStartCenterFeet_;
 

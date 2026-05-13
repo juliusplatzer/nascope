@@ -216,13 +216,20 @@ void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
 
     if (isPointOverDcb(event->position())) {
         clearHighlightedTarget();
-        setAsdexCursor(CursorMode::Dcb);
+        updateDcbHover(event->position());
+        if (event->button() == Qt::LeftButton) {
+            dcbMouseCaptured_ = true;
+            setAsdexCursor(CursorMode::Captured);
+        } else {
+            setAsdexCursor(CursorMode::Dcb);
+        }
         update();
         event->accept();
         return;
     }
 
     if (event->button() == Qt::RightButton) {
+        clearDcbHover();
         panning_ = true;
         rightDragMoved_ = false;
         panStartMouseFramebuffer_ = framebufferPoint(event->position());
@@ -239,6 +246,7 @@ void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
 void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
     if (datablockEdit_) {
         clearHighlightedTarget();
+        clearDcbHover();
         setAsdexCursor(CursorMode::Hidden);
         update();
         event->accept();
@@ -260,19 +268,32 @@ void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
             update();
         }
 
+        clearDcbHover();
         setAsdexCursor(CursorMode::Hidden);
+        event->accept();
+        return;
+    }
+
+    if (dcbMouseCaptured_) {
+        clearHighlightedTarget();
+        if (isPointOverDcb(event->position()))
+            updateDcbHover(event->position());
+        else
+            clearDcbHover();
+        setAsdexCursor(CursorMode::Captured);
         event->accept();
         return;
     }
 
     if (isPointOverDcb(event->position())) {
         clearHighlightedTarget();
+        updateDcbHover(event->position());
         setAsdexCursor(CursorMode::Dcb);
-        update();
         event->accept();
         return;
     }
 
+    clearDcbHover();
     setAsdexCursor(CursorMode::Scope);
     updateHighlightedTarget(event->position());
     update();
@@ -289,8 +310,10 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
         if (rightClick) {
             if (isPointOverDcb(event->position())) {
                 clearHighlightedTarget();
+                updateDcbHover(event->position());
                 updateHoverCursor(event->position());
             } else {
+                clearDcbHover();
                 updateHighlightedTarget(event->position());
                 if (AsdexTarget* target = highlightedTarget()) {
                     startDatablockEdit(*target);
@@ -307,6 +330,7 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
     }
 
     if (datablockEdit_) {
+        clearDcbHover();
         event->accept();
         return;
     }
@@ -314,7 +338,13 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
     if (dcbMouseCaptured_ && event->button() == Qt::LeftButton) {
         dcbMouseCaptured_ = false;
         clearHighlightedTarget();
-        updateHoverCursor(event->position());
+        if (isPointOverDcb(event->position())) {
+            updateDcbHover(event->position());
+            setAsdexCursor(CursorMode::Dcb);
+        } else {
+            clearDcbHover();
+            setAsdexCursor(CursorMode::Scope);
+        }
         update();
         event->accept();
         return;
@@ -322,6 +352,7 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
 
     if (isPointOverDcb(event->position())) {
         clearHighlightedTarget();
+        updateDcbHover(event->position());
         setAsdexCursor(CursorMode::Dcb);
         update();
         event->accept();
@@ -329,6 +360,7 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
     }
 
     if (event->button() == Qt::LeftButton && event->modifiers() == Qt::NoModifier) {
+        clearDcbHover();
         updateHighlightedTarget(event->position());
         if (AsdexTarget* target = highlightedTarget()) {
             toggleDataBlockForTarget(*target);
@@ -354,6 +386,7 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
     }
 
     if (datablockEdit_) {
+        clearDcbHover();
         if (wheelY > 0)
             datablockEdit_->moveUp();
         else
@@ -364,10 +397,13 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
     }
 
     if (isPointOverDcb(event->position())) {
+        updateDcbHover(event->position());
         setAsdexCursor(CursorMode::Dcb);
         event->accept();
         return;
     }
+
+    clearDcbHover();
 
     const bool ctrl = event->modifiers().testFlag(Qt::ControlModifier);
     const bool alt = event->modifiers().testFlag(Qt::AltModifier);
@@ -400,6 +436,7 @@ void AsdexScopeWidget::leaveEvent(QEvent* event) {
     if (!datablockEdit_ && !panning_) {
         dcbMouseCaptured_ = false;
         clearHighlightedTarget();
+        clearDcbHover();
         setAsdexCursor(CursorMode::Scope);
         update();
     }
@@ -583,6 +620,7 @@ void AsdexScopeWidget::startDatablockEdit(const AsdexTarget& target) {
     datablockEdit_ = DatablockEditCommand::fromTarget(target);
     editingTrackId_ = target.id;
     clearHighlightedTarget();
+    clearDcbHover();
     previewArea_.setSystemResponse({});
     setAsdexCursor(CursorMode::Hidden);
     update();
@@ -593,6 +631,7 @@ void AsdexScopeWidget::cancelCommand() {
     datablockEdit_.reset();
     editingTrackId_.clear();
     previewArea_.setSystemResponse({});
+    clearDcbHover();
     setAsdexCursor(CursorMode::Scope);
     clearHighlightedTarget();
     update();
@@ -706,9 +745,18 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
 
     const std::uint32_t dcbFontTexture = fontTextureId(dcbLayout.renderFontSize);
     if (fontTexturesReady_ && dcbFontTexture != 0) {
+        const int dcbHoverIndex =
+            hoveredDcbButtonIndex_ >= 0 && hoveredDcbButtonIndex_ < dcbLayout.buttons.size()
+                ? hoveredDcbButtonIndex_
+                : -1;
+
         renderer::TextBuilder* dcbTextBuilder = renderer::getTextBuilder();
         dcbTextBuilder->setFont(&asdexFont_);
-        dcb_.drawText(*dcbTextBuilder, asdexFont_, dcbFontTexture, dcbLayout);
+        dcb_.drawText(*dcbTextBuilder,
+                      asdexFont_,
+                      dcbFontTexture,
+                      dcbLayout,
+                      dcbHoverIndex);
         dcbTextBuilder->generateCommands(commandBuffer);
         renderer::returnTextBuilder(dcbTextBuilder);
     }
@@ -877,6 +925,35 @@ bool AsdexScopeWidget::isPointOverDcb(const QPointF& logicalPoint) const {
     if (!fontLoaded_) return false;
 
     return dcb_.contains(logicalPoint, size(), asdexFont_, makeDcbState());
+}
+
+void AsdexScopeWidget::clearDcbHover() {
+    if (hoveredDcbButtonIndex_ == -1 && !hoveredDcbFunction_.has_value()) return;
+
+    hoveredDcbButtonIndex_ = -1;
+    hoveredDcbFunction_.reset();
+    update();
+}
+
+void AsdexScopeWidget::updateDcbHover(const QPointF& logicalPoint) {
+    if (!fontLoaded_) {
+        clearDcbHover();
+        return;
+    }
+
+    const DcbHit hit = dcb_.hitTest(logicalPoint, size(), asdexFont_, makeDcbState());
+    const int oldIndex = hoveredDcbButtonIndex_;
+    const std::optional<DcbFunction> oldFunction = hoveredDcbFunction_;
+
+    if (hit.overDcb && hit.buttonIndex >= 0) {
+        hoveredDcbButtonIndex_ = hit.buttonIndex;
+        hoveredDcbFunction_ = hit.function;
+    } else {
+        hoveredDcbButtonIndex_ = -1;
+        hoveredDcbFunction_.reset();
+    }
+
+    if (hoveredDcbButtonIndex_ != oldIndex || hoveredDcbFunction_ != oldFunction) update();
 }
 
 void AsdexScopeWidget::updateHoverCursor(const QPointF& logicalPoint) {
