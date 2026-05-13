@@ -85,6 +85,10 @@ private:
     int currentRangeValue() const;
     void setRangeValue(int range);
     void startRangeCommand();
+    int currentRotationValue() const;
+    void setRotationValue(int degrees);
+    void rotateByDegrees(int deltaDegrees);
+    void startRotateCommand();
     bool handleDcbEntryCommandKey(QKeyEvent* event);
     QStringList activeCommandLines() const;
     void renderScene(const QSize& renderSize);
@@ -98,6 +102,8 @@ private:
     QPointF framebufferPoint(const QPointF& logicalPoint) const;
     double pixelsPerFoot(const QSize& renderSize) const;
     QPointF screenToWorldFeet(const QPointF& logicalPoint, const QSize& renderSize) const;
+    QPointF screenDeltaToWorldDelta(const QPointF& framebufferDelta,
+                                    const QSize& renderSize) const;
     void zoomByFeet(double deltaFeet);
     void zoomToCursorByFeet(double deltaFeet, const QPointF& cursorLogicalPoint);
     bool isPointOverDcb(const QPointF& logicalPoint) const;
@@ -132,6 +138,7 @@ private:
     QString editingTrackId_;
     QPointF centerFeet_;
     double halfRangeFeet_ = 1.0;
+    int rotationDegrees_ = 0;
     asdex::Mode mode_ = asdex::Mode::Day;
     bool showDataBlocks_ = true;
     bool timesharePrimary_ = true;

@@ -17,6 +17,7 @@ enum class CommandType {
     None,
     EditDatablockFields,
     Range,
+    Rotate,
 };
 
 struct EditedDbFields {
@@ -88,6 +89,7 @@ public:
 
         QString invalidMessage = QStringLiteral("INVALID ENTRY");
         bool numericOnly = true;
+        bool wrapWheel = false;
     };
 
     static DcbEntryCommand range(int currentRange) {
@@ -100,6 +102,19 @@ public:
         spec.invalidMessage = QStringLiteral("INVALID RANGE");
         spec.numericOnly = true;
         return DcbEntryCommand(spec, QString::number(currentRange));
+    }
+
+    static DcbEntryCommand rotate(int currentRotation) {
+        Spec spec;
+        spec.type = CommandType::Rotate;
+        spec.label = QStringLiteral("ROTATE");
+        spec.minValue = 0;
+        spec.maxValue = 359;
+        spec.wheelStep = 1;
+        spec.invalidMessage = QStringLiteral("INVALID ENTRY");
+        spec.numericOnly = true;
+        spec.wrapWheel = true;
+        return DcbEntryCommand(spec, QString::number(currentRotation));
     }
 
     QStringList displayLines() const { return {spec_.label, value_}; }
@@ -149,7 +164,12 @@ public:
     void wheelDelta(int steps) {
         int value = currentOrMinimum();
         value += steps * spec_.wheelStep;
-        value = std::clamp(value, spec_.minValue, spec_.maxValue);
+        if (spec_.wrapWheel && spec_.maxValue >= spec_.minValue) {
+            const int span = spec_.maxValue - spec_.minValue + 1;
+            value = ((value - spec_.minValue) % span + span) % span + spec_.minValue;
+        } else {
+            value = std::clamp(value, spec_.minValue, spec_.maxValue);
+        }
 
         value_ = QString::number(value);
         cursor_ = value_.size();

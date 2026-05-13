@@ -28,6 +28,15 @@ constexpr double kWheelStepFeet = 400.0;
 constexpr double kCtrlWheelStepFeet = 1600.0;
 constexpr double kMaxHoverRangeFeet = 150.0;
 constexpr double kRightClickDragTolerancePx = 3.0;
+constexpr double kPi = 3.14159265358979323846;
+
+int normalizedDegrees(int degrees) {
+    return ((degrees % 360) + 360) % 360;
+}
+
+double radiansFromDegrees(int degrees) {
+    return double(normalizedDegrees(degrees)) * kPi / 180.0;
+}
 
 bool isHeavyWake(QStringView wake) {
     if (wake.size() != 1) return false;
@@ -263,8 +272,8 @@ void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
             const double tolerance = kRightClickDragTolerancePx * devicePixelRatioF();
             if (delta.x() * delta.x() + delta.y() * delta.y() > tolerance * tolerance)
                 rightDragMoved_ = true;
-            centerFeet_ = QPointF(panStartCenterFeet_.x() - delta.x() / ppf,
-                                  panStartCenterFeet_.y() + delta.y() / ppf);
+            const QPointF worldDelta = screenDeltaToWorldDelta(delta, renderSize);
+            centerFeet_ = panStartCenterFeet_ - worldDelta;
             update();
         }
 
@@ -418,8 +427,14 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
     }
 
     if (dcbEntryCommand_) {
-        const int steps = wheelY > 0 ? -1 : 1;
+        const int steps = dcbEntryCommand_->type() == CommandType::Rotate
+            ? (wheelY > 0 ? 1 : -1)
+            : (wheelY > 0 ? -1 : 1);
         dcbEntryCommand_->wheelDelta(steps);
+        if (dcbEntryCommand_->type() == CommandType::Rotate) {
+            int value = 0;
+            if (dcbEntryCommand_->valueInt(&value)) setRotationValue(value);
+        }
         clearDcbHover();
         setAsdexCursor(CursorMode::Hidden);
         update();
@@ -435,6 +450,12 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
     }
 
     clearDcbHover();
+
+    if (event->modifiers().testFlag(Qt::ShiftModifier)) {
+        rotateByDegrees(wheelY > 0 ? 1 : -1);
+        event->accept();
+        return;
+    }
 
     const bool ctrl = event->modifiers().testFlag(Qt::ControlModifier);
     const bool alt = event->modifiers().testFlag(Qt::AltModifier);
@@ -471,7 +492,7 @@ void AsdexScopeWidget::keyPressEvent(QKeyEvent* event) {
 }
 
 void AsdexScopeWidget::leaveEvent(QEvent* event) {
-    if (!datablockEdit_ && !panning_) {
+    if (!commandActive() && !panning_) {
         dcbMouseCaptured_ = false;
         clearHighlightedTarget();
         clearDcbHover();
@@ -780,6 +801,9 @@ void AsdexScopeWidget::submitDcbEntryCommand() {
         case CommandType::Range:
             setRangeValue(value);
             break;
+        case CommandType::Rotate:
+            setRotationValue(value);
+            break;
         case CommandType::None:
         case CommandType::EditDatablockFields:
         default:
@@ -851,6 +875,9 @@ void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
         case DcbFunction::Range:
             startRangeCommand();
             return;
+        case DcbFunction::Rotate:
+            startRotateCommand();
+            return;
         case DcbFunction::DayNite:
             toggleDayNite();
             return;
@@ -892,6 +919,33 @@ void AsdexScopeWidget::startRangeCommand() {
 
     commandType_ = CommandType::Range;
     dcbEntryCommand_ = DcbEntryCommand::range(currentRangeValue());
+    datablockEdit_.reset();
+    editingTrackId_.clear();
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Hidden);
+    update();
+}
+
+int AsdexScopeWidget::currentRotationValue() const {
+    return normalizedDegrees(rotationDegrees_);
+}
+
+void AsdexScopeWidget::setRotationValue(int degrees) {
+    rotationDegrees_ = normalizedDegrees(degrees);
+    update();
+}
+
+void AsdexScopeWidget::rotateByDegrees(int deltaDegrees) {
+    setRotationValue(rotationDegrees_ + deltaDegrees);
+}
+
+void AsdexScopeWidget::startRotateCommand() {
+    if (commandType_ != CommandType::None) return;
+
+    commandType_ = CommandType::Rotate;
+    dcbEntryCommand_ = DcbEntryCommand::rotate(currentRotationValue());
     datablockEdit_.reset();
     editingTrackId_.clear();
     clearHighlightedTarget();
@@ -1016,7 +1070,7 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
 DcbState AsdexScopeWidget::makeDcbState() const {
     DcbState state;
     state.range = currentRangeValue();
-    state.rotation = 0;
+    state.rotation = currentRotationValue();
     state.vectorLength = targetVectorSeconds_;
     state.leaderLength = 2;
     state.nightMode = mode_ == Mode::Night;
@@ -1051,10 +1105,17 @@ QMatrix4x4 AsdexScopeWidget::screenProjection() const {
 QPointF AsdexScopeWidget::worldToScreenLogical(const QPointF& worldFeet,
                                                const QSize& renderSize) const {
     const double ppf = pixelsPerFoot(renderSize);
-    const double framebufferX = renderSize.width() * 0.5
-                              + (worldFeet.x() - centerFeet_.x()) * ppf;
-    const double framebufferY = renderSize.height() * 0.5
-                              - (worldFeet.y() - centerFeet_.y()) * ppf;
+    const double theta = radiansFromDegrees(currentRotationValue());
+    const double c = std::cos(theta);
+    const double s = std::sin(theta);
+
+    const double dx = worldFeet.x() - centerFeet_.x();
+    const double dy = worldFeet.y() - centerFeet_.y();
+    const double rx = c * dx - s * dy;
+    const double ry = s * dx + c * dy;
+
+    const double framebufferX = renderSize.width() * 0.5 + rx * ppf;
+    const double framebufferY = renderSize.height() * 0.5 - ry * ppf;
 
     const qreal dpr = devicePixelRatioF();
     return QPointF(framebufferX / dpr, framebufferY / dpr);
@@ -1063,8 +1124,17 @@ QPointF AsdexScopeWidget::worldToScreenLogical(const QPointF& worldFeet,
 QPointF AsdexScopeWidget::worldToFramebufferTopLeft(const QPointF& worldFeet,
                                                     const QSize& renderSize) const {
     const double ppf = pixelsPerFoot(renderSize);
-    return QPointF(renderSize.width() * 0.5 + (worldFeet.x() - centerFeet_.x()) * ppf,
-                   renderSize.height() * 0.5 - (worldFeet.y() - centerFeet_.y()) * ppf);
+    const double theta = radiansFromDegrees(currentRotationValue());
+    const double c = std::cos(theta);
+    const double s = std::sin(theta);
+
+    const double dx = worldFeet.x() - centerFeet_.x();
+    const double dy = worldFeet.y() - centerFeet_.y();
+    const double rx = c * dx - s * dy;
+    const double ry = s * dx + c * dy;
+
+    return QPointF(renderSize.width() * 0.5 + rx * ppf,
+                   renderSize.height() * 0.5 - ry * ppf);
 }
 
 QPointF AsdexScopeWidget::framebufferPoint(const QPointF& logicalPoint) const {
@@ -1088,8 +1158,34 @@ QPointF AsdexScopeWidget::screenToWorldFeet(const QPointF& logicalPoint,
 
     if (ppf <= 0.0) return centerFeet_;
 
-    return QPointF(centerFeet_.x() + (point.x() - renderSize.width() * 0.5) / ppf,
-                   centerFeet_.y() + (renderSize.height() * 0.5 - point.y()) / ppf);
+    const double rx = (point.x() - renderSize.width() * 0.5) / ppf;
+    const double ry = (renderSize.height() * 0.5 - point.y()) / ppf;
+
+    const double theta = radiansFromDegrees(currentRotationValue());
+    const double c = std::cos(theta);
+    const double s = std::sin(theta);
+
+    const double dx = c * rx + s * ry;
+    const double dy = -s * rx + c * ry;
+
+    return QPointF(centerFeet_.x() + dx, centerFeet_.y() + dy);
+}
+
+QPointF AsdexScopeWidget::screenDeltaToWorldDelta(const QPointF& framebufferDelta,
+                                                  const QSize& renderSize) const {
+    const double ppf = pixelsPerFoot(renderSize);
+    if (ppf <= 0.0) return QPointF();
+
+    const double rx = framebufferDelta.x() / ppf;
+    const double ry = -framebufferDelta.y() / ppf;
+
+    const double theta = radiansFromDegrees(currentRotationValue());
+    const double c = std::cos(theta);
+    const double s = std::sin(theta);
+
+    const double dx = c * rx + s * ry;
+    const double dy = -s * rx + c * ry;
+    return QPointF(dx, dy);
 }
 
 void AsdexScopeWidget::zoomByFeet(double deltaFeet) {
@@ -1154,7 +1250,7 @@ void AsdexScopeWidget::updateDcbHover(const QPointF& logicalPoint) {
 }
 
 void AsdexScopeWidget::updateHoverCursor(const QPointF& logicalPoint) {
-    if (datablockEdit_ || panning_) {
+    if (commandActive() || panning_) {
         setAsdexCursor(CursorMode::Hidden);
         return;
     }
@@ -1224,10 +1320,18 @@ QMatrix4x4 AsdexScopeWidget::viewProjection(const QSize& renderSize) const {
     const double sx = 2.0 * pxPerFoot / renderSize.width();
     const double sy = 2.0 * pxPerFoot / renderSize.height();
 
-    matrix(0, 0) = static_cast<float>(sx);
-    matrix(0, 3) = static_cast<float>(-centerFeet_.x() * sx);
-    matrix(1, 1) = static_cast<float>(sy);
-    matrix(1, 3) = static_cast<float>(-centerFeet_.y() * sy);
+    const double theta = radiansFromDegrees(currentRotationValue());
+    const double c = std::cos(theta);
+    const double s = std::sin(theta);
+    const double cx = centerFeet_.x();
+    const double cy = centerFeet_.y();
+
+    matrix(0, 0) = static_cast<float>(sx * c);
+    matrix(0, 1) = static_cast<float>(-sx * s);
+    matrix(0, 3) = static_cast<float>(sx * (-c * cx + s * cy));
+    matrix(1, 0) = static_cast<float>(sy * s);
+    matrix(1, 1) = static_cast<float>(sy * c);
+    matrix(1, 3) = static_cast<float>(sy * (-s * cx - c * cy));
     return matrix;
 }
 
