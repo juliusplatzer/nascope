@@ -8,11 +8,15 @@
 #include <QStringList>
 #include <QVector>
 
+#include <algorithm>
+#include <utility>
+
 namespace asdex {
 
 enum class CommandType {
     None,
     EditDatablockFields,
+    Range,
 };
 
 struct EditedDbFields {
@@ -70,6 +74,115 @@ private:
 
     QVector<EditField> fields_;
     int active_ = 0;
+};
+
+class DcbEntryCommand {
+public:
+    struct Spec {
+        CommandType type = CommandType::None;
+        QString label;
+
+        int minValue = 0;
+        int maxValue = 0;
+        int wheelStep = 1;
+
+        QString invalidMessage = QStringLiteral("INVALID ENTRY");
+        bool numericOnly = true;
+    };
+
+    static DcbEntryCommand range(int currentRange) {
+        Spec spec;
+        spec.type = CommandType::Range;
+        spec.label = QStringLiteral("RANGE");
+        spec.minValue = 6;
+        spec.maxValue = 300;
+        spec.wheelStep = 1;
+        spec.invalidMessage = QStringLiteral("INVALID RANGE");
+        spec.numericOnly = true;
+        return DcbEntryCommand(spec, QString::number(currentRange));
+    }
+
+    QStringList displayLines() const { return {spec_.label, value_}; }
+    int cursorLine() const { return 2; }
+    int cursorColumn() const { return cursor_; }
+    CommandType type() const { return spec_.type; }
+    QString invalidMessage() const { return spec_.invalidMessage; }
+
+    void insert(QChar c) {
+        if (spec_.numericOnly && !c.isDigit()) return;
+
+        if (resetOnFirstType_) {
+            value_.clear();
+            cursor_ = 0;
+            resetOnFirstType_ = false;
+        }
+
+        value_.insert(cursor_, c);
+        ++cursor_;
+    }
+
+    void backspace() {
+        resetOnFirstType_ = false;
+        if (cursor_ <= 0) return;
+
+        value_.remove(cursor_ - 1, 1);
+        --cursor_;
+    }
+
+    void deleteForward() {
+        resetOnFirstType_ = false;
+        if (cursor_ < 0 || cursor_ >= value_.size()) return;
+
+        value_.remove(cursor_, 1);
+    }
+
+    void moveLeft() {
+        resetOnFirstType_ = false;
+        cursor_ = std::max(0, cursor_ - 1);
+    }
+
+    void moveRight() {
+        resetOnFirstType_ = false;
+        cursor_ = std::min(cursor_ + 1, static_cast<int>(value_.size()));
+    }
+
+    void wheelDelta(int steps) {
+        int value = currentOrMinimum();
+        value += steps * spec_.wheelStep;
+        value = std::clamp(value, spec_.minValue, spec_.maxValue);
+
+        value_ = QString::number(value);
+        cursor_ = value_.size();
+        resetOnFirstType_ = false;
+    }
+
+    bool valueInt(int* out) const {
+        bool ok = false;
+        const int value = value_.trimmed().toInt(&ok);
+        if (!ok) return false;
+        if (value < spec_.minValue || value > spec_.maxValue) return false;
+
+        if (out) *out = value;
+        return true;
+    }
+
+private:
+    DcbEntryCommand(Spec spec, QString initialValue)
+        : spec_(std::move(spec)),
+          value_(std::move(initialValue)),
+          cursor_(value_.size()) {}
+
+    int currentOrMinimum() const {
+        bool ok = false;
+        const int value = value_.trimmed().toInt(&ok);
+        if (!ok) return spec_.minValue;
+        return std::clamp(value, spec_.minValue, spec_.maxValue);
+    }
+
+    Spec spec_;
+    QString value_;
+    int cursor_ = 0;
+    bool resetOnFirstType_ = true;
 };
 
 } // namespace asdex

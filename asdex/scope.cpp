@@ -209,7 +209,7 @@ void AsdexScopeWidget::fitMapToView() {
 void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
     setFocus(Qt::MouseFocusReason);
 
-    if (datablockEdit_) {
+    if (commandActive()) {
         event->accept();
         return;
     }
@@ -244,7 +244,7 @@ void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
 }
 
 void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
-    if (datablockEdit_) {
+    if (commandActive()) {
         clearHighlightedTarget();
         clearDcbHover();
         setAsdexCursor(CursorMode::Hidden);
@@ -335,6 +335,13 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
 
+    if (dcbEntryCommand_) {
+        if (event->button() == Qt::LeftButton) submitDcbEntryCommand();
+
+        event->accept();
+        return;
+    }
+
     if (dcbMouseCaptured_ && event->button() == Qt::LeftButton) {
         dcbMouseCaptured_ = false;
         clearHighlightedTarget();
@@ -342,6 +349,14 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
         const DcbHit hit = dcb_.hitTest(event->position(), size(), asdexFont_, makeDcbState());
         if (hit.overDcb && hit.buttonIndex >= 0 && hit.function.has_value()) {
             handleDcbButtonClicked(*hit.function);
+        }
+
+        if (commandActive()) {
+            clearDcbHover();
+            setAsdexCursor(CursorMode::Hidden);
+            update();
+            event->accept();
+            return;
         }
 
         if (isPointOverDcb(event->position())) {
@@ -402,6 +417,16 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
         return;
     }
 
+    if (dcbEntryCommand_) {
+        const int steps = wheelY > 0 ? -1 : 1;
+        dcbEntryCommand_->wheelDelta(steps);
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Hidden);
+        update();
+        event->accept();
+        return;
+    }
+
     if (isPointOverDcb(event->position())) {
         updateDcbHover(event->position());
         setAsdexCursor(CursorMode::Dcb);
@@ -426,11 +451,18 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
 
 void AsdexScopeWidget::keyPressEvent(QKeyEvent* event) {
     if (datablockEdit_ && handleDatablockEditKey(event)) return;
+    if (dcbEntryCommand_ && handleDcbEntryCommandKey(event)) return;
 
     if (event->key() == Qt::Key_F6 && event->modifiers() == Qt::NoModifier) {
         showDataBlocks_ = !showDataBlocks_;
         datablockVisibility_.clear();
         update();
+        event->accept();
+        return;
+    }
+
+    if (event->key() == Qt::Key_F10 && event->modifiers() == Qt::NoModifier) {
+        toggleDayNite();
         event->accept();
         return;
     }
@@ -507,6 +539,61 @@ bool AsdexScopeWidget::handleDatablockEditKey(QKeyEvent* event) {
     const QString text = event->text();
     if (!text.isEmpty()) {
         for (const QChar c : text) datablockEdit_->insert(c);
+        update();
+        event->accept();
+        return true;
+    }
+
+    event->accept();
+    return true;
+}
+
+bool AsdexScopeWidget::handleDcbEntryCommandKey(QKeyEvent* event) {
+    if (!dcbEntryCommand_) return false;
+
+    switch (event->key()) {
+        case Qt::Key_Escape:
+            cancelCommand();
+            event->accept();
+            return true;
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+            submitDcbEntryCommand();
+            event->accept();
+            return true;
+        case Qt::Key_Backspace:
+            dcbEntryCommand_->backspace();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Delete:
+            dcbEntryCommand_->deleteForward();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Left:
+            dcbEntryCommand_->moveLeft();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Right:
+            dcbEntryCommand_->moveRight();
+            update();
+            event->accept();
+            return true;
+        default:
+            break;
+    }
+
+    if (event->modifiers().testFlag(Qt::ControlModifier)
+        || event->modifiers().testFlag(Qt::MetaModifier)) {
+        event->accept();
+        return true;
+    }
+
+    const QString text = event->text();
+    if (text.size() == 1) {
+        dcbEntryCommand_->insert(text.at(0));
         update();
         event->accept();
         return true;
@@ -635,6 +722,7 @@ void AsdexScopeWidget::startDatablockEdit(const AsdexTarget& target) {
 void AsdexScopeWidget::cancelCommand() {
     commandType_ = CommandType::None;
     datablockEdit_.reset();
+    dcbEntryCommand_.reset();
     editingTrackId_.clear();
     previewArea_.setSystemResponse({});
     clearDcbHover();
@@ -674,6 +762,38 @@ void AsdexScopeWidget::submitDatablockEdit() {
     cancelCommand();
 }
 
+void AsdexScopeWidget::submitDcbEntryCommand() {
+    if (!dcbEntryCommand_) return;
+
+    int value = 0;
+    if (!dcbEntryCommand_->valueInt(&value)) {
+        previewArea_.setSystemResponse(dcbEntryCommand_->invalidMessage());
+        commandType_ = CommandType::None;
+        dcbEntryCommand_.reset();
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Scope);
+        update();
+        return;
+    }
+
+    switch (dcbEntryCommand_->type()) {
+        case CommandType::Range:
+            setRangeValue(value);
+            break;
+        case CommandType::None:
+        case CommandType::EditDatablockFields:
+        default:
+            break;
+    }
+
+    previewArea_.setSystemResponse(QString());
+    commandType_ = CommandType::None;
+    dcbEntryCommand_.reset();
+    clearDcbHover();
+    setAsdexCursor(CursorMode::Scope);
+    update();
+}
+
 void AsdexScopeWidget::applyEditedFields(AsdexTarget& target,
                                          const EditedDbFields& fields) const {
     target.callsign = fields.callsign;
@@ -683,6 +803,10 @@ void AsdexScopeWidget::applyEditedFields(AsdexTarget& target,
     target.fix = fields.fix;
     target.scratchpad1 = fields.scratchpad1;
     target.scratchpad2 = fields.scratchpad2;
+}
+
+bool AsdexScopeWidget::commandActive() const {
+    return datablockEdit_.has_value() || dcbEntryCommand_.has_value();
 }
 
 bool AsdexScopeWidget::defaultDataBlockVisibleForTarget(const AsdexTarget& target) const {
@@ -724,6 +848,12 @@ void AsdexScopeWidget::toggleDataBlockForTarget(const AsdexTarget& target) {
 
 void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
     switch (function) {
+        case DcbFunction::Range:
+            startRangeCommand();
+            return;
+        case DcbFunction::DayNite:
+            toggleDayNite();
+            return;
         case DcbFunction::DcbOnOff:
             toggleDcbOnOff();
             return;
@@ -737,6 +867,44 @@ void AsdexScopeWidget::toggleDcbOnOff() {
     dcb_.setMenu(dcbOff_ ? DcbMenu::Off : DcbMenu::Main);
     clearDcbHover();
     update();
+}
+
+void AsdexScopeWidget::toggleDayNite() {
+    mode_ = (mode_ == Mode::Day) ? Mode::Night : Mode::Day;
+    clearDcbHover();
+    update();
+}
+
+int AsdexScopeWidget::currentRangeValue() const {
+    return std::clamp(int(std::round(halfRangeFeet_ / 100.0)), 6, 300);
+}
+
+void AsdexScopeWidget::setRangeValue(int range) {
+    range = std::clamp(range, 6, 300);
+    halfRangeFeet_ = std::clamp(double(range) * 100.0,
+                                kMinHalfRangeFeet,
+                                kMaxHalfRangeFeet);
+    update();
+}
+
+void AsdexScopeWidget::startRangeCommand() {
+    if (commandType_ != CommandType::None) return;
+
+    commandType_ = CommandType::Range;
+    dcbEntryCommand_ = DcbEntryCommand::range(currentRangeValue());
+    datablockEdit_.reset();
+    editingTrackId_.clear();
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Hidden);
+    update();
+}
+
+QStringList AsdexScopeWidget::activeCommandLines() const {
+    if (datablockEdit_) return datablockEdit_->displayLines();
+    if (dcbEntryCommand_) return dcbEntryCommand_->displayLines();
+    return {};
 }
 
 void AsdexScopeWidget::renderScene(const QSize& renderSize) {
@@ -814,22 +982,28 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
 
         coastList_.render(*textBuilder, asdexFont_, listFontTexture, size());
 
-        const QStringList commandLines =
-            datablockEdit_ ? datablockEdit_->displayLines() : QStringList();
+        const QStringList commandLines = activeCommandLines();
         previewArea_.render(*textBuilder, asdexFont_, listFontTexture, commandLines);
         textBuilder->generateCommands(commandBuffer);
         renderer::returnTextBuilder(textBuilder);
 
-        if (datablockEdit_) {
-            commandBuffer->setRgba(renderer::RGBA::fromQColor(
-                applyBrightness(QColor(0, 248, 0), 95, 20)));
+        if (datablockEdit_ || dcbEntryCommand_) {
+            commandBuffer->setRgba(renderer::RGBA::fromQColor(previewArea_.textColor()));
             commandBuffer->lineWidth(1.0f);
 
             renderer::LinesBuilder* lineBuilder = renderer::getLinesBuilder();
-            previewArea_.renderCommandCursor(*lineBuilder,
-                                             asdexFont_,
-                                             *datablockEdit_,
-                                             projection);
+            if (datablockEdit_) {
+                previewArea_.renderCommandCursor(*lineBuilder,
+                                                 asdexFont_,
+                                                 *datablockEdit_,
+                                                 projection);
+            } else if (dcbEntryCommand_) {
+                previewArea_.renderCommandCursor(*lineBuilder,
+                                                 asdexFont_,
+                                                 dcbEntryCommand_->cursorLine(),
+                                                 dcbEntryCommand_->cursorColumn(),
+                                                 projection);
+            }
             lineBuilder->generateCommands(commandBuffer);
             renderer::returnLinesBuilder(lineBuilder);
         }
@@ -841,7 +1015,7 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
 
 DcbState AsdexScopeWidget::makeDcbState() const {
     DcbState state;
-    state.range = int(std::round(halfRangeFeet_ / 100.0));
+    state.range = currentRangeValue();
     state.rotation = 0;
     state.vectorLength = targetVectorSeconds_;
     state.leaderLength = 2;

@@ -135,6 +135,7 @@ public:
     void setSystemResponse(QString response);
 
     bool loadDefaultStateFromConfigFile(const QString& path, QString* error = nullptr);
+    QColor textColor() const;
 
     void render(renderer::TextBuilder& textBuilder,
                 const renderer::BitmapFont& font,
@@ -143,6 +144,11 @@ public:
     void renderCommandCursor(renderer::LinesBuilder& lineBuilder,
                              const renderer::BitmapFont& font,
                              const DatablockEditCommand& command,
+                             const QMatrix4x4& screenProjection) const;
+    void renderCommandCursor(renderer::LinesBuilder& lineBuilder,
+                             const renderer::BitmapFont& font,
+                             int cursorLine,
+                             int cursorColumn,
                              const QMatrix4x4& screenProjection) const;
 
 private:
@@ -156,7 +162,6 @@ private:
     QString matchedRunwayConfigName(const QStringList& landingRunways,
                                     const QStringList& departureRunways) const;
     int baseLineCount() const;
-    QColor textColor() const;
 
     ScreenList list_;
     PreviewAreaState state_;

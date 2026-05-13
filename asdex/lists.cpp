@@ -382,6 +382,18 @@ void PreviewArea::renderCommandCursor(renderer::LinesBuilder& lineBuilder,
                                       const renderer::BitmapFont& font,
                                       const DatablockEditCommand& command,
                                       const QMatrix4x4& screenProjection) const {
+    renderCommandCursor(lineBuilder,
+                        font,
+                        command.cursorLine(),
+                        command.cursorColumn(),
+                        screenProjection);
+}
+
+void PreviewArea::renderCommandCursor(renderer::LinesBuilder& lineBuilder,
+                                      const renderer::BitmapFont& font,
+                                      int cursorLine,
+                                      int cursorColumn,
+                                      const QMatrix4x4& screenProjection) const {
     Q_UNUSED(screenProjection);
 
     const ScreenListStyle& style = list_.style();
@@ -391,13 +403,13 @@ void PreviewArea::renderCommandCursor(renderer::LinesBuilder& lineBuilder,
     if (charWidth <= 0 || lineHeight <= 0) return;
 
     const int fontSpacing = font.fontSpacing(style.fontSize);
-    const int column = command.cursorColumn();
-    const int line = command.cursorLine();
+    const int column = cursorColumn;
+    const int line = cursorLine;
     const QPointF location = style.location;
 
     const double x = location.x()
         + charWidth * column
-        + fontSpacing * (column - 1);
+        + fontSpacing * std::max(0, column - 1);
     const double y = location.y()
         + (lineHeight + style.lineSpacing) * (line + baseLineCount());
 

@@ -73,12 +73,20 @@ private:
     void startDatablockEdit(const AsdexTarget& target);
     void cancelCommand();
     void submitDatablockEdit();
+    void submitDcbEntryCommand();
     void applyEditedFields(AsdexTarget& target, const EditedDbFields& fields) const;
+    bool commandActive() const;
     bool defaultDataBlockVisibleForTarget(const AsdexTarget& target) const;
     bool isDataBlockVisible(const AsdexTarget& target) const;
     void toggleDataBlockForTarget(const AsdexTarget& target);
     void handleDcbButtonClicked(DcbFunction function);
     void toggleDcbOnOff();
+    void toggleDayNite();
+    int currentRangeValue() const;
+    void setRangeValue(int range);
+    void startRangeCommand();
+    bool handleDcbEntryCommandKey(QKeyEvent* event);
+    QStringList activeCommandLines() const;
     void renderScene(const QSize& renderSize);
     DcbState makeDcbState() const;
     QSize framebufferRenderSize() const;
@@ -120,6 +128,7 @@ private:
     QString highlightedTargetId_;
     CommandType commandType_ = CommandType::None;
     std::optional<DatablockEditCommand> datablockEdit_;
+    std::optional<DcbEntryCommand> dcbEntryCommand_;
     QString editingTrackId_;
     QPointF centerFeet_;
     double halfRangeFeet_ = 1.0;
