@@ -5,6 +5,7 @@
 #include "renderer/command_buffer.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace asdex {
 namespace {
@@ -23,36 +24,52 @@ const QColor kDcbText(Qt::white);
 const QColor kDcbTextHover(Qt::green);
 const QColor kDcbHighlight(255, 220, 40);
 
+struct DcbTextFragment {
+    QString text;
+    bool active = false;
+};
+
+using DcbTextLine = QVector<DcbTextFragment>;
+
 void addRect(renderer::ColoredTrianglesBuilder* builder, const QRectF& rect, const QColor& color) {
     if (!builder || rect.isEmpty()) return;
 
     builder->addQuad(rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft(), color);
 }
 
-QStringList displayLinesForButton(const DcbButtonSpec& spec) {
-    QStringList lines = spec.lines;
+DcbTextLine normalLine(const QString& text) {
+    return DcbTextLine{DcbTextFragment{text, false}};
+}
+
+QVector<DcbTextLine> displayTextLinesForButton(const DcbButtonSpec& spec) {
+    QVector<DcbTextLine> lines;
+    lines.reserve(spec.lines.size() + 1);
+
+    for (const QString& line : spec.lines) {
+        lines.push_back(normalLine(line));
+    }
 
     if (spec.kind == DcbButtonKind::Value && spec.showValue) {
-        if (lines.size() > 1) {
-            bool ok = false;
-            lines.at(1).toInt(&ok);
-            if (ok) {
-                lines[1] = QString::number(spec.value);
-            } else if (lines.size() < 3) {
-                lines << QString::number(spec.value);
-            } else {
-                lines[2] = QString::number(spec.value);
-            }
-        } else {
-            lines << QString::number(spec.value);
-        }
+        lines.push_back(normalLine(QString::number(spec.value)));
     }
 
     if (spec.kind == DcbButtonKind::Toggle) {
-        lines << (spec.onLabel + QLatin1Char('/') + spec.offLabel);
+        DcbTextLine toggleLine;
+        toggleLine.push_back(DcbTextFragment{spec.onLabel, spec.toggleOn});
+        toggleLine.push_back(DcbTextFragment{QStringLiteral("/"), false});
+        toggleLine.push_back(DcbTextFragment{spec.offLabel, !spec.toggleOn});
+        lines.push_back(std::move(toggleLine));
     }
 
     return lines;
+}
+
+int measureFragmentLine(const renderer::BitmapFont& font, const DcbTextLine& line, int fontSize) {
+    int width = 0;
+    for (const DcbTextFragment& fragment : line) {
+        width += font.measureText(QStringView(fragment.text), fontSize).width();
+    }
+    return width;
 }
 
 }  // namespace
@@ -183,7 +200,7 @@ QVector<DcbButtonSpec> Dcb::mainButtonSpecs(const DcbState& state) {
     normal(DcbFunction::InitControl, {"INIT", "CNTL"});
     normal(DcbFunction::TrackSuspend, {"TRK", "SUSP"});
     normal(DcbFunction::TermControl, {"TERM", "CNTL"});
-    toggle(DcbFunction::DcbOnOff, {"DCB"}, state.showDcb);
+    toggle(DcbFunction::DcbOnOff, {"DCB"}, state.dcbOn);
 
     if (!state.networkConnected) {
         error(DcbFunction::MlatOff, {"MLAT", "OFF"});
@@ -191,6 +208,28 @@ QVector<DcbButtonSpec> Dcb::mainButtonSpecs(const DcbState& state) {
     }
 
     menu(DcbFunction::OperationalMode, {"OPER", "MODE"});
+
+    return out;
+}
+
+QVector<DcbButtonSpec> Dcb::offButtonSpecs(const DcbState& state) {
+    QVector<DcbButtonSpec> out;
+    out.reserve(2);
+
+    DcbButtonSpec dcb;
+    dcb.function = DcbFunction::DcbOnOff;
+    dcb.kind = DcbButtonKind::Toggle;
+    dcb.lines = {QStringLiteral("DCB")};
+    dcb.toggleOn = state.dcbOn;
+    dcb.onLabel = QStringLiteral("ON");
+    dcb.offLabel = QStringLiteral("OFF");
+    out.push_back(std::move(dcb));
+
+    DcbButtonSpec oper;
+    oper.function = DcbFunction::OperationalMode;
+    oper.kind = DcbButtonKind::Menu;
+    oper.lines = {QStringLiteral("OPER"), QStringLiteral("MODE")};
+    out.push_back(std::move(oper));
 
     return out;
 }
@@ -208,6 +247,10 @@ QSize Dcb::horizontalMenuSize(QSize buttonSize) {
                  buttonSize.height() * 2 + 9);
 }
 
+QSize Dcb::offMenuSize(QSize buttonSize) {
+    return QSize(buttonSize.width() + 6, buttonSize.height() * 2 + 9);
+}
+
 DcbLayout Dcb::layout(QSize displaySize,
                       const renderer::BitmapFont& font,
                       const DcbState& state) const {
@@ -217,10 +260,11 @@ DcbLayout Dcb::layout(QSize displaySize,
     int autoSize = 3;
     QSize buttonSize;
     QSize menuSize;
+    const bool offMenu = menu_ == DcbMenu::Off;
 
     while (autoSize >= 1) {
         buttonSize = buttonSizeForFont(font, autoSize);
-        menuSize = horizontalMenuSize(buttonSize);
+        menuSize = offMenu ? offMenuSize(buttonSize) : horizontalMenuSize(buttonSize);
         if (autoSize == 1 || displaySize.width() >= menuSize.width()) break;
         --autoSize;
     }
@@ -232,18 +276,28 @@ DcbLayout Dcb::layout(QSize displaySize,
 
     if (!isHorizontal(position_)) return out;
 
-    const int menuX = displaySize.width() > menuSize.width()
-        ? (displaySize.width() - menuSize.width()) / 2
-        : 0;
-    const int menuY = position_ == DcbPosition::Top ? 0 : displaySize.height() - menuSize.height();
+    int menuX = 0;
+    int menuY = position_ == DcbPosition::Top ? 0 : displaySize.height() - menuSize.height();
 
-    out.dcbBounds = QRectF(0, menuY, displaySize.width(), menuSize.height());
-    out.menuBounds = QRectF(menuX, menuY, menuSize.width(), menuSize.height());
+    if (offMenu) {
+        menuX = std::max(0, displaySize.width() - menuSize.width());
+        out.dcbBounds = QRectF(menuX, menuY, menuSize.width(), menuSize.height());
+        out.menuBounds = out.dcbBounds;
+    } else {
+        menuX = displaySize.width() > menuSize.width()
+            ? (displaySize.width() - menuSize.width()) / 2
+            : 0;
+        out.dcbBounds = QRectF(0, menuY, displaySize.width(), menuSize.height());
+        out.menuBounds = QRectF(menuX, menuY, menuSize.width(), menuSize.height());
+    }
+
+    const QVector<DcbButtonSpec> specs =
+        offMenu ? offButtonSpecs(state) : mainButtonSpecs(state);
 
     int row = 1;
     int column = 1;
 
-    for (const DcbButtonSpec& spec : mainButtonSpecs(state)) {
+    for (const DcbButtonSpec& spec : specs) {
         const int x = menuX + column * kButtonSpacing + (column - 1) * buttonSize.width();
         const int y = menuY + (row == 1 ? kButtonSpacing
                                         : (2 * kButtonSpacing + buttonSize.height()));
@@ -341,23 +395,28 @@ void Dcb::drawText(renderer::TextBuilder& textBuilder,
         const DcbButtonLayout& button = layout.buttons[buttonIndex];
         const bool hovered = buttonIndex == hoveredButtonIndex;
 
-        renderer::TextStyle style;
-        style.size = layout.renderFontSize;
-        style.color = textColor(false, hovered);
-        style.background = Qt::transparent;
-
-        const QStringList lines = displayLinesForButton(button.spec);
+        const QVector<DcbTextLine> lines = displayTextLinesForButton(button.spec);
         if (lines.isEmpty()) continue;
 
         const int blockHeight =
             lines.size() * lineHeight + (lines.size() - 1) * kLineSpacing;
         int y = int(button.bounds.y()) + (int(button.bounds.height()) - blockHeight) / 2;
 
-        for (const QString& line : lines) {
-            const QSize measured = font.measureText(QStringView(line), layout.renderFontSize);
-            const int x = int(button.bounds.x()) + (int(button.bounds.width()) - measured.width()) / 2;
+        for (const DcbTextLine& line : lines) {
+            const int lineWidth = measureFragmentLine(font, line, layout.renderFontSize);
+            int x = int(button.bounds.x()) + (int(button.bounds.width()) - lineWidth) / 2;
 
-            textBuilder.addText(QStringView(line), QPointF(x, y), style, fontTextureId);
+            for (const DcbTextFragment& fragment : line) {
+                renderer::TextStyle style;
+                style.size = layout.renderFontSize;
+                style.background = Qt::transparent;
+                style.color = fragment.active ? textColor(true, false)
+                                              : textColor(false, hovered);
+
+                textBuilder.addText(QStringView(fragment.text), QPointF(x, y), style, fontTextureId);
+                x += font.measureText(QStringView(fragment.text), layout.renderFontSize).width();
+            }
+
             y += lineHeight + kLineSpacing;
         }
     }

@@ -338,6 +338,12 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
     if (dcbMouseCaptured_ && event->button() == Qt::LeftButton) {
         dcbMouseCaptured_ = false;
         clearHighlightedTarget();
+
+        const DcbHit hit = dcb_.hitTest(event->position(), size(), asdexFont_, makeDcbState());
+        if (hit.overDcb && hit.buttonIndex >= 0 && hit.function.has_value()) {
+            handleDcbButtonClicked(*hit.function);
+        }
+
         if (isPointOverDcb(event->position())) {
             updateDcbHover(event->position());
             setAsdexCursor(CursorMode::Dcb);
@@ -716,6 +722,23 @@ void AsdexScopeWidget::toggleDataBlockForTarget(const AsdexTarget& target) {
         : DataBlockVisibility::ForceOn;
 }
 
+void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
+    switch (function) {
+        case DcbFunction::DcbOnOff:
+            toggleDcbOnOff();
+            return;
+        default:
+            return;
+    }
+}
+
+void AsdexScopeWidget::toggleDcbOnOff() {
+    dcbOff_ = !dcbOff_;
+    dcb_.setMenu(dcbOff_ ? DcbMenu::Off : DcbMenu::Main);
+    clearDcbHover();
+    update();
+}
+
 void AsdexScopeWidget::renderScene(const QSize& renderSize) {
     if (!renderer_ || renderSize.isEmpty()) return;
 
@@ -825,7 +848,7 @@ DcbState AsdexScopeWidget::makeDcbState() const {
     state.nightMode = mode_ == Mode::Night;
     state.showVectorLine = true;
     state.showDataBlocks = showDataBlocks_;
-    state.showDcb = true;
+    state.dcbOn = !dcbOff_;
     state.networkConnected = true;
     return state;
 }

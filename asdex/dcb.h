@@ -120,7 +120,7 @@ struct DcbState {
     bool nightMode = false;
     bool showVectorLine = true;
     bool showDataBlocks = true;
-    bool showDcb = true;
+    bool dcbOn = true;
 
     bool networkConnected = true;
 };
@@ -140,6 +140,9 @@ public:
 
     void setCharSize(int charSize);
     int charSize() const { return dcbCharSize_; }
+
+    void setMenu(DcbMenu menu) { menu_ = menu; }
+    DcbMenu menu() const { return menu_; }
 
     DcbLayout layout(QSize displaySize,
                      const renderer::BitmapFont& font,
@@ -169,11 +172,13 @@ public:
 
 private:
     static QVector<DcbButtonSpec> mainButtonSpecs(const DcbState& state);
+    static QVector<DcbButtonSpec> offButtonSpecs(const DcbState& state);
     static bool isHorizontal(DcbPosition position);
     static bool isLargeFunction(DcbFunction function);
 
     static QSize buttonSizeForFont(const renderer::BitmapFont& font, int autoSize);
     static QSize horizontalMenuSize(QSize buttonSize);
+    static QSize offMenuSize(QSize buttonSize);
     static QColor applyDcbBrightness(QColor color, int brightness);
 
     QColor backgroundColor() const;

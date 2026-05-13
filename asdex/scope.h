@@ -77,6 +77,8 @@ private:
     bool defaultDataBlockVisibleForTarget(const AsdexTarget& target) const;
     bool isDataBlockVisible(const AsdexTarget& target) const;
     void toggleDataBlockForTarget(const AsdexTarget& target);
+    void handleDcbButtonClicked(DcbFunction function);
+    void toggleDcbOnOff();
     void renderScene(const QSize& renderSize);
     DcbState makeDcbState() const;
     QSize framebufferRenderSize() const;
@@ -129,6 +131,7 @@ private:
     bool panning_ = false;
     bool rightDragMoved_ = false;
     bool dcbMouseCaptured_ = false;
+    bool dcbOff_ = false;
     int hoveredDcbButtonIndex_ = -1;
     std::optional<DcbFunction> hoveredDcbFunction_;
     QPointF panStartMouseFramebuffer_;
