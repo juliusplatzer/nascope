@@ -93,6 +93,9 @@ private:
     int currentVectorLengthValue() const;
     void setVectorLengthValue(int seconds);
     void startVectorLengthCommand();
+    int currentLeaderLengthValue() const;
+    void setLeaderLengthValue(int leaderLength);
+    void startLeaderLengthCommand();
     void startMapRepositionCommand();
     void commitMapRepositionCommand();
     void cancelMapRepositionCommand();
@@ -118,6 +121,7 @@ private:
     void zoomByFeet(double deltaFeet);
     void zoomToCursorByFeet(double deltaFeet, const QPointF& cursorLogicalPoint);
     bool isPointOverDcb(const QPointF& logicalPoint) const;
+    bool handleDcbWheel(DcbFunction function, int wheelY);
     void clearDcbHover();
     void updateDcbHover(const QPointF& logicalPoint);
     void updateHoverCursor(const QPointF& logicalPoint);
@@ -170,6 +174,7 @@ private:
 
     int targetVectorSeconds_ = 5;
     bool showVectorLine_ = true;
+    int leaderLength_ = 2;
     CursorMode currentCursorMode_ = CursorMode::Hidden;
     bool fontLoaded_ = false;
     bool fontTexturesReady_ = false;
