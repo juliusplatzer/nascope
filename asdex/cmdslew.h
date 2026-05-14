@@ -19,6 +19,7 @@ enum class CommandType {
     Range,
     Rotate,
     VectorLength,
+    LeaderLength,
     MapReposition,
 };
 
@@ -129,6 +130,18 @@ public:
         spec.invalidMessage = QStringLiteral("INVALID ENTRY");
         spec.numericOnly = true;
         return DcbEntryCommand(spec, QString::number(currentVectorLength));
+    }
+
+    static DcbEntryCommand leaderLength(int currentLeaderLength) {
+        Spec spec;
+        spec.type = CommandType::LeaderLength;
+        spec.label = QStringLiteral("LDR LNG");
+        spec.minValue = 0;
+        spec.maxValue = 15;
+        spec.wheelStep = 1;
+        spec.invalidMessage = QStringLiteral("INVALID LNG");
+        spec.numericOnly = true;
+        return DcbEntryCommand(spec, QString::number(currentLeaderLength));
     }
 
     QStringList displayLines() const { return {spec_.label, value_}; }

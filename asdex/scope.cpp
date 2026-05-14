@@ -467,6 +467,7 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
         switch (dcbEntryCommand_->type()) {
             case CommandType::Rotate:
             case CommandType::VectorLength:
+            case CommandType::LeaderLength:
                 steps = wheelY > 0 ? 1 : -1;
                 break;
             case CommandType::Range:
@@ -488,6 +489,9 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
                 case CommandType::VectorLength:
                     setVectorLengthValue(value);
                     break;
+                case CommandType::LeaderLength:
+                    setLeaderLengthValue(value);
+                    break;
                 default:
                     break;
             }
@@ -501,6 +505,15 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
     }
 
     if (isPointOverDcb(event->position())) {
+        const DcbHit hit = dcb_.hitTest(event->position(), size(), asdexFont_, makeDcbState());
+        if (hit.function && handleDcbWheel(*hit.function, wheelY)) {
+            updateDcbHover(event->position());
+            setAsdexCursor(CursorMode::Dcb);
+            update();
+            event->accept();
+            return;
+        }
+
         updateDcbHover(event->position());
         setAsdexCursor(CursorMode::Dcb);
         event->accept();
@@ -890,8 +903,12 @@ void AsdexScopeWidget::submitDcbEntryCommand() {
         case CommandType::VectorLength:
             setVectorLengthValue(value);
             break;
+        case CommandType::LeaderLength:
+            setLeaderLengthValue(value);
+            break;
         case CommandType::None:
         case CommandType::EditDatablockFields:
+        case CommandType::MapReposition:
         default:
             break;
     }
@@ -974,6 +991,9 @@ void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
             return;
         case DcbFunction::VectorLength:
             startVectorLengthCommand();
+            return;
+        case DcbFunction::LeaderLength:
+            startLeaderLengthCommand();
             return;
         case DcbFunction::DayNite:
             toggleDayNite();
@@ -1072,6 +1092,29 @@ void AsdexScopeWidget::startVectorLengthCommand() {
 
     commandType_ = CommandType::VectorLength;
     dcbEntryCommand_ = DcbEntryCommand::vectorLength(currentVectorLengthValue());
+    datablockEdit_.reset();
+    editingTrackId_.clear();
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Hidden);
+    update();
+}
+
+int AsdexScopeWidget::currentLeaderLengthValue() const {
+    return std::clamp(leaderLength_, 0, 15);
+}
+
+void AsdexScopeWidget::setLeaderLengthValue(int leaderLength) {
+    leaderLength_ = std::clamp(leaderLength, 0, 15);
+    update();
+}
+
+void AsdexScopeWidget::startLeaderLengthCommand() {
+    if (commandType_ != CommandType::None) return;
+
+    commandType_ = CommandType::LeaderLength;
+    dcbEntryCommand_ = DcbEntryCommand::leaderLength(currentLeaderLengthValue());
     datablockEdit_.reset();
     editingTrackId_.clear();
     clearHighlightedTarget();
@@ -1231,7 +1274,7 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
         DataBlockSettings datablockSettings;
         datablockSettings.fontSize = 2;
         datablockSettings.brightness = 95;
-        datablockSettings.leaderLength = 2;
+        datablockSettings.leaderLength = currentLeaderLengthValue();
         datablockSettings.leaderDirection = LeaderDirection::NE;
         datablockSettings.timesharePrimary = timesharePrimary_;
         datablockSettings.alertInProgress = false;
@@ -1292,7 +1335,7 @@ DcbState AsdexScopeWidget::makeDcbState() const {
     state.range = currentRangeValue();
     state.rotation = currentRotationValue();
     state.vectorLength = currentVectorLengthValue();
-    state.leaderLength = 2;
+    state.leaderLength = currentLeaderLengthValue();
     state.nightMode = mode_ == Mode::Night;
     state.showVectorLine = showVectorLine_;
     state.showDataBlocks = showDataBlocks_;
@@ -1438,6 +1481,24 @@ bool AsdexScopeWidget::isPointOverDcb(const QPointF& logicalPoint) const {
     if (!fontLoaded_) return false;
 
     return dcb_.contains(logicalPoint, size(), asdexFont_, makeDcbState());
+}
+
+bool AsdexScopeWidget::handleDcbWheel(DcbFunction function, int wheelY) {
+    const int step = wheelY > 0 ? 1 : -1;
+
+    switch (function) {
+        case DcbFunction::Range:
+            setRangeValue(currentRangeValue() - step);
+            return true;
+        case DcbFunction::LeaderLength:
+            setLeaderLengthValue(currentLeaderLengthValue() + step);
+            return true;
+        case DcbFunction::VectorLength:
+            setVectorLengthValue(currentVectorLengthValue() + step);
+            return true;
+        default:
+            return false;
+    }
 }
 
 void AsdexScopeWidget::clearDcbHover() {
