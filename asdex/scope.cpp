@@ -557,9 +557,7 @@ void AsdexScopeWidget::keyPressEvent(QKeyEvent* event) {
     if (dcbEntryCommand_ && handleDcbEntryCommandKey(event)) return;
 
     if (event->key() == Qt::Key_F6 && event->modifiers() == Qt::NoModifier) {
-        showDataBlocks_ = !showDataBlocks_;
-        datablockVisibility_.clear();
-        update();
+        toggleAllDataBlocks();
         event->accept();
         return;
     }
@@ -995,6 +993,9 @@ void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
         case DcbFunction::LeaderLength:
             startLeaderLengthCommand();
             return;
+        case DcbFunction::DataBlocksOnOff:
+            toggleAllDataBlocks();
+            return;
         case DcbFunction::DayNite:
             toggleDayNite();
             return;
@@ -1015,6 +1016,13 @@ void AsdexScopeWidget::toggleDcbOnOff() {
 
 void AsdexScopeWidget::toggleDayNite() {
     mode_ = (mode_ == Mode::Day) ? Mode::Night : Mode::Day;
+    clearDcbHover();
+    update();
+}
+
+void AsdexScopeWidget::toggleAllDataBlocks() {
+    showDataBlocks_ = !showDataBlocks_;
+    datablockVisibility_.clear();
     clearDcbHover();
     update();
 }

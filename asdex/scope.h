@@ -82,6 +82,7 @@ private:
     void handleDcbButtonClicked(DcbFunction function);
     void toggleDcbOnOff();
     void toggleDayNite();
+    void toggleAllDataBlocks();
     int currentRangeValue() const;
     void setRangeValue(int range);
     void startRangeCommand();
