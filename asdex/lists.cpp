@@ -31,6 +31,10 @@ QColor applyCrcBrightness(QColor color, int brightness, int minBrightness) {
 ScreenList::ScreenList(ScreenListStyle style)
     : style_(std::move(style)) {}
 
+void ScreenList::setBrightness(int brightness) {
+    style_.brightness = std::clamp(brightness, 0, 100);
+}
+
 void ScreenList::render(renderer::TextBuilder& textBuilder,
                         const renderer::BitmapFont& font,
                         std::uint32_t fontTextureId,
@@ -78,6 +82,10 @@ CoastList::CoastList()
                              20,
                              5,
                              QColor(0, 248, 0)}) {}
+
+void CoastList::setBrightness(int brightness) {
+    style_.brightness = std::clamp(brightness, 0, 100);
+}
 
 QPointF CoastList::locationForDisplay(QSize displaySize) const {
     const double x = std::max(0.0, double(displaySize.width()) - 300.0);
@@ -258,6 +266,10 @@ PreviewArea::PreviewArea()
                             20,
                             3,
                             QColor(0, 248, 0)}) {}
+
+void PreviewArea::setBrightness(int brightness) {
+    list_.setBrightness(brightness);
+}
 
 bool PreviewArea::loadDefaultStateFromConfigFile(const QString& path, QString* error) {
     QFile file(path);

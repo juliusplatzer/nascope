@@ -468,11 +468,22 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
             case CommandType::Rotate:
             case CommandType::VectorLength:
             case CommandType::LeaderLength:
+            case CommandType::HoldBarsBrightness:
+            case CommandType::MovementAreasBrightness:
+            case CommandType::BackgroundBrightness:
+            case CommandType::TrackBrightness:
+            case CommandType::DataBlocksBrightness:
+            case CommandType::ListsBrightness:
+            case CommandType::TempMapAreasBrightness:
+            case CommandType::TempMapTextBrightness:
+            case CommandType::DcbBrightness:
                 steps = wheelY > 0 ? 1 : -1;
                 break;
             case CommandType::Range:
+            case CommandType::Brightness:
             case CommandType::None:
             case CommandType::EditDatablockFields:
+            case CommandType::MapReposition:
             default:
                 steps = wheelY > 0 ? -1 : 1;
                 break;
@@ -491,6 +502,17 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
                     break;
                 case CommandType::LeaderLength:
                     setLeaderLengthValue(value);
+                    break;
+                case CommandType::HoldBarsBrightness:
+                case CommandType::MovementAreasBrightness:
+                case CommandType::BackgroundBrightness:
+                case CommandType::TrackBrightness:
+                case CommandType::DataBlocksBrightness:
+                case CommandType::ListsBrightness:
+                case CommandType::TempMapAreasBrightness:
+                case CommandType::TempMapTextBrightness:
+                case CommandType::DcbBrightness:
+                    setBrightnessValue(dcbEntryCommand_->type(), value);
                     break;
                 default:
                     break;
@@ -555,6 +577,12 @@ void AsdexScopeWidget::keyPressEvent(QKeyEvent* event) {
 
     if (datablockEdit_ && handleDatablockEditKey(event)) return;
     if (dcbEntryCommand_ && handleDcbEntryCommandKey(event)) return;
+
+    if (commandType_ == CommandType::Brightness && event->key() == Qt::Key_Escape) {
+        cancelCommand();
+        event->accept();
+        return;
+    }
 
     if (event->key() == Qt::Key_F6 && event->modifiers() == Qt::NoModifier) {
         toggleAllDataBlocks();
@@ -832,6 +860,20 @@ void AsdexScopeWidget::cancelCommand() {
         return;
     }
 
+    if (isBrightnessValueCommand(commandType_)
+        || (dcbEntryCommand_ && isBrightnessValueCommand(dcbEntryCommand_->type()))) {
+        commandType_ = CommandType::Brightness;
+        dcbEntryCommand_.reset();
+        editingTrackId_.clear();
+        previewArea_.setSystemResponse({});
+        dcb_.setMenu(DcbMenu::Brightness);
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Scope);
+        clearHighlightedTarget();
+        update();
+        return;
+    }
+
     commandType_ = CommandType::None;
     datablockEdit_.reset();
     dcbEntryCommand_.reset();
@@ -840,6 +882,7 @@ void AsdexScopeWidget::cancelCommand() {
     suppressNextMapRepositionRelease_ = false;
     editingTrackId_.clear();
     previewArea_.setSystemResponse({});
+    dcb_.setMenu(currentDcbMenu());
     clearDcbHover();
     setAsdexCursor(CursorMode::Scope);
     clearHighlightedTarget();
@@ -883,7 +926,10 @@ void AsdexScopeWidget::submitDcbEntryCommand() {
     int value = 0;
     if (!dcbEntryCommand_->valueInt(&value)) {
         previewArea_.setSystemResponse(dcbEntryCommand_->invalidMessage());
-        commandType_ = CommandType::None;
+        commandType_ = isBrightnessValueCommand(dcbEntryCommand_->type())
+            ? CommandType::Brightness
+            : CommandType::None;
+        dcb_.setMenu(currentDcbMenu());
         dcbEntryCommand_.reset();
         clearDcbHover();
         setAsdexCursor(CursorMode::Scope);
@@ -894,25 +940,43 @@ void AsdexScopeWidget::submitDcbEntryCommand() {
     switch (dcbEntryCommand_->type()) {
         case CommandType::Range:
             setRangeValue(value);
+            commandType_ = CommandType::None;
             break;
         case CommandType::Rotate:
             setRotationValue(value);
+            commandType_ = CommandType::None;
             break;
         case CommandType::VectorLength:
             setVectorLengthValue(value);
+            commandType_ = CommandType::None;
             break;
         case CommandType::LeaderLength:
             setLeaderLengthValue(value);
+            commandType_ = CommandType::None;
+            break;
+        case CommandType::HoldBarsBrightness:
+        case CommandType::MovementAreasBrightness:
+        case CommandType::BackgroundBrightness:
+        case CommandType::TrackBrightness:
+        case CommandType::DataBlocksBrightness:
+        case CommandType::ListsBrightness:
+        case CommandType::TempMapAreasBrightness:
+        case CommandType::TempMapTextBrightness:
+        case CommandType::DcbBrightness:
+            setBrightnessValue(dcbEntryCommand_->type(), value);
+            commandType_ = CommandType::Brightness;
             break;
         case CommandType::None:
         case CommandType::EditDatablockFields:
         case CommandType::MapReposition:
+        case CommandType::Brightness:
         default:
+            commandType_ = CommandType::None;
             break;
     }
 
     previewArea_.setSystemResponse(QString());
-    commandType_ = CommandType::None;
+    dcb_.setMenu(currentDcbMenu());
     dcbEntryCommand_.reset();
     clearDcbHover();
     setAsdexCursor(CursorMode::Scope);
@@ -934,6 +998,15 @@ bool AsdexScopeWidget::commandActive() const {
     return datablockEdit_.has_value()
         || dcbEntryCommand_.has_value()
         || isMapRepositionCommandActive();
+}
+
+DcbMenu AsdexScopeWidget::currentDcbMenu() const {
+    if (dcbOff_) return DcbMenu::Off;
+
+    if (commandType_ == CommandType::Brightness || isBrightnessValueCommand(commandType_))
+        return DcbMenu::Brightness;
+
+    return DcbMenu::Main;
 }
 
 bool AsdexScopeWidget::defaultDataBlockVisibleForTarget(const AsdexTarget& target) const {
@@ -996,6 +1069,23 @@ void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
         case DcbFunction::DataBlocksOnOff:
             toggleAllDataBlocks();
             return;
+        case DcbFunction::Brightness:
+            startBrightnessMenu();
+            return;
+        case DcbFunction::HoldBarsBrightness:
+        case DcbFunction::MovementAreasBrightness:
+        case DcbFunction::BackgroundBrightness:
+        case DcbFunction::TrackBrightness:
+        case DcbFunction::DataBlocksBrightness:
+        case DcbFunction::ListsBrightness:
+        case DcbFunction::TempMapAreasBrightness:
+        case DcbFunction::TempMapTextBrightness:
+        case DcbFunction::DcbBrightness:
+            startBrightnessValueCommand(function);
+            return;
+        case DcbFunction::Done:
+            handleDcbDone();
+            return;
         case DcbFunction::DayNite:
             toggleDayNite();
             return;
@@ -1024,6 +1114,162 @@ void AsdexScopeWidget::toggleAllDataBlocks() {
     showDataBlocks_ = !showDataBlocks_;
     datablockVisibility_.clear();
     clearDcbHover();
+    update();
+}
+
+void AsdexScopeWidget::startBrightnessMenu() {
+    if (commandType_ != CommandType::None) return;
+
+    commandType_ = CommandType::Brightness;
+    dcb_.setMenu(DcbMenu::Brightness);
+    datablockEdit_.reset();
+    dcbEntryCommand_.reset();
+    editingTrackId_.clear();
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Scope);
+    update();
+}
+
+void AsdexScopeWidget::startBrightnessValueCommand(DcbFunction function) {
+    const CommandType type = commandForBrightnessFunction(function);
+    if (type == CommandType::None) return;
+
+    commandType_ = type;
+    dcb_.setMenu(DcbMenu::Brightness);
+    dcbEntryCommand_ =
+        DcbEntryCommand::brightness(type, brightnessCommandLabel(type), brightnessValue(type));
+    datablockEdit_.reset();
+    editingTrackId_.clear();
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Hidden);
+    update();
+}
+
+void AsdexScopeWidget::handleDcbDone() {
+    commandType_ = CommandType::None;
+    dcb_.setMenu(currentDcbMenu());
+    dcbEntryCommand_.reset();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Scope);
+    update();
+}
+
+CommandType AsdexScopeWidget::commandForBrightnessFunction(DcbFunction function) const {
+    switch (function) {
+        case DcbFunction::HoldBarsBrightness:
+            return CommandType::HoldBarsBrightness;
+        case DcbFunction::MovementAreasBrightness:
+            return CommandType::MovementAreasBrightness;
+        case DcbFunction::BackgroundBrightness:
+            return CommandType::BackgroundBrightness;
+        case DcbFunction::TrackBrightness:
+            return CommandType::TrackBrightness;
+        case DcbFunction::DataBlocksBrightness:
+            return CommandType::DataBlocksBrightness;
+        case DcbFunction::ListsBrightness:
+            return CommandType::ListsBrightness;
+        case DcbFunction::TempMapAreasBrightness:
+            return CommandType::TempMapAreasBrightness;
+        case DcbFunction::TempMapTextBrightness:
+            return CommandType::TempMapTextBrightness;
+        case DcbFunction::DcbBrightness:
+            return CommandType::DcbBrightness;
+        default:
+            return CommandType::None;
+    }
+}
+
+QString AsdexScopeWidget::brightnessCommandLabel(CommandType type) const {
+    switch (type) {
+        case CommandType::HoldBarsBrightness:
+            return QStringLiteral("HOLD BARS");
+        case CommandType::MovementAreasBrightness:
+            return QStringLiteral("MVMENT AREA");
+        case CommandType::BackgroundBrightness:
+            return QStringLiteral("BAKGND");
+        case CommandType::TrackBrightness:
+            return QStringLiteral("TRACK");
+        case CommandType::DataBlocksBrightness:
+            return QStringLiteral("DATA BLOCKS");
+        case CommandType::ListsBrightness:
+            return QStringLiteral("LISTS");
+        case CommandType::TempMapAreasBrightness:
+            return QStringLiteral("TEMP MAP AREAS");
+        case CommandType::TempMapTextBrightness:
+            return QStringLiteral("TEMP MAP TEXT");
+        case CommandType::DcbBrightness:
+            return QStringLiteral("DCB");
+        default:
+            return {};
+    }
+}
+
+int AsdexScopeWidget::brightnessValue(CommandType type) const {
+    switch (type) {
+        case CommandType::HoldBarsBrightness:
+            return holdBarsBrightness_;
+        case CommandType::MovementAreasBrightness:
+            return movementAreasBrightness_;
+        case CommandType::BackgroundBrightness:
+            return backgroundBrightness_;
+        case CommandType::TrackBrightness:
+            return trackBrightness_;
+        case CommandType::DataBlocksBrightness:
+            return dataBlocksBrightness_;
+        case CommandType::ListsBrightness:
+            return listsBrightness_;
+        case CommandType::TempMapAreasBrightness:
+            return tempMapAreasBrightness_;
+        case CommandType::TempMapTextBrightness:
+            return tempMapTextBrightness_;
+        case CommandType::DcbBrightness:
+            return dcbBrightness_;
+        default:
+            return 95;
+    }
+}
+
+void AsdexScopeWidget::setBrightnessValue(CommandType type, int value) {
+    value = std::clamp(value, 1, 99);
+
+    switch (type) {
+        case CommandType::HoldBarsBrightness:
+            holdBarsBrightness_ = value;
+            break;
+        case CommandType::MovementAreasBrightness:
+            movementAreasBrightness_ = value;
+            break;
+        case CommandType::BackgroundBrightness:
+            backgroundBrightness_ = value;
+            break;
+        case CommandType::TrackBrightness:
+            trackBrightness_ = value;
+            break;
+        case CommandType::DataBlocksBrightness:
+            dataBlocksBrightness_ = value;
+            break;
+        case CommandType::ListsBrightness:
+            listsBrightness_ = value;
+            break;
+        case CommandType::TempMapAreasBrightness:
+            tempMapAreasBrightness_ = value;
+            break;
+        case CommandType::TempMapTextBrightness:
+            tempMapTextBrightness_ = value;
+            break;
+        case CommandType::DcbBrightness:
+            dcbBrightness_ = value;
+            dcb_.setBrightness(value);
+            break;
+        default:
+            return;
+    }
+
     update();
 }
 
@@ -1224,6 +1470,7 @@ QStringList AsdexScopeWidget::activeCommandLines() const {
     if (datablockEdit_) return datablockEdit_->displayLines();
     if (dcbEntryCommand_) return dcbEntryCommand_->displayLines();
     if (isMapRepositionCommandActive()) return {QStringLiteral("MAP RPOS")};
+    if (commandType_ == CommandType::Brightness) return {QStringLiteral("BRITE")};
     return {};
 }
 
@@ -1233,7 +1480,8 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
     renderer::CommandBuffer* commandBuffer = renderer::getCommandBuffer();
     commandBuffer->resetState();
     commandBuffer->viewport(0, 0, renderSize.width(), renderSize.height());
-    commandBuffer->clear(renderer::RGBA::fromQColor(backgroundColor(mode_)));
+    commandBuffer->clear(
+        renderer::RGBA::fromQColor(applyBrightness(backgroundColor(mode_), backgroundBrightness_, 20)));
 
     const QMatrix4x4 worldProjection = viewProjection(renderSize);
     commandBuffer->loadProjectionMatrix(worldProjection);
@@ -1244,18 +1492,22 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
                   worldProjection,
                   [this, &renderSize](QPointF worldFeet) {
                       return worldToFramebufferTopLeft(worldFeet, renderSize);
-                  });
+                  },
+                  tempMapAreasBrightness_);
     drawTargets(targets_,
                 commandBuffer,
                 worldProjection,
                 mode_,
                 targetVectorSeconds_,
-                showVectorLine_);
+                showVectorLine_,
+                trackBrightness_);
 
     const QMatrix4x4 projection = screenProjection();
     commandBuffer->loadProjectionMatrix(projection);
 
     const DcbState dcbState = makeDcbState();
+    dcb_.setBrightness(dcbBrightness_);
+    dcb_.setMenu(currentDcbMenu());
     const DcbLayout dcbLayout = dcb_.layout(size(), asdexFont_, dcbState);
     dcb_.drawQuads(commandBuffer, dcbLayout);
 
@@ -1281,7 +1533,7 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
     if (fontTexturesReady_ && listFontTexture != 0) {
         DataBlockSettings datablockSettings;
         datablockSettings.fontSize = 2;
-        datablockSettings.brightness = 95;
+        datablockSettings.brightness = dataBlocksBrightness_;
         datablockSettings.leaderLength = currentLeaderLengthValue();
         datablockSettings.leaderDirection = LeaderDirection::NE;
         datablockSettings.timesharePrimary = timesharePrimary_;
@@ -1305,6 +1557,8 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
         renderer::TextBuilder* textBuilder = renderer::getTextBuilder();
         textBuilder->setFont(&asdexFont_);
 
+        coastList_.setBrightness(listsBrightness_);
+        previewArea_.setBrightness(listsBrightness_);
         coastList_.render(*textBuilder, asdexFont_, listFontTexture, size());
 
         const QStringList commandLines = activeCommandLines();
@@ -1349,6 +1603,15 @@ DcbState AsdexScopeWidget::makeDcbState() const {
     state.showDataBlocks = showDataBlocks_;
     state.dcbOn = !dcbOff_;
     state.networkConnected = true;
+    state.holdBarsBrightness = holdBarsBrightness_;
+    state.movementAreasBrightness = movementAreasBrightness_;
+    state.backgroundBrightness = backgroundBrightness_;
+    state.trackBrightness = trackBrightness_;
+    state.dataBlocksBrightness = dataBlocksBrightness_;
+    state.listsBrightness = listsBrightness_;
+    state.tempMapAreasBrightness = tempMapAreasBrightness_;
+    state.tempMapTextBrightness = tempMapTextBrightness_;
+    state.dcbBrightness = dcbBrightness_;
     return state;
 }
 
@@ -1493,6 +1756,12 @@ bool AsdexScopeWidget::isPointOverDcb(const QPointF& logicalPoint) const {
 
 bool AsdexScopeWidget::handleDcbWheel(DcbFunction function, int wheelY) {
     const int step = wheelY > 0 ? 1 : -1;
+    const CommandType brightnessType = commandForBrightnessFunction(function);
+
+    if (brightnessType != CommandType::None) {
+        setBrightnessValue(brightnessType, brightnessValue(brightnessType) + step);
+        return true;
+    }
 
     switch (function) {
         case DcbFunction::Range:

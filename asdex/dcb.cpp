@@ -119,6 +119,17 @@ bool Dcb::isLargeFunction(DcbFunction function) {
     case DcbFunction::Range:
     case DcbFunction::SafetyLogic:
     case DcbFunction::Tools:
+    case DcbFunction::HoldBarsBrightness:
+    case DcbFunction::MovementAreasBrightness:
+    case DcbFunction::BackgroundBrightness:
+    case DcbFunction::TrackBrightness:
+    case DcbFunction::DataBlocksBrightness:
+    case DcbFunction::ListsBrightness:
+    case DcbFunction::TempMapAreasBrightness:
+    case DcbFunction::TempMapTextBrightness:
+    case DcbFunction::DcbBrightness:
+    case DcbFunction::Done:
+    case DcbFunction::Vacant:
         return true;
     default:
         return false;
@@ -234,6 +245,56 @@ QVector<DcbButtonSpec> Dcb::offButtonSpecs(const DcbState& state) {
     return out;
 }
 
+QVector<DcbButtonSpec> Dcb::brightnessButtonSpecs(const DcbState& state) {
+    QVector<DcbButtonSpec> out;
+    out.reserve(14);
+
+    auto vacant = [&out]() {
+        DcbButtonSpec button;
+        button.function = DcbFunction::Vacant;
+        button.kind = DcbButtonKind::Vacant;
+        button.large = true;
+        out.push_back(std::move(button));
+    };
+
+    auto value = [&out](DcbFunction function, QStringList lines, int value) {
+        DcbButtonSpec button;
+        button.function = function;
+        button.kind = DcbButtonKind::Value;
+        button.lines = std::move(lines);
+        button.large = true;
+        button.value = value;
+        button.showValue = true;
+        out.push_back(std::move(button));
+    };
+
+    auto normal = [&out](DcbFunction function, QStringList lines) {
+        DcbButtonSpec button;
+        button.function = function;
+        button.kind = DcbButtonKind::Normal;
+        button.lines = std::move(lines);
+        button.large = true;
+        out.push_back(std::move(button));
+    };
+
+    vacant();
+    vacant();
+    value(DcbFunction::HoldBarsBrightness, {"HOLD BARS"}, state.holdBarsBrightness);
+    value(DcbFunction::MovementAreasBrightness, {"MVMENT", "AREA"}, state.movementAreasBrightness);
+    value(DcbFunction::BackgroundBrightness, {"BAKGND"}, state.backgroundBrightness);
+    value(DcbFunction::TrackBrightness, {"TRACK"}, state.trackBrightness);
+    value(DcbFunction::DataBlocksBrightness, {"DATA", "BLOCKS"}, state.dataBlocksBrightness);
+    value(DcbFunction::ListsBrightness, {"LISTS"}, state.listsBrightness);
+    value(DcbFunction::TempMapAreasBrightness, {"TEMP MAP", "AREAS"}, state.tempMapAreasBrightness);
+    value(DcbFunction::TempMapTextBrightness, {"TEMP MAP", "TEXT"}, state.tempMapTextBrightness);
+    value(DcbFunction::DcbBrightness, {"DCB"}, state.dcbBrightness);
+    normal(DcbFunction::Done, {"DONE"});
+    vacant();
+    vacant();
+
+    return out;
+}
+
 QSize Dcb::buttonSizeForFont(const renderer::BitmapFont& font, int autoSize) {
     const QSize charSize = font.charSize(autoSize);
     const int charHeight = std::max(1, charSize.height());
@@ -292,7 +353,8 @@ DcbLayout Dcb::layout(QSize displaySize,
     }
 
     const QVector<DcbButtonSpec> specs =
-        offMenu ? offButtonSpecs(state) : mainButtonSpecs(state);
+        menu_ == DcbMenu::Brightness ? brightnessButtonSpecs(state)
+                                     : offMenu ? offButtonSpecs(state) : mainButtonSpecs(state);
 
     int row = 1;
     int column = 1;
@@ -333,11 +395,12 @@ DcbHit Dcb::hitTest(QPointF displayPoint,
     hit.overDcb = true;
 
     for (int i = 0; i < dcbLayout.buttons.size(); ++i) {
-        if (dcbLayout.buttons[i].bounds.contains(displayPoint)) {
-            hit.buttonIndex = i;
-            hit.function = dcbLayout.buttons[i].spec.function;
-            break;
-        }
+        const DcbButtonLayout& button = dcbLayout.buttons[i];
+        if (!button.bounds.contains(displayPoint)) continue;
+
+        hit.buttonIndex = i;
+        if (button.spec.kind != DcbButtonKind::Vacant) hit.function = button.spec.function;
+        break;
     }
 
     return hit;

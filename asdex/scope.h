@@ -76,6 +76,7 @@ private:
     void submitDcbEntryCommand();
     void applyEditedFields(AsdexTarget& target, const EditedDbFields& fields) const;
     bool commandActive() const;
+    DcbMenu currentDcbMenu() const;
     bool defaultDataBlockVisibleForTarget(const AsdexTarget& target) const;
     bool isDataBlockVisible(const AsdexTarget& target) const;
     void toggleDataBlockForTarget(const AsdexTarget& target);
@@ -83,6 +84,13 @@ private:
     void toggleDcbOnOff();
     void toggleDayNite();
     void toggleAllDataBlocks();
+    void startBrightnessMenu();
+    void startBrightnessValueCommand(DcbFunction function);
+    void handleDcbDone();
+    CommandType commandForBrightnessFunction(DcbFunction function) const;
+    QString brightnessCommandLabel(CommandType type) const;
+    int brightnessValue(CommandType type) const;
+    void setBrightnessValue(CommandType type, int value);
     int currentRangeValue() const;
     void setRangeValue(int range);
     void startRangeCommand();
@@ -176,6 +184,15 @@ private:
     int targetVectorSeconds_ = 5;
     bool showVectorLine_ = true;
     int leaderLength_ = 2;
+    int holdBarsBrightness_ = 95;
+    int movementAreasBrightness_ = 95;
+    int backgroundBrightness_ = 95;
+    int trackBrightness_ = 95;
+    int dataBlocksBrightness_ = 95;
+    int listsBrightness_ = 95;
+    int tempMapAreasBrightness_ = 95;
+    int tempMapTextBrightness_ = 95;
+    int dcbBrightness_ = 95;
     CursorMode currentCursorMode_ = CursorMode::Hidden;
     bool fontLoaded_ = false;
     bool fontTexturesReady_ = false;
