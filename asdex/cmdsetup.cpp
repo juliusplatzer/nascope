@@ -22,6 +22,19 @@ bool isBrightnessValueCommand(CommandType type) {
     }
 }
 
+bool isCharSizeValueCommand(CommandType type) {
+    switch (type) {
+    case CommandType::DataBlockCharSize:
+    case CommandType::DcbCharSize:
+    case CommandType::CoastSuspendCharSize:
+    case CommandType::TempDataCharSize:
+    case CommandType::PreviewAreaCharSize:
+        return true;
+    default:
+        return false;
+    }
+}
+
 DcbEntryCommand DcbEntryCommand::range(int currentRange) {
     Spec spec;
     spec.type = CommandType::Range;
@@ -89,6 +102,22 @@ DcbEntryCommand DcbEntryCommand::brightness(CommandType type,
     spec.maxValue = 99;
     spec.wheelStep = 1;
     spec.invalidMessage = QStringLiteral("INVALID ENTRY");
+    spec.numericOnly = true;
+    spec.initialEntry = QString();
+    spec.wheelBaseValue = currentValue;
+    return DcbEntryCommand(spec);
+}
+
+DcbEntryCommand DcbEntryCommand::charSize(CommandType type,
+                                          QString label,
+                                          int currentValue) {
+    Spec spec;
+    spec.type = type;
+    spec.headingLines = {QStringLiteral("CHAR SIZE"), std::move(label)};
+    spec.minValue = 1;
+    spec.maxValue = type == CommandType::DcbCharSize ? 3 : 6;
+    spec.wheelStep = 1;
+    spec.invalidMessage = QStringLiteral("INVALID SIZE");
     spec.numericOnly = true;
     spec.initialEntry = QString();
     spec.wheelBaseValue = currentValue;

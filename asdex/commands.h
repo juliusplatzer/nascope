@@ -30,6 +30,13 @@ enum class CommandType {
     TempMapAreasBrightness,
     TempMapTextBrightness,
     DcbBrightness,
+
+    CharSize,
+    DataBlockCharSize,
+    DcbCharSize,
+    CoastSuspendCharSize,
+    TempDataCharSize,
+    PreviewAreaCharSize,
 };
 
 }  // namespace asdex

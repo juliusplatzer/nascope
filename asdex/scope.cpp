@@ -201,7 +201,7 @@ void AsdexScopeWidget::initializeGL() {
     }
 
     if (fontLoaded_) {
-        const int fontSizes[] = {1, 2, 3};
+        const int fontSizes[] = {1, 2, 3, 4, 5, 6};
         for (const int fontSize : fontSizes) {
             const renderer::BitmapFontSize* fontSizeData = asdexFont_.fontSize(fontSize);
             if (!fontSizeData) continue;
@@ -498,10 +498,16 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
             case CommandType::TempMapAreasBrightness:
             case CommandType::TempMapTextBrightness:
             case CommandType::DcbBrightness:
+            case CommandType::DataBlockCharSize:
+            case CommandType::DcbCharSize:
+            case CommandType::CoastSuspendCharSize:
+            case CommandType::TempDataCharSize:
+            case CommandType::PreviewAreaCharSize:
                 steps = wheelY > 0 ? 1 : -1;
                 break;
             case CommandType::Range:
             case CommandType::Brightness:
+            case CommandType::CharSize:
             case CommandType::None:
             case CommandType::EditDatablockFields:
             case CommandType::MapReposition:
@@ -534,6 +540,13 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
                 case CommandType::TempMapTextBrightness:
                 case CommandType::DcbBrightness:
                     setBrightnessValue(dcbEntryCommand_->type(), value);
+                    break;
+                case CommandType::DataBlockCharSize:
+                case CommandType::DcbCharSize:
+                case CommandType::CoastSuspendCharSize:
+                case CommandType::TempDataCharSize:
+                case CommandType::PreviewAreaCharSize:
+                    setCharSizeValue(dcbEntryCommand_->type(), value);
                     break;
                 default:
                     break;
@@ -599,7 +612,8 @@ void AsdexScopeWidget::keyPressEvent(QKeyEvent* event) {
     if (datablockEdit_ && handleDatablockEditKey(event)) return;
     if (dcbEntryCommand_ && handleDcbEntryCommandKey(event)) return;
 
-    if (commandType_ == CommandType::Brightness && event->key() == Qt::Key_Escape) {
+    if ((commandType_ == CommandType::Brightness || commandType_ == CommandType::CharSize)
+        && event->key() == Qt::Key_Escape) {
         cancelCommand();
         event->accept();
         return;
@@ -895,6 +909,20 @@ void AsdexScopeWidget::cancelCommand() {
         return;
     }
 
+    if (isCharSizeValueCommand(commandType_)
+        || (dcbEntryCommand_ && isCharSizeValueCommand(dcbEntryCommand_->type()))) {
+        commandType_ = CommandType::CharSize;
+        dcbEntryCommand_.reset();
+        editingTrackId_.clear();
+        previewArea_.setSystemResponse({});
+        dcb_.setMenu(DcbMenu::CharSize);
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Scope);
+        clearHighlightedTarget();
+        update();
+        return;
+    }
+
     commandType_ = CommandType::None;
     datablockEdit_.reset();
     dcbEntryCommand_.reset();
@@ -947,9 +975,13 @@ void AsdexScopeWidget::submitDcbEntryCommand() {
     int value = 0;
     if (!dcbEntryCommand_->valueInt(&value)) {
         previewArea_.setSystemResponse(dcbEntryCommand_->invalidMessage());
-        commandType_ = isBrightnessValueCommand(dcbEntryCommand_->type())
-            ? CommandType::Brightness
-            : CommandType::None;
+        if (isBrightnessValueCommand(dcbEntryCommand_->type())) {
+            commandType_ = CommandType::Brightness;
+        } else if (isCharSizeValueCommand(dcbEntryCommand_->type())) {
+            commandType_ = CommandType::CharSize;
+        } else {
+            commandType_ = CommandType::None;
+        }
         dcb_.setMenu(currentDcbMenu());
         dcbEntryCommand_.reset();
         clearDcbHover();
@@ -987,10 +1019,19 @@ void AsdexScopeWidget::submitDcbEntryCommand() {
             setBrightnessValue(dcbEntryCommand_->type(), value);
             commandType_ = CommandType::Brightness;
             break;
+        case CommandType::DataBlockCharSize:
+        case CommandType::DcbCharSize:
+        case CommandType::CoastSuspendCharSize:
+        case CommandType::TempDataCharSize:
+        case CommandType::PreviewAreaCharSize:
+            setCharSizeValue(dcbEntryCommand_->type(), value);
+            commandType_ = CommandType::CharSize;
+            break;
         case CommandType::None:
         case CommandType::EditDatablockFields:
         case CommandType::MapReposition:
         case CommandType::Brightness:
+        case CommandType::CharSize:
         default:
             commandType_ = CommandType::None;
             break;
@@ -1026,6 +1067,9 @@ DcbMenu AsdexScopeWidget::currentDcbMenu() const {
 
     if (commandType_ == CommandType::Brightness || isBrightnessValueCommand(commandType_))
         return DcbMenu::Brightness;
+
+    if (commandType_ == CommandType::CharSize || isCharSizeValueCommand(commandType_))
+        return DcbMenu::CharSize;
 
     return DcbMenu::Main;
 }
@@ -1093,6 +1137,9 @@ void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
         case DcbFunction::Brightness:
             startBrightnessMenu();
             return;
+        case DcbFunction::CharSize:
+            startCharSizeMenu();
+            return;
         case DcbFunction::HoldBarsBrightness:
         case DcbFunction::MovementAreasBrightness:
         case DcbFunction::BackgroundBrightness:
@@ -1103,6 +1150,13 @@ void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
         case DcbFunction::TempMapTextBrightness:
         case DcbFunction::DcbBrightness:
             startBrightnessValueCommand(function);
+            return;
+        case DcbFunction::DataBlockCharSize:
+        case DcbFunction::DcbCharSize:
+        case DcbFunction::CoastSuspendCharSize:
+        case DcbFunction::TempDataCharSize:
+        case DcbFunction::PreviewAreaCharSize:
+            startCharSizeValueCommand(function);
             return;
         case DcbFunction::Done:
             handleDcbDone();
@@ -1161,6 +1215,38 @@ void AsdexScopeWidget::startBrightnessValueCommand(DcbFunction function) {
     dcb_.setMenu(DcbMenu::Brightness);
     dcbEntryCommand_ =
         DcbEntryCommand::brightness(type, brightnessCommandLabel(type), brightnessValue(type));
+    datablockEdit_.reset();
+    editingTrackId_.clear();
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Hidden);
+    update();
+}
+
+void AsdexScopeWidget::startCharSizeMenu() {
+    if (commandType_ != CommandType::None) return;
+
+    commandType_ = CommandType::CharSize;
+    dcb_.setMenu(DcbMenu::CharSize);
+    datablockEdit_.reset();
+    dcbEntryCommand_.reset();
+    editingTrackId_.clear();
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Scope);
+    update();
+}
+
+void AsdexScopeWidget::startCharSizeValueCommand(DcbFunction function) {
+    const CommandType type = commandForCharSizeFunction(function);
+    if (type == CommandType::None) return;
+
+    commandType_ = type;
+    dcb_.setMenu(DcbMenu::CharSize);
+    dcbEntryCommand_ =
+        DcbEntryCommand::charSize(type, charSizeCommandLabel(type), charSizeValue(type));
     datablockEdit_.reset();
     editingTrackId_.clear();
     clearHighlightedTarget();
@@ -1286,6 +1372,85 @@ void AsdexScopeWidget::setBrightnessValue(CommandType type, int value) {
         case CommandType::DcbBrightness:
             dcbBrightness_ = value;
             dcb_.setBrightness(value);
+            break;
+        default:
+            return;
+    }
+
+    update();
+}
+
+CommandType AsdexScopeWidget::commandForCharSizeFunction(DcbFunction function) const {
+    switch (function) {
+        case DcbFunction::DataBlockCharSize:
+            return CommandType::DataBlockCharSize;
+        case DcbFunction::DcbCharSize:
+            return CommandType::DcbCharSize;
+        case DcbFunction::CoastSuspendCharSize:
+            return CommandType::CoastSuspendCharSize;
+        case DcbFunction::TempDataCharSize:
+            return CommandType::TempDataCharSize;
+        case DcbFunction::PreviewAreaCharSize:
+            return CommandType::PreviewAreaCharSize;
+        default:
+            return CommandType::None;
+    }
+}
+
+QString AsdexScopeWidget::charSizeCommandLabel(CommandType type) const {
+    switch (type) {
+        case CommandType::DataBlockCharSize:
+            return QStringLiteral("DATA BLOCK");
+        case CommandType::DcbCharSize:
+            return QStringLiteral("DCB");
+        case CommandType::CoastSuspendCharSize:
+            return QStringLiteral("CS LIST");
+        case CommandType::TempDataCharSize:
+            return QStringLiteral("TEMP DATA");
+        case CommandType::PreviewAreaCharSize:
+            return QStringLiteral("PREVIEW");
+        default:
+            return {};
+    }
+}
+
+int AsdexScopeWidget::charSizeValue(CommandType type) const {
+    switch (type) {
+        case CommandType::DataBlockCharSize:
+            return dataBlockCharSize_;
+        case CommandType::DcbCharSize:
+            return dcbCharSize_;
+        case CommandType::CoastSuspendCharSize:
+            return coastSuspendCharSize_;
+        case CommandType::TempDataCharSize:
+            return tempDataCharSize_;
+        case CommandType::PreviewAreaCharSize:
+            return previewAreaCharSize_;
+        default:
+            return 2;
+    }
+}
+
+void AsdexScopeWidget::setCharSizeValue(CommandType type, int value) {
+    const int maxValue = type == CommandType::DcbCharSize ? 3 : 6;
+    value = std::clamp(value, 1, maxValue);
+
+    switch (type) {
+        case CommandType::DataBlockCharSize:
+            dataBlockCharSize_ = value;
+            break;
+        case CommandType::DcbCharSize:
+            dcbCharSize_ = value;
+            dcb_.setCharSize(value);
+            break;
+        case CommandType::CoastSuspendCharSize:
+            coastSuspendCharSize_ = value;
+            break;
+        case CommandType::TempDataCharSize:
+            tempDataCharSize_ = value;
+            break;
+        case CommandType::PreviewAreaCharSize:
+            previewAreaCharSize_ = value;
             break;
         default:
             return;
@@ -1492,6 +1657,7 @@ QStringList AsdexScopeWidget::activeCommandLines() const {
     if (dcbEntryCommand_) return dcbEntryCommand_->displayLines();
     if (isMapRepositionCommandActive()) return {QStringLiteral("MAP RPOS")};
     if (commandType_ == CommandType::Brightness) return {QStringLiteral("BRITE")};
+    if (commandType_ == CommandType::CharSize) return {QStringLiteral("CHAR SIZE")};
     return {};
 }
 
@@ -1550,6 +1716,7 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
 
     const DcbState dcbState = makeDcbState();
     dcb_.setBrightness(dcbBrightness_);
+    dcb_.setCharSize(dcbCharSize_);
     dcb_.setMenu(currentDcbMenu());
     const DcbLayout dcbLayout = dcb_.layout(size(), asdexFont_, dcbState);
 
@@ -1582,10 +1749,10 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
         renderer::returnTextBuilder(dcbTextBuilder);
     }
 
-    const std::uint32_t listFontTexture = fontTextureId(2);
-    if (fontTexturesReady_ && listFontTexture != 0) {
+    const std::uint32_t datablockFontTexture = fontTextureId(dataBlockCharSize_);
+    if (fontTexturesReady_ && datablockFontTexture != 0) {
         DataBlockSettings datablockSettings;
-        datablockSettings.fontSize = 2;
+        datablockSettings.fontSize = dataBlockCharSize_;
         datablockSettings.brightness = dataBlocksBrightness_;
         datablockSettings.leaderLength = currentLeaderLengthValue();
         datablockSettings.leaderDirection = LeaderDirection::NE;
@@ -1604,20 +1771,34 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
                            return isDataBlockVisible(target);
                        },
                        asdexFont_,
-                       listFontTexture,
+                       datablockFontTexture,
                        datablockSettings);
+    }
 
-        renderer::CommandBuffer& listBuffer = layers.layer(z::PreviewArea);
-        prepareLayer(listBuffer, projection);
+    renderer::CommandBuffer& listBuffer = layers.layer(z::PreviewArea);
+    prepareLayer(listBuffer, projection);
+
+    const std::uint32_t coastFontTexture = fontTextureId(coastSuspendCharSize_);
+    if (fontTexturesReady_ && coastFontTexture != 0) {
         renderer::TextBuilder* textBuilder = renderer::getTextBuilder();
         textBuilder->setFont(&asdexFont_);
 
         coastList_.setBrightness(listsBrightness_);
-        previewArea_.setBrightness(listsBrightness_);
-        coastList_.render(*textBuilder, asdexFont_, listFontTexture, size());
+        coastList_.setFontSize(coastSuspendCharSize_);
+        coastList_.render(*textBuilder, asdexFont_, coastFontTexture, size());
+        textBuilder->generateCommands(&listBuffer);
+        renderer::returnTextBuilder(textBuilder);
+    }
 
+    const std::uint32_t previewFontTexture = fontTextureId(previewAreaCharSize_);
+    if (fontTexturesReady_ && previewFontTexture != 0) {
+        renderer::TextBuilder* textBuilder = renderer::getTextBuilder();
+        textBuilder->setFont(&asdexFont_);
+
+        previewArea_.setBrightness(listsBrightness_);
+        previewArea_.setFontSize(previewAreaCharSize_);
         const QStringList commandLines = activeCommandLines();
-        previewArea_.render(*textBuilder, asdexFont_, listFontTexture, commandLines);
+        previewArea_.render(*textBuilder, asdexFont_, previewFontTexture, commandLines);
         textBuilder->generateCommands(&listBuffer);
         renderer::returnTextBuilder(textBuilder);
 
@@ -1668,6 +1849,11 @@ DcbState AsdexScopeWidget::makeDcbState() const {
     state.tempMapAreasBrightness = tempMapAreasBrightness_;
     state.tempMapTextBrightness = tempMapTextBrightness_;
     state.dcbBrightness = dcbBrightness_;
+    state.dataBlockCharSize = dataBlockCharSize_;
+    state.dcbCharSize = dcbCharSize_;
+    state.coastSuspendCharSize = coastSuspendCharSize_;
+    state.tempDataCharSize = tempDataCharSize_;
+    state.previewAreaCharSize = previewAreaCharSize_;
     return state;
 }
 
@@ -1816,6 +2002,12 @@ bool AsdexScopeWidget::handleDcbWheel(DcbFunction function, int wheelY) {
 
     if (brightnessType != CommandType::None) {
         setBrightnessValue(brightnessType, brightnessValue(brightnessType) + step);
+        return true;
+    }
+
+    const CommandType charSizeType = commandForCharSizeFunction(function);
+    if (charSizeType != CommandType::None) {
+        setCharSizeValue(charSizeType, charSizeValue(charSizeType) + step);
         return true;
     }
 

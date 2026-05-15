@@ -57,6 +57,7 @@ public:
     void setLocation(QPointF location) { style_.location = location; }
     QPointF location() const { return style_.location; }
     void setBrightness(int brightness);
+    void setFontSize(int fontSize);
 
     const ScreenListStyle& style() const { return style_; }
 
@@ -95,6 +96,7 @@ public:
     void setVisible(bool visible) { visible_ = visible; }
     bool visible() const { return visible_; }
     void setBrightness(int brightness);
+    void setFontSize(int fontSize);
 
     void setEntries(QVector<CoastListEntry> entries) { entries_ = std::move(entries); }
 
@@ -132,6 +134,7 @@ public:
     void setState(PreviewAreaState state) { state_ = std::move(state); }
     const PreviewAreaState& state() const { return state_; }
     void setBrightness(int brightness);
+    void setFontSize(int fontSize);
     bool setRunwayConfigName(QString name);
     bool updateRunwayConfigFromRunways(const QStringList& landingRunways,
                                        const QStringList& departureRunways);

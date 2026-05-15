@@ -35,6 +35,10 @@ void ScreenList::setBrightness(int brightness) {
     style_.brightness = std::clamp(brightness, 0, 100);
 }
 
+void ScreenList::setFontSize(int fontSize) {
+    style_.fontSize = std::clamp(fontSize, 1, 6);
+}
+
 void ScreenList::render(renderer::TextBuilder& textBuilder,
                         const renderer::BitmapFont& font,
                         std::uint32_t fontTextureId,
@@ -85,6 +89,10 @@ CoastList::CoastList()
 
 void CoastList::setBrightness(int brightness) {
     style_.brightness = std::clamp(brightness, 0, 100);
+}
+
+void CoastList::setFontSize(int fontSize) {
+    style_.fontSize = std::clamp(fontSize, 1, 6);
 }
 
 QPointF CoastList::locationForDisplay(QSize displaySize) const {
@@ -269,6 +277,10 @@ PreviewArea::PreviewArea()
 
 void PreviewArea::setBrightness(int brightness) {
     list_.setBrightness(brightness);
+}
+
+void PreviewArea::setFontSize(int fontSize) {
+    list_.setFontSize(fontSize);
 }
 
 bool PreviewArea::loadDefaultStateFromConfigFile(const QString& path, QString* error) {
