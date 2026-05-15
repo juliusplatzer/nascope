@@ -1,4 +1,4 @@
-#include "renderer/gl/openglrenderer.h"
+#include "renderer/gl/ogl.h"
 
 #include "renderer/cmdbuffer.h"
 #include "renderer/gl/shaders.h"

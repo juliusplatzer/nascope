@@ -1,5 +1,5 @@
-#ifndef RENDERER_GL_OPENGLRENDERER_H_
-#define RENDERER_GL_OPENGLRENDERER_H_
+#ifndef RENDERER_GL_OGL_H_
+#define RENDERER_GL_OGL_H_
 
 #include "renderer/rgb.h"
 #include "renderer/renderer.h"
@@ -62,4 +62,4 @@ private:
 
 } // namespace renderer
 
-#endif  // RENDERER_GL_OPENGLRENDERER_H_
+#endif  // RENDERER_GL_OGL_H_

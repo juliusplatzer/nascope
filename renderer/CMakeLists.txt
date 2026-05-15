@@ -8,7 +8,7 @@ add_library(nascope_renderer STATIC
     cmdbuffer.cpp
     builders.cpp
     font.cpp
-    gl/openglrenderer.cpp
+    gl/ogl.cpp
     gl/shaders.cpp
     gl/glutessellator.cpp
 )
