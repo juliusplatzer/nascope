@@ -463,43 +463,56 @@ void TempAreaGeometry::draw(
     const QMatrix4x4& worldProjection,
     const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft,
     int brightness) const {
+    drawType(commandBuffer,
+             worldProjection,
+             worldToFramebufferTopLeft,
+             TempAreaType::RestrictedArea,
+             brightness);
+    drawType(commandBuffer,
+             worldProjection,
+             worldToFramebufferTopLeft,
+             TempAreaType::ClosedArea,
+             brightness);
+}
+
+void TempAreaGeometry::drawType(
+    renderer::CommandBuffer* commandBuffer,
+    const QMatrix4x4& worldProjection,
+    const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft,
+    TempAreaType type,
+    int brightness) const {
     if (!commandBuffer) return;
     if (dirty_) rebuild();
     if (groups_.isEmpty()) return;
 
     commandBuffer->loadProjectionMatrix(worldProjection);
 
-    auto drawType = [&](TempAreaType type) {
-        for (const AreaGroup& group : groups_) {
-            if (group.meshIndices.isEmpty() || group.type != type) continue;
+    for (const AreaGroup& group : groups_) {
+        if (group.meshIndices.isEmpty() || group.type != type) continue;
 
-            const QColor color = areaColor(group.type, group.highlighted, brightness);
-            const QPointF firstScreen = worldToFramebufferTopLeft(group.hatchOriginFeet);
-            const float offset =
-                -std::fmod(float(firstScreen.x() + 4.0 * firstScreen.y()), 50.0f);
+        const QColor color = areaColor(group.type, group.highlighted, brightness);
+        const QPointF firstScreen = worldToFramebufferTopLeft(group.hatchOriginFeet);
+        const float offset =
+            -std::fmod(float(firstScreen.x() + 4.0 * firstScreen.y()), 50.0f);
 
-            commandBuffer->setRgba(renderer::RGBA::fromQColor(color));
-            commandBuffer->lineWidth(1.0f);
+        commandBuffer->setRgba(renderer::RGBA::fromQColor(color));
+        commandBuffer->lineWidth(1.0f);
 
-            renderer::LinesBuilder* lines = renderer::getLinesBuilder();
-            for (int i = 0; i + 1 < group.outlineVertices.size(); i += 2)
-                lines->addLine(group.outlineVertices.at(i), group.outlineVertices.at(i + 1));
-            lines->generateCommands(commandBuffer);
-            renderer::returnLinesBuilder(lines);
+        renderer::LinesBuilder* lines = renderer::getLinesBuilder();
+        for (int i = 0; i + 1 < group.outlineVertices.size(); i += 2)
+            lines->addLine(group.outlineVertices.at(i), group.outlineVertices.at(i + 1));
+        lines->generateCommands(commandBuffer);
+        renderer::returnLinesBuilder(lines);
 
-            renderer::TrianglesBuilder* triangles = renderer::getTrianglesBuilder();
-            for (const int meshIndex : group.meshIndices) {
-                if (meshIndex < 0 || meshIndex >= meshes_.size()) continue;
-                triangles->addIndexed(meshes_.at(meshIndex).fillVertices,
-                                      meshes_.at(meshIndex).fillIndices);
-            }
-            triangles->generateCommands(commandBuffer, renderer::DrawMode::Hatched, offset);
-            renderer::returnTrianglesBuilder(triangles);
+        renderer::TrianglesBuilder* triangles = renderer::getTrianglesBuilder();
+        for (const int meshIndex : group.meshIndices) {
+            if (meshIndex < 0 || meshIndex >= meshes_.size()) continue;
+            triangles->addIndexed(meshes_.at(meshIndex).fillVertices,
+                                  meshes_.at(meshIndex).fillIndices);
         }
-    };
-
-    drawType(TempAreaType::RestrictedArea);
-    drawType(TempAreaType::ClosedArea);
+        triangles->generateCommands(commandBuffer, renderer::DrawMode::Hatched, offset);
+        renderer::returnTrianglesBuilder(triangles);
+    }
 }
 
 void drawTempAreas(const TempAreaGeometry& geometry,

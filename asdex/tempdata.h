@@ -61,6 +61,11 @@ public:
               const QMatrix4x4& worldProjection,
               const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft,
               int brightness = 95) const;
+    void drawType(renderer::CommandBuffer* commandBuffer,
+                  const QMatrix4x4& worldProjection,
+                  const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft,
+                  TempAreaType type,
+                  int brightness = 95) const;
 
 private:
     struct AreaMesh {
