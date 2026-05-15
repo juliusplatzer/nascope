@@ -1,6 +1,8 @@
 #ifndef RENDERER_RENDERER_H_
 #define RENDERER_RENDERER_H_
 
+#include "renderer/display_emulation.h"
+
 #include <QByteArray>
 #include <QImage>
 #include <QString>
@@ -36,6 +38,9 @@ public:
 
     virtual bool initialize(QString* error = nullptr) = 0;
     virtual void deinitialize() = 0;
+
+    virtual void beginFrame(const FrameSpec& frameSpec) { (void)frameSpec; }
+    virtual void endFrame() {}
 
     virtual std::uint32_t createTextureFromImage(const QImage& image, bool magNearest) = 0;
     virtual std::uint32_t createTextureR8(int width,

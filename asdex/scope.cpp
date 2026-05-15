@@ -223,8 +223,7 @@ void AsdexScopeWidget::resizeGL(int width, int height) {
 }
 
 void AsdexScopeWidget::paintGL() {
-    const QSize renderSize = framebufferRenderSize();
-    renderScene(renderSize);
+    renderScene(sceneDisplaySize(), sceneFramebufferSize());
 }
 
 void AsdexScopeWidget::fitMapToView() {
@@ -255,9 +254,19 @@ void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
         return;
     }
 
-    if (isPointOverDcb(event->position())) {
+    const std::optional<QPointF> displayPoint = widgetToDisplayPoint(event->position());
+    if (!displayPoint) {
         clearHighlightedTarget();
-        updateDcbHover(event->position());
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Scope);
+        update();
+        event->accept();
+        return;
+    }
+
+    if (isPointOverDcb(*displayPoint)) {
+        clearHighlightedTarget();
+        updateDcbHover(*displayPoint);
         if (event->button() == Qt::LeftButton) {
             dcbMouseCaptured_ = true;
             setAsdexCursor(CursorMode::Captured);
@@ -273,7 +282,8 @@ void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
         clearDcbHover();
         panning_ = true;
         rightDragMoved_ = false;
-        panStartMouseFramebuffer_ = framebufferPoint(event->position());
+        panStartMouseFramebuffer_ =
+            displayToFramebufferPoint(*displayPoint, sceneDisplaySize(), sceneFramebufferSize());
         panStartCenterFeet_ = centerFeet_;
         setAsdexCursor(CursorMode::Hidden);
         grabMouse();
@@ -285,11 +295,13 @@ void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
 }
 
 void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
+    const std::optional<QPointF> displayPoint = widgetToDisplayPoint(event->position());
+
     if (isMapRepositionCommandActive()) {
         clearHighlightedTarget();
         clearDcbHover();
         setAsdexCursor(CursorMode::Hidden);
-        handleMapRepositionMouseMove(event->position());
+        if (displayPoint) handleMapRepositionMouseMove(*displayPoint);
         event->accept();
         return;
     }
@@ -303,14 +315,26 @@ void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
         return;
     }
 
+    if (!displayPoint) {
+        clearHighlightedTarget();
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Scope);
+        update();
+        event->accept();
+        return;
+    }
+
     if (panning_) {
-        const QSize renderSize = framebufferRenderSize();
+        const QSize displaySize = sceneDisplaySize();
+        const QSize renderSize = sceneFramebufferSize();
         const double ppf = pixelsPerFoot(renderSize);
 
         if (ppf > 0.0) {
-            const QPointF current = framebufferPoint(event->position());
+            const QPointF current =
+                displayToFramebufferPoint(*displayPoint, displaySize, renderSize);
             const QPointF delta = current - panStartMouseFramebuffer_;
-            const double tolerance = kRightClickDragTolerancePx * devicePixelRatioF();
+            const double tolerance =
+                kRightClickDragTolerancePx * double(renderSize.width()) / double(displaySize.width());
             if (delta.x() * delta.x() + delta.y() * delta.y() > tolerance * tolerance)
                 rightDragMoved_ = true;
             const QPointF worldDelta = screenDeltaToWorldDelta(delta, renderSize);
@@ -326,8 +350,8 @@ void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
 
     if (dcbMouseCaptured_) {
         clearHighlightedTarget();
-        if (isPointOverDcb(event->position()))
-            updateDcbHover(event->position());
+        if (isPointOverDcb(*displayPoint))
+            updateDcbHover(*displayPoint);
         else
             clearDcbHover();
         setAsdexCursor(CursorMode::Captured);
@@ -335,9 +359,9 @@ void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
         return;
     }
 
-    if (isPointOverDcb(event->position())) {
+    if (isPointOverDcb(*displayPoint)) {
         clearHighlightedTarget();
-        updateDcbHover(event->position());
+        updateDcbHover(*displayPoint);
         setAsdexCursor(CursorMode::Dcb);
         event->accept();
         return;
@@ -345,7 +369,7 @@ void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
 
     clearDcbHover();
     setAsdexCursor(CursorMode::Scope);
-    updateHighlightedTarget(event->position());
+    updateHighlightedTarget(*displayPoint);
     update();
     QOpenGLWidget::mouseMoveEvent(event);
 }
@@ -363,27 +387,33 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
     }
 
     if (event->button() == Qt::RightButton && panning_) {
+        const std::optional<QPointF> displayPoint = widgetToDisplayPoint(event->position());
         const bool rightClick = !rightDragMoved_;
         panning_ = false;
         rightDragMoved_ = false;
         releaseMouse();
 
-        if (rightClick) {
-            if (isPointOverDcb(event->position())) {
+        if (!displayPoint) {
+            clearHighlightedTarget();
+            clearDcbHover();
+            setAsdexCursor(CursorMode::Scope);
+            update();
+        } else if (rightClick) {
+            if (isPointOverDcb(*displayPoint)) {
                 clearHighlightedTarget();
-                updateDcbHover(event->position());
-                updateHoverCursor(event->position());
+                updateDcbHover(*displayPoint);
+                updateHoverCursor(*displayPoint);
             } else {
                 clearDcbHover();
-                updateHighlightedTarget(event->position());
+                updateHighlightedTarget(*displayPoint);
                 if (AsdexTarget* target = highlightedTarget()) {
                     startDatablockEdit(*target);
                 } else {
-                    updateHoverCursor(event->position());
+                    updateHoverCursor(*displayPoint);
                 }
             }
         } else {
-            updateHoverCursor(event->position());
+            updateHoverCursor(*displayPoint);
         }
 
         event->accept();
@@ -407,7 +437,10 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
         dcbMouseCaptured_ = false;
         clearHighlightedTarget();
 
-        const DcbHit hit = dcb_.hitTest(event->position(), size(), asdexFont_, makeDcbState());
+        const std::optional<QPointF> displayPoint = widgetToDisplayPoint(event->position());
+        const DcbHit hit = displayPoint
+            ? dcb_.hitTest(*displayPoint, sceneDisplaySize(), asdexFont_, makeDcbState())
+            : DcbHit{};
         if (hit.overDcb && hit.buttonIndex >= 0 && hit.function.has_value()) {
             handleDcbButtonClicked(*hit.function);
         }
@@ -420,8 +453,8 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
             return;
         }
 
-        if (isPointOverDcb(event->position())) {
-            updateDcbHover(event->position());
+        if (displayPoint && isPointOverDcb(*displayPoint)) {
+            updateDcbHover(*displayPoint);
             setAsdexCursor(CursorMode::Dcb);
         } else {
             clearDcbHover();
@@ -432,9 +465,19 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
 
-    if (isPointOverDcb(event->position())) {
+    const std::optional<QPointF> displayPoint = widgetToDisplayPoint(event->position());
+    if (!displayPoint) {
         clearHighlightedTarget();
-        updateDcbHover(event->position());
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Scope);
+        update();
+        event->accept();
+        return;
+    }
+
+    if (isPointOverDcb(*displayPoint)) {
+        clearHighlightedTarget();
+        updateDcbHover(*displayPoint);
         setAsdexCursor(CursorMode::Dcb);
         update();
         event->accept();
@@ -443,7 +486,7 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
 
     if (event->button() == Qt::LeftButton && event->modifiers() == Qt::NoModifier) {
         clearDcbHover();
-        updateHighlightedTarget(event->position());
+        updateHighlightedTarget(*displayPoint);
         if (AsdexTarget* target = highlightedTarget()) {
             toggleDataBlockForTarget(*target);
             update();
@@ -547,17 +590,30 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
         return;
     }
 
-    if (isPointOverDcb(event->position())) {
-        const DcbHit hit = dcb_.hitTest(event->position(), size(), asdexFont_, makeDcbState());
+    const std::optional<QPointF> displayPoint = widgetToDisplayPoint(event->position());
+    if (!displayPoint) {
+        clearHighlightedTarget();
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Scope);
+        update();
+        event->accept();
+        return;
+    }
+
+    if (isPointOverDcb(*displayPoint)) {
+        const DcbHit hit = dcb_.hitTest(*displayPoint,
+                                        sceneDisplaySize(),
+                                        asdexFont_,
+                                        makeDcbState());
         if (hit.function && handleDcbWheel(*hit.function, wheelY)) {
-            updateDcbHover(event->position());
+            updateDcbHover(*displayPoint);
             setAsdexCursor(CursorMode::Dcb);
             update();
             event->accept();
             return;
         }
 
-        updateDcbHover(event->position());
+        updateDcbHover(*displayPoint);
         setAsdexCursor(CursorMode::Dcb);
         event->accept();
         return;
@@ -577,7 +633,7 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
     const double deltaFeet = (wheelY > 0) ? -step : step;
 
     if (alt)
-        zoomToCursorByFeet(deltaFeet, event->position());
+        zoomToCursorByFeet(deltaFeet, *displayPoint);
     else
         zoomByFeet(deltaFeet);
 
@@ -812,8 +868,9 @@ void AsdexScopeWidget::updateTargetsFromCache() {
 }
 
 void AsdexScopeWidget::updateHighlightedTarget(const QPointF& mouseLogical) {
-    const QSize renderSize = framebufferRenderSize();
-    const QPointF mouseWorld = screenToWorldFeet(mouseLogical, renderSize);
+    const QSize displaySize = sceneDisplaySize();
+    const QSize renderSize = sceneFramebufferSize();
+    const QPointF mouseWorld = screenToWorldFeet(mouseLogical, displaySize, renderSize);
     const double maxDistance2 = kMaxHoverRangeFeet * kMaxHoverRangeFeet;
 
     int bestIndex = -1;
@@ -1407,7 +1464,10 @@ void AsdexScopeWidget::startMapRepositionCommand() {
     dcbEntryCommand_.reset();
     editingTrackId_.clear();
     mapRepositionOriginalCenter_ = centerFeet_;
-    mapRepositionLastMouseFramebuffer_ = framebufferPoint(mapRepositionBoxCenterLogical());
+    mapRepositionLastMouseFramebuffer_ =
+        displayToFramebufferPoint(mapRepositionBoxCenterDisplay(),
+                                  sceneDisplaySize(),
+                                  sceneFramebufferSize());
     suppressNextMapRepositionMove_ = true;
     suppressNextMapRepositionRelease_ = false;
 
@@ -1449,29 +1509,33 @@ bool AsdexScopeWidget::isMapRepositionCommandActive() const {
     return commandType_ == CommandType::MapReposition;
 }
 
-QPointF AsdexScopeWidget::mapRepositionBoxCenterLogical() const {
-    return QPointF(std::min(50.0, std::max(0.0, width() * 0.5)),
-                   std::min(50.0, std::max(0.0, height() * 0.5)));
+QPointF AsdexScopeWidget::mapRepositionBoxCenterDisplay() const {
+    const QSize displaySize = sceneDisplaySize();
+    return QPointF(std::min(50.0, std::max(0.0, displaySize.width() * 0.5)),
+                   std::min(50.0, std::max(0.0, displaySize.height() * 0.5)));
 }
 
 void AsdexScopeWidget::moveMapRepositionCursorToBoxCenter() {
-    const QPointF point = mapRepositionBoxCenterLogical();
+    const QPointF point = displayToWidgetPoint(mapRepositionBoxCenterDisplay());
     QCursor::setPos(mapToGlobal(QPoint(int(std::round(point.x())),
                                       int(std::round(point.y())))));
 }
 
-void AsdexScopeWidget::handleMapRepositionMouseMove(const QPointF& logicalPoint) {
-    const QSize renderSize = framebufferRenderSize();
+void AsdexScopeWidget::handleMapRepositionMouseMove(const QPointF& displayPoint) {
+    const QSize displaySize = sceneDisplaySize();
+    const QSize renderSize = sceneFramebufferSize();
     if (renderSize.isEmpty()) return;
 
-    const QPointF currentFramebuffer = framebufferPoint(logicalPoint);
+    const QPointF currentFramebuffer =
+        displayToFramebufferPoint(displayPoint, displaySize, renderSize);
     if (suppressNextMapRepositionMove_) {
         suppressNextMapRepositionMove_ = false;
         mapRepositionLastMouseFramebuffer_ = currentFramebuffer;
         return;
     }
 
-    const QPointF boxCenterFramebuffer = framebufferPoint(mapRepositionBoxCenterLogical());
+    const QPointF boxCenterFramebuffer =
+        displayToFramebufferPoint(mapRepositionBoxCenterDisplay(), displaySize, renderSize);
     QPointF delta = currentFramebuffer - boxCenterFramebuffer;
     if (std::abs(delta.x()) < 0.5 && std::abs(delta.y()) < 0.5) {
         delta = currentFramebuffer - mapRepositionLastMouseFramebuffer_;
@@ -1495,12 +1559,12 @@ QStringList AsdexScopeWidget::activeCommandLines() const {
     return {};
 }
 
-void AsdexScopeWidget::renderScene(const QSize& renderSize) {
+void AsdexScopeWidget::renderScene(const QSize& displaySize, const QSize& renderSize) {
     if (!renderer_ || renderSize.isEmpty()) return;
 
     renderer::LayeredCommandBuffer layers;
     const QMatrix4x4 worldProjection = viewProjection(renderSize);
-    const QMatrix4x4 projection = screenProjection();
+    const QMatrix4x4 projection = screenProjection(displaySize);
 
     auto prepareLayer = [&renderSize](renderer::CommandBuffer& buffer,
                                       const QMatrix4x4& layerProjection) {
@@ -1551,7 +1615,7 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
     const DcbState dcbState = makeDcbState();
     dcb_.setBrightness(dcbBrightness_);
     dcb_.setMenu(currentDcbMenu());
-    const DcbLayout dcbLayout = dcb_.layout(size(), asdexFont_, dcbState);
+    const DcbLayout dcbLayout = dcb_.layout(displaySize, asdexFont_, dcbState);
 
     renderer::CommandBuffer& dcbBackgroundBuffer = layers.layer(z::DcbBackground);
     prepareLayer(dcbBackgroundBuffer, projection);
@@ -1597,8 +1661,8 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
         drawDatablocks(targets_,
                        &datablockBuffer,
                        projection,
-                       [this, &renderSize](QPointF worldFeet) {
-                           return worldToScreenLogical(worldFeet, renderSize);
+                       [this, &displaySize, &renderSize](QPointF worldFeet) {
+                           return worldToScreenLogical(worldFeet, displaySize, renderSize);
                        },
                        [this](const AsdexTarget& target) {
                            return isDataBlockVisible(target);
@@ -1614,7 +1678,7 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
 
         coastList_.setBrightness(listsBrightness_);
         previewArea_.setBrightness(listsBrightness_);
-        coastList_.render(*textBuilder, asdexFont_, listFontTexture, size());
+        coastList_.render(*textBuilder, asdexFont_, listFontTexture, displaySize);
 
         const QStringList commandLines = activeCommandLines();
         previewArea_.render(*textBuilder, asdexFont_, listFontTexture, commandLines);
@@ -1645,7 +1709,15 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
         }
     }
 
-    layers.flushTo(renderer_.get());
+    renderer::FrameSpec frameSpec;
+    frameSpec.sceneFramebufferSize = renderSize;
+    frameSpec.outputFramebufferSize = nativeFramebufferSize();
+    frameSpec.display = necDisplayEmulation_
+        ? renderer::DisplayEmulationSettings::necLcd2190Uxp()
+        : renderer::DisplayEmulationSettings{};
+    if (!necDisplayEmulation_) frameSpec.display.mode = renderer::DisplayEmulationMode::Native;
+
+    layers.flushTo(renderer_.get(), frameSpec);
 }
 
 DcbState AsdexScopeWidget::makeDcbState() const {
@@ -1671,21 +1743,72 @@ DcbState AsdexScopeWidget::makeDcbState() const {
     return state;
 }
 
-QSize AsdexScopeWidget::framebufferRenderSize() const {
+QSize AsdexScopeWidget::sceneDisplaySize() const {
+    if (fixedVirtualPanel_) return QSize(1600, 1200);
+    return size();
+}
+
+QSize AsdexScopeWidget::sceneFramebufferSize() const {
+    if (fixedVirtualPanel_) return QSize(1600, 1200);
+    return nativeFramebufferSize();
+}
+
+QSize AsdexScopeWidget::nativeFramebufferSize() const {
     const qreal ratio = devicePixelRatioF();
     return QSize(qRound(width() * ratio), qRound(height() * ratio));
+}
+
+QRectF AsdexScopeWidget::panelRectInWidgetLogical() const {
+    const QSize displaySize = sceneDisplaySize();
+    if (!fixedVirtualPanel_ || displaySize.isEmpty()) {
+        return QRectF(0.0, 0.0, double(width()), double(height()));
+    }
+
+    const double sx = double(width()) / double(displaySize.width());
+    const double sy = double(height()) / double(displaySize.height());
+    const double scale = std::min(sx, sy);
+    const double panelWidth = displaySize.width() * scale;
+    const double panelHeight = displaySize.height() * scale;
+    return QRectF((width() - panelWidth) * 0.5,
+                  (height() - panelHeight) * 0.5,
+                  panelWidth,
+                  panelHeight);
+}
+
+std::optional<QPointF> AsdexScopeWidget::widgetToDisplayPoint(QPointF widgetPoint) const {
+    if (!fixedVirtualPanel_) return widgetPoint;
+
+    const QSize displaySize = sceneDisplaySize();
+    const QRectF panelRect = panelRectInWidgetLogical();
+    if (displaySize.isEmpty() || panelRect.isEmpty() || !panelRect.contains(widgetPoint)) {
+        return std::nullopt;
+    }
+
+    return QPointF((widgetPoint.x() - panelRect.x()) * displaySize.width() / panelRect.width(),
+                   (widgetPoint.y() - panelRect.y()) * displaySize.height() / panelRect.height());
+}
+
+QPointF AsdexScopeWidget::displayToWidgetPoint(QPointF displayPoint) const {
+    if (!fixedVirtualPanel_) return displayPoint;
+
+    const QSize displaySize = sceneDisplaySize();
+    const QRectF panelRect = panelRectInWidgetLogical();
+    if (displaySize.isEmpty() || panelRect.isEmpty()) return displayPoint;
+
+    return QPointF(panelRect.x() + displayPoint.x() * panelRect.width() / displaySize.width(),
+                   panelRect.y() + displayPoint.y() * panelRect.height() / displaySize.height());
 }
 
 std::uint32_t AsdexScopeWidget::fontTextureId(int fontSize) const {
     return fontTextureIds_.value(fontSize, 0);
 }
 
-QMatrix4x4 AsdexScopeWidget::screenProjection() const {
+QMatrix4x4 AsdexScopeWidget::screenProjection(const QSize& displaySize) const {
     QMatrix4x4 projection;
     projection.setToIdentity();
     projection.ortho(0.0f,
-                     static_cast<float>(width()),
-                     static_cast<float>(height()),
+                     static_cast<float>(displaySize.width()),
+                     static_cast<float>(displaySize.height()),
                      0.0f,
                      -1.0f,
                      1.0f);
@@ -1693,6 +1816,7 @@ QMatrix4x4 AsdexScopeWidget::screenProjection() const {
 }
 
 QPointF AsdexScopeWidget::worldToScreenLogical(const QPointF& worldFeet,
+                                               const QSize& displaySize,
                                                const QSize& renderSize) const {
     const double ppf = pixelsPerFoot(renderSize);
     const double theta = radiansFromDegrees(currentRotationValue());
@@ -1707,8 +1831,8 @@ QPointF AsdexScopeWidget::worldToScreenLogical(const QPointF& worldFeet,
     const double framebufferX = renderSize.width() * 0.5 + rx * ppf;
     const double framebufferY = renderSize.height() * 0.5 - ry * ppf;
 
-    const qreal dpr = devicePixelRatioF();
-    return QPointF(framebufferX / dpr, framebufferY / dpr);
+    return QPointF(framebufferX * displaySize.width() / renderSize.width(),
+                   framebufferY * displaySize.height() / renderSize.height());
 }
 
 QPointF AsdexScopeWidget::worldToFramebufferTopLeft(const QPointF& worldFeet,
@@ -1727,9 +1851,13 @@ QPointF AsdexScopeWidget::worldToFramebufferTopLeft(const QPointF& worldFeet,
                    renderSize.height() * 0.5 - ry * ppf);
 }
 
-QPointF AsdexScopeWidget::framebufferPoint(const QPointF& logicalPoint) const {
-    const qreal ratio = devicePixelRatioF();
-    return QPointF(logicalPoint.x() * ratio, logicalPoint.y() * ratio);
+QPointF AsdexScopeWidget::displayToFramebufferPoint(const QPointF& displayPoint,
+                                                    const QSize& displaySize,
+                                                    const QSize& framebufferSize) const {
+    if (displaySize.isEmpty()) return displayPoint;
+
+    return QPointF(displayPoint.x() * framebufferSize.width() / displaySize.width(),
+                   displayPoint.y() * framebufferSize.height() / displaySize.height());
 }
 
 double AsdexScopeWidget::pixelsPerFoot(const QSize& renderSize) const {
@@ -1741,9 +1869,10 @@ double AsdexScopeWidget::pixelsPerFoot(const QSize& renderSize) const {
     return radiusPx / halfRangeFeet_;
 }
 
-QPointF AsdexScopeWidget::screenToWorldFeet(const QPointF& logicalPoint,
+QPointF AsdexScopeWidget::screenToWorldFeet(const QPointF& displayPoint,
+                                            const QSize& displaySize,
                                             const QSize& renderSize) const {
-    const QPointF point = framebufferPoint(logicalPoint);
+    const QPointF point = displayToFramebufferPoint(displayPoint, displaySize, renderSize);
     const double ppf = pixelsPerFoot(renderSize);
 
     if (ppf <= 0.0) return centerFeet_;
@@ -1789,8 +1918,9 @@ void AsdexScopeWidget::zoomByFeet(double deltaFeet) {
 }
 
 void AsdexScopeWidget::zoomToCursorByFeet(double deltaFeet, const QPointF& cursorLogicalPoint) {
-    const QSize renderSize = framebufferRenderSize();
-    const QPointF worldBefore = screenToWorldFeet(cursorLogicalPoint, renderSize);
+    const QSize displaySize = sceneDisplaySize();
+    const QSize renderSize = sceneFramebufferSize();
+    const QPointF worldBefore = screenToWorldFeet(cursorLogicalPoint, displaySize, renderSize);
     const double oldRange = halfRangeFeet_;
     const double newRange = std::clamp(oldRange + deltaFeet,
                                        kMinHalfRangeFeet,
@@ -1799,7 +1929,7 @@ void AsdexScopeWidget::zoomToCursorByFeet(double deltaFeet, const QPointF& curso
     if (qFuzzyCompare(oldRange, newRange)) return;
 
     halfRangeFeet_ = newRange;
-    const QPointF worldAfter = screenToWorldFeet(cursorLogicalPoint, renderSize);
+    const QPointF worldAfter = screenToWorldFeet(cursorLogicalPoint, displaySize, renderSize);
     centerFeet_ += worldBefore - worldAfter;
     update();
 }
@@ -1807,7 +1937,7 @@ void AsdexScopeWidget::zoomToCursorByFeet(double deltaFeet, const QPointF& curso
 bool AsdexScopeWidget::isPointOverDcb(const QPointF& logicalPoint) const {
     if (!fontLoaded_) return false;
 
-    return dcb_.contains(logicalPoint, size(), asdexFont_, makeDcbState());
+    return dcb_.contains(logicalPoint, sceneDisplaySize(), asdexFont_, makeDcbState());
 }
 
 bool AsdexScopeWidget::handleDcbWheel(DcbFunction function, int wheelY) {
@@ -1848,7 +1978,8 @@ void AsdexScopeWidget::updateDcbHover(const QPointF& logicalPoint) {
         return;
     }
 
-    const DcbHit hit = dcb_.hitTest(logicalPoint, size(), asdexFont_, makeDcbState());
+    const DcbHit hit =
+        dcb_.hitTest(logicalPoint, sceneDisplaySize(), asdexFont_, makeDcbState());
     const int oldIndex = hoveredDcbButtonIndex_;
     const std::optional<DcbFunction> oldFunction = hoveredDcbFunction_;
 

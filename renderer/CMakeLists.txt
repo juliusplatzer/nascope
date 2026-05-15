@@ -7,7 +7,9 @@ endif()
 add_library(nascope_renderer STATIC
     command_buffer.cpp
     builders.cpp
+    display_emulation.cpp
     font.cpp
+    gl/display_emulation_pass.cpp
     gl/opengl_renderer.cpp
     gl/shaders.cpp
     gl/glu_tessellator.cpp

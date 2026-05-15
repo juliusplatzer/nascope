@@ -1,6 +1,7 @@
 #include "renderer/gl/opengl_renderer.h"
 
 #include "renderer/command_buffer.h"
+#include "renderer/gl/display_emulation_pass.h"
 #include "renderer/gl/shaders.h"
 
 #include <QImage>
@@ -49,6 +50,12 @@ bool OpenGLRenderer::initialize(QString* error) {
 
     if (!initializeShaders(error)) return false;
 
+    displayPass_ = std::make_unique<DisplayEmulationPass>();
+    if (!displayPass_->initialize(functions_, error)) {
+        displayPass_.reset();
+        return false;
+    }
+
     functions_->glGenVertexArrays(1, &vao_);
     functions_->glGenBuffers(1, &vbo_);
     functions_->glGenBuffers(1, &ebo_);
@@ -85,8 +92,42 @@ void OpenGLRenderer::deinitialize() {
     coloredShader_.removeAllShaders();
     texturedShader_.removeAllShaders();
     fontShader_.removeAllShaders();
+    if (displayPass_) {
+        displayPass_->deinitialize();
+        displayPass_.reset();
+    }
+    activeFrame_.reset();
+    displayPassActive_ = false;
     ready_ = false;
     functions_ = nullptr;
+}
+
+void OpenGLRenderer::beginFrame(const FrameSpec& frameSpec) {
+    activeFrame_ = frameSpec;
+    displayPassActive_ = false;
+
+    if (!ready_ || !functions_) return;
+    if (frameSpec.display.mode == DisplayEmulationMode::Native) return;
+    if (!displayPass_) return;
+
+    functions_->glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &savedDrawFramebuffer_);
+    displayPassActive_ = displayPass_->beginScene(frameSpec.sceneFramebufferSize);
+    if (!displayPassActive_) {
+        functions_->glBindFramebuffer(GL_DRAW_FRAMEBUFFER, GLuint(savedDrawFramebuffer_));
+    }
+}
+
+void OpenGLRenderer::endFrame() {
+    if (!activeFrame_) return;
+
+    if (ready_ && functions_ && displayPass_ && displayPassActive_) {
+        displayPass_->endSceneToFramebuffer(savedDrawFramebuffer_,
+                                            activeFrame_->outputFramebufferSize,
+                                            activeFrame_->display);
+    }
+
+    activeFrame_.reset();
+    displayPassActive_ = false;
 }
 
 bool OpenGLRenderer::initializeShaders(QString* error) {

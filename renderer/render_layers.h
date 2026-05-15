@@ -2,6 +2,7 @@
 #define RENDERER_RENDER_LAYERS_H_
 
 #include "renderer/command_buffer.h"
+#include "renderer/display_emulation.h"
 #include "renderer/renderer.h"
 
 #include <map>
@@ -23,6 +24,21 @@ public:
             stats.merge(renderer->renderCommandBuffer(&buffer));
         }
 
+        return stats;
+    }
+
+    RendererStats flushTo(Renderer* renderer, const FrameSpec& frameSpec) {
+        RendererStats stats;
+        if (!renderer) return stats;
+
+        renderer->beginFrame(frameSpec);
+
+        for (auto& [unusedZ, buffer] : layers_) {
+            (void)unusedZ;
+            stats.merge(renderer->renderCommandBuffer(&buffer));
+        }
+
+        renderer->endFrame();
         return stats;
     }
 

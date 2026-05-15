@@ -1,6 +1,7 @@
 #ifndef RENDERER_GL_OPENGL_RENDERER_H_
 #define RENDERER_GL_OPENGL_RENDERER_H_
 
+#include "renderer/display_emulation.h"
 #include "renderer/rgb.h"
 #include "renderer/renderer.h"
 
@@ -10,9 +11,14 @@
 
 #include <QtGui/qopengl.h>
 
+#include <memory>
+#include <optional>
+
 class QOpenGLFunctions_3_3_Core;
 
 namespace renderer {
+
+class DisplayEmulationPass;
 
 class OpenGLRenderer : public Renderer {
 public:
@@ -24,6 +30,9 @@ public:
 
     bool initialize(QString* error = nullptr) override;
     void deinitialize() override;
+
+    void beginFrame(const FrameSpec& frameSpec) override;
+    void endFrame() override;
 
     std::uint32_t createTextureFromImage(const QImage& image, bool magNearest) override;
     std::uint32_t createTextureR8(int width,
@@ -49,6 +58,8 @@ private:
     QOpenGLShaderProgram coloredShader_;
     QOpenGLShaderProgram texturedShader_;
     QOpenGLShaderProgram fontShader_;
+    std::unique_ptr<DisplayEmulationPass> displayPass_;
+    std::optional<FrameSpec> activeFrame_;
     QHash<std::uint32_t, GLuint> textures_;
     std::uint32_t nextTextureId_ = 1;
     GLuint vao_ = 0;
@@ -57,6 +68,8 @@ private:
     QMatrix4x4 projection_;
     RGBA currentColor_;
     float currentLineWidth_ = 1.0f;
+    GLint savedDrawFramebuffer_ = 0;
+    bool displayPassActive_ = false;
     bool ready_ = false;
 };
 

@@ -22,6 +22,7 @@
 #include <QMouseEvent>
 #include <QOpenGLWidget>
 #include <QPointF>
+#include <QRectF>
 #include <QTimer>
 #include <QVector>
 #include <QWheelEvent>
@@ -110,21 +111,32 @@ private:
     void cancelMapRepositionCommand();
     bool isMapRepositionCommandActive() const;
     void moveMapRepositionCursorToBoxCenter();
-    QPointF mapRepositionBoxCenterLogical() const;
-    void handleMapRepositionMouseMove(const QPointF& logicalPoint);
+    QPointF mapRepositionBoxCenterDisplay() const;
+    void handleMapRepositionMouseMove(const QPointF& displayPoint);
     bool handleDcbEntryCommandKey(QKeyEvent* event);
     QStringList activeCommandLines() const;
-    void renderScene(const QSize& renderSize);
+    void renderScene(const QSize& displaySize, const QSize& renderSize);
     DcbState makeDcbState() const;
-    QSize framebufferRenderSize() const;
+    QSize sceneDisplaySize() const;
+    QSize sceneFramebufferSize() const;
+    QSize nativeFramebufferSize() const;
+    QRectF panelRectInWidgetLogical() const;
+    std::optional<QPointF> widgetToDisplayPoint(QPointF widgetPoint) const;
+    QPointF displayToWidgetPoint(QPointF displayPoint) const;
     std::uint32_t fontTextureId(int fontSize) const;
-    QMatrix4x4 screenProjection() const;
+    QMatrix4x4 screenProjection(const QSize& displaySize) const;
     QMatrix4x4 viewProjection(const QSize& renderSize) const;
-    QPointF worldToScreenLogical(const QPointF& worldFeet, const QSize& renderSize) const;
+    QPointF worldToScreenLogical(const QPointF& worldFeet,
+                                 const QSize& displaySize,
+                                 const QSize& renderSize) const;
     QPointF worldToFramebufferTopLeft(const QPointF& worldFeet, const QSize& renderSize) const;
-    QPointF framebufferPoint(const QPointF& logicalPoint) const;
+    QPointF displayToFramebufferPoint(const QPointF& displayPoint,
+                                      const QSize& displaySize,
+                                      const QSize& framebufferSize) const;
     double pixelsPerFoot(const QSize& renderSize) const;
-    QPointF screenToWorldFeet(const QPointF& logicalPoint, const QSize& renderSize) const;
+    QPointF screenToWorldFeet(const QPointF& displayPoint,
+                              const QSize& displaySize,
+                              const QSize& renderSize) const;
     QPointF screenDeltaToWorldDelta(const QPointF& framebufferDelta,
                                     const QSize& renderSize) const;
     void zoomByFeet(double deltaFeet);
@@ -196,6 +208,8 @@ private:
     CursorMode currentCursorMode_ = CursorMode::Hidden;
     bool fontLoaded_ = false;
     bool fontTexturesReady_ = false;
+    bool fixedVirtualPanel_ = true;
+    bool necDisplayEmulation_ = true;
 };
 
 } // namespace asdex
