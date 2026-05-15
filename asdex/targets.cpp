@@ -2,7 +2,7 @@
 
 #include "utils/math.h"
 #include "renderer/builders.h"
-#include "renderer/commandbuffer.h"
+#include "renderer/cmdbuffer.h"
 #include "renderer/tessellator.h"
 
 #include <algorithm>

@@ -3,7 +3,7 @@
 #include "utils/math.h"
 #include "utils/resources.h"
 #include "renderer/builders.h"
-#include "renderer/commandbuffer.h"
+#include "renderer/cmdbuffer.h"
 #include "renderer/tessellator.h"
 
 #include <QDebug>

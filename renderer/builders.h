@@ -1,7 +1,7 @@
 #ifndef RENDERER_BUILDERS_H_
 #define RENDERER_BUILDERS_H_
 
-#include "renderer/commandbuffer.h"
+#include "renderer/cmdbuffer.h"
 #include "renderer/font.h"
 
 #include <QColor>

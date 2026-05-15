@@ -2,7 +2,7 @@
 
 #include "asdex/colors.h"
 #include "renderer/builders.h"
-#include "renderer/commandbuffer.h"
+#include "renderer/cmdbuffer.h"
 #include "renderer/font.h"
 
 #include <QStringList>

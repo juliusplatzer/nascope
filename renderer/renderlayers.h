@@ -1,7 +1,7 @@
 #ifndef RENDERER_RENDERLAYERS_H_
 #define RENDERER_RENDERLAYERS_H_
 
-#include "renderer/commandbuffer.h"
+#include "renderer/cmdbuffer.h"
 #include "renderer/renderer.h"
 
 #include <map>
