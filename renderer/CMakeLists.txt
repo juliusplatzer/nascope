@@ -5,10 +5,10 @@ if(NOT APPLE)
 endif()
 
 add_library(nascope_renderer STATIC
-    commandbuffer.cpp
+    cmdbuffer.cpp
     builders.cpp
     font.cpp
-    gl/openglrenderer.cpp
+    gl/ogl.cpp
     gl/shaders.cpp
     gl/glutessellator.cpp
 )
