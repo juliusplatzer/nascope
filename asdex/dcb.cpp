@@ -2,7 +2,7 @@
 
 #include "asdex/colors.h"
 #include "renderer/builders.h"
-#include "renderer/command_buffer.h"
+#include "renderer/commandbuffer.h"
 
 #include <algorithm>
 #include <utility>

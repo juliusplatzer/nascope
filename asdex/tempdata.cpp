@@ -3,8 +3,8 @@
 #include "asdex/colors.h"
 #include "utils/math.h"
 #include "renderer/builders.h"
-#include "renderer/command_buffer.h"
-#include "renderer/geometry/tessellator.h"
+#include "renderer/commandbuffer.h"
+#include "renderer/tessellator.h"
 
 #include <QFile>
 #include <QJsonArray>

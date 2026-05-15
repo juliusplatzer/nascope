@@ -1,7 +1,7 @@
-#ifndef RENDERER_RENDER_LAYERS_H_
-#define RENDERER_RENDER_LAYERS_H_
+#ifndef RENDERER_RENDERLAYERS_H_
+#define RENDERER_RENDERLAYERS_H_
 
-#include "renderer/command_buffer.h"
+#include "renderer/commandbuffer.h"
 #include "renderer/renderer.h"
 
 #include <map>
@@ -32,4 +32,4 @@ private:
 
 }  // namespace renderer
 
-#endif  // RENDERER_RENDER_LAYERS_H_
+#endif  // RENDERER_RENDERLAYERS_H_

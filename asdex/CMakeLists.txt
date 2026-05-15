@@ -5,6 +5,7 @@ add_library(nascope_asdex STATIC
     window.cpp
     atiscache.cpp
     notamcache.cpp
+    cmdsetup.cpp
     cmdslew.cpp
     cursors.cpp
     dcb.cpp
