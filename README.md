@@ -1,3 +1,3 @@
 ### nascope
 
-View live air traffic at select airports in the US on a realistic ASDE-X radar scope. 
+High-fidelity [ASDE-X](https://www.faa.gov/air_traffic/technology/asde-x) emulation.
