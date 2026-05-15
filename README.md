@@ -1,3 +1,3 @@
 ### nascope
 
-High-fidelity [ASDE-X](https://www.faa.gov/air_traffic/technology/asde-x) emulation.
+High-fidelity [ASDE-X](https://www.faa.gov/air_traffic/technology/asde-x) emulation with FAA SWIM integration.
