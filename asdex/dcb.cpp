@@ -414,12 +414,26 @@ bool Dcb::contains(QPointF displayPoint,
 }
 
 void Dcb::drawQuads(renderer::CommandBuffer* commandBuffer, const DcbLayout& layout) const {
+    drawBackground(commandBuffer, layout);
+    drawButtons(commandBuffer, layout);
+}
+
+void Dcb::drawBackground(renderer::CommandBuffer* commandBuffer, const DcbLayout& layout) const {
     if (!commandBuffer || layout.dcbBounds.isEmpty()) return;
 
     renderer::ColoredTrianglesBuilder* builder = renderer::getColoredTrianglesBuilder();
 
     addRect(builder, layout.dcbBounds, backgroundColor());
     addRect(builder, layout.menuBounds, menuSlabColor());
+
+    builder->generateCommands(commandBuffer);
+    renderer::returnColoredTrianglesBuilder(builder);
+}
+
+void Dcb::drawButtons(renderer::CommandBuffer* commandBuffer, const DcbLayout& layout) const {
+    if (!commandBuffer || layout.dcbBounds.isEmpty()) return;
+
+    renderer::ColoredTrianglesBuilder* builder = renderer::getColoredTrianglesBuilder();
 
     for (const DcbButtonLayout& button : layout.buttons) {
         QColor color;

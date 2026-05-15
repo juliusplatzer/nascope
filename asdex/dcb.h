@@ -180,6 +180,8 @@ public:
                   const DcbState& state) const;
 
     void drawQuads(renderer::CommandBuffer* commandBuffer, const DcbLayout& layout) const;
+    void drawBackground(renderer::CommandBuffer* commandBuffer, const DcbLayout& layout) const;
+    void drawButtons(renderer::CommandBuffer* commandBuffer, const DcbLayout& layout) const;
 
     void drawText(renderer::TextBuilder& textBuilder,
                   const renderer::BitmapFont& font,

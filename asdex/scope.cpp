@@ -8,6 +8,7 @@
 #include "utils/resources.h"
 #include "renderer/builders.h"
 #include "renderer/command_buffer.h"
+#include "renderer/render_layers.h"
 #include "renderer/renderer.h"
 
 #include <QCursor>
@@ -30,6 +31,26 @@ constexpr double kCtrlWheelStepFeet = 1600.0;
 constexpr double kMaxHoverRangeFeet = 150.0;
 constexpr double kRightClickDragTolerancePx = 3.0;
 constexpr double kPi = 3.14159265358979323846;
+
+namespace z {
+
+constexpr int VideoMap = -900;
+constexpr int RunwayClosures = -800;
+
+constexpr int RestrictedArea = -700;
+constexpr int ClosedArea = -690;
+
+constexpr int Targets = -500;
+constexpr int Datablocks = -480;
+
+constexpr int PreviewArea = -200;
+constexpr int PreviewCursor = -190;
+
+constexpr int DcbBackground = -100;
+constexpr int DcbButtons = -99;
+constexpr int DcbText = -98;
+
+}  // namespace z
 
 int normalizedDegrees(int degrees) {
     return ((degrees % 360) + 360) % 360;
@@ -1477,39 +1498,68 @@ QStringList AsdexScopeWidget::activeCommandLines() const {
 void AsdexScopeWidget::renderScene(const QSize& renderSize) {
     if (!renderer_ || renderSize.isEmpty()) return;
 
-    renderer::CommandBuffer* commandBuffer = renderer::getCommandBuffer();
-    commandBuffer->resetState();
-    commandBuffer->viewport(0, 0, renderSize.width(), renderSize.height());
-    commandBuffer->clear(
-        renderer::RGBA::fromQColor(applyBrightness(backgroundColor(mode_), backgroundBrightness_, 20)));
-
+    renderer::LayeredCommandBuffer layers;
     const QMatrix4x4 worldProjection = viewProjection(renderSize);
-    commandBuffer->loadProjectionMatrix(worldProjection);
-    drawVideoMap(map_, commandBuffer, mode_);
-    drawRunwayClosures(runwayClosureGeometry_, commandBuffer, worldProjection);
-    drawTempAreas(tempAreaGeometry_,
-                  commandBuffer,
-                  worldProjection,
-                  [this, &renderSize](QPointF worldFeet) {
-                      return worldToFramebufferTopLeft(worldFeet, renderSize);
-                  },
-                  tempMapAreasBrightness_);
+    const QMatrix4x4 projection = screenProjection();
+
+    auto prepareLayer = [&renderSize](renderer::CommandBuffer& buffer,
+                                      const QMatrix4x4& layerProjection) {
+        buffer.viewport(0, 0, renderSize.width(), renderSize.height());
+        buffer.loadProjectionMatrix(layerProjection);
+    };
+
+    renderer::CommandBuffer& mapBuffer = layers.layer(z::VideoMap);
+    prepareLayer(mapBuffer, worldProjection);
+    mapBuffer.clear(
+        renderer::RGBA::fromQColor(applyBrightness(backgroundColor(mode_), backgroundBrightness_, 20)));
+    drawVideoMap(map_, &mapBuffer, mode_);
+
+    renderer::CommandBuffer& runwayBuffer = layers.layer(z::RunwayClosures);
+    prepareLayer(runwayBuffer, worldProjection);
+    drawRunwayClosures(runwayClosureGeometry_, &runwayBuffer, worldProjection);
+
+    auto worldToFramebuffer = [this, &renderSize](QPointF worldFeet) {
+        return worldToFramebufferTopLeft(worldFeet, renderSize);
+    };
+
+    renderer::CommandBuffer& restrictedAreaBuffer = layers.layer(z::RestrictedArea);
+    prepareLayer(restrictedAreaBuffer, worldProjection);
+    tempAreaGeometry_.drawType(&restrictedAreaBuffer,
+                               worldProjection,
+                               worldToFramebuffer,
+                               TempAreaType::RestrictedArea,
+                               tempMapAreasBrightness_);
+
+    renderer::CommandBuffer& closedAreaBuffer = layers.layer(z::ClosedArea);
+    prepareLayer(closedAreaBuffer, worldProjection);
+    tempAreaGeometry_.drawType(&closedAreaBuffer,
+                               worldProjection,
+                               worldToFramebuffer,
+                               TempAreaType::ClosedArea,
+                               tempMapAreasBrightness_);
+
+    renderer::CommandBuffer& targetBuffer = layers.layer(z::Targets);
+    prepareLayer(targetBuffer, worldProjection);
     drawTargets(targets_,
-                commandBuffer,
+                &targetBuffer,
                 worldProjection,
                 mode_,
                 targetVectorSeconds_,
                 showVectorLine_,
                 trackBrightness_);
 
-    const QMatrix4x4 projection = screenProjection();
-    commandBuffer->loadProjectionMatrix(projection);
-
     const DcbState dcbState = makeDcbState();
     dcb_.setBrightness(dcbBrightness_);
     dcb_.setMenu(currentDcbMenu());
     const DcbLayout dcbLayout = dcb_.layout(size(), asdexFont_, dcbState);
-    dcb_.drawQuads(commandBuffer, dcbLayout);
+
+    renderer::CommandBuffer& dcbBackgroundBuffer = layers.layer(z::DcbBackground);
+    prepareLayer(dcbBackgroundBuffer, projection);
+    dcb_.drawBackground(&dcbBackgroundBuffer, dcbLayout);
+
+    renderer::CommandBuffer& dcbButtonBuffer = layers.layer(z::DcbButtons);
+    prepareLayer(dcbButtonBuffer, projection);
+    dcb_.drawButtons(&dcbButtonBuffer, dcbLayout);
 
     const std::uint32_t dcbFontTexture = fontTextureId(dcbLayout.renderFontSize);
     if (fontTexturesReady_ && dcbFontTexture != 0) {
@@ -1518,6 +1568,9 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
                 ? hoveredDcbButtonIndex_
                 : -1;
 
+        renderer::CommandBuffer& dcbTextBuffer = layers.layer(z::DcbText);
+        prepareLayer(dcbTextBuffer, projection);
+
         renderer::TextBuilder* dcbTextBuilder = renderer::getTextBuilder();
         dcbTextBuilder->setFont(&asdexFont_);
         dcb_.drawText(*dcbTextBuilder,
@@ -1525,7 +1578,7 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
                       dcbFontTexture,
                       dcbLayout,
                       dcbHoverIndex);
-        dcbTextBuilder->generateCommands(commandBuffer);
+        dcbTextBuilder->generateCommands(&dcbTextBuffer);
         renderer::returnTextBuilder(dcbTextBuilder);
     }
 
@@ -1539,8 +1592,10 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
         datablockSettings.timesharePrimary = timesharePrimary_;
         datablockSettings.alertInProgress = false;
 
+        renderer::CommandBuffer& datablockBuffer = layers.layer(z::Datablocks);
+        prepareLayer(datablockBuffer, projection);
         drawDatablocks(targets_,
-                       commandBuffer,
+                       &datablockBuffer,
                        projection,
                        [this, &renderSize](QPointF worldFeet) {
                            return worldToScreenLogical(worldFeet, renderSize);
@@ -1552,8 +1607,8 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
                        listFontTexture,
                        datablockSettings);
 
-        commandBuffer->loadProjectionMatrix(projection);
-
+        renderer::CommandBuffer& listBuffer = layers.layer(z::PreviewArea);
+        prepareLayer(listBuffer, projection);
         renderer::TextBuilder* textBuilder = renderer::getTextBuilder();
         textBuilder->setFont(&asdexFont_);
 
@@ -1563,12 +1618,14 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
 
         const QStringList commandLines = activeCommandLines();
         previewArea_.render(*textBuilder, asdexFont_, listFontTexture, commandLines);
-        textBuilder->generateCommands(commandBuffer);
+        textBuilder->generateCommands(&listBuffer);
         renderer::returnTextBuilder(textBuilder);
 
         if (datablockEdit_ || dcbEntryCommand_) {
-            commandBuffer->setRgba(renderer::RGBA::fromQColor(previewArea_.textColor()));
-            commandBuffer->lineWidth(1.0f);
+            renderer::CommandBuffer& cursorBuffer = layers.layer(z::PreviewCursor);
+            prepareLayer(cursorBuffer, projection);
+            cursorBuffer.setRgba(renderer::RGBA::fromQColor(previewArea_.textColor()));
+            cursorBuffer.lineWidth(1.0f);
 
             renderer::LinesBuilder* lineBuilder = renderer::getLinesBuilder();
             if (datablockEdit_) {
@@ -1583,13 +1640,12 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
                                                  dcbEntryCommand_->cursorColumn(),
                                                  projection);
             }
-            lineBuilder->generateCommands(commandBuffer);
+            lineBuilder->generateCommands(&cursorBuffer);
             renderer::returnLinesBuilder(lineBuilder);
         }
     }
 
-    renderer_->renderCommandBuffer(commandBuffer);
-    renderer::returnCommandBuffer(commandBuffer);
+    layers.flushTo(renderer_.get());
 }
 
 DcbState AsdexScopeWidget::makeDcbState() const {
