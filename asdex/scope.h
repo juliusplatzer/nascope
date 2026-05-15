@@ -2,6 +2,7 @@
 #define ASDEX_SCOPE_H_
 
 #include "asdex/atiscache.h"
+#include "asdex/cmdsetup.h"
 #include "asdex/cmdslew.h"
 #include "asdex/lists.h"
 #include "asdex/notamcache.h"

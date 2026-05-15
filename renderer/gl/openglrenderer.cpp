@@ -1,6 +1,6 @@
-#include "renderer/gl/opengl_renderer.h"
+#include "renderer/gl/openglrenderer.h"
 
-#include "renderer/command_buffer.h"
+#include "renderer/commandbuffer.h"
 #include "renderer/gl/shaders.h"
 
 #include <QImage>

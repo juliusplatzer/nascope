@@ -1,5 +1,5 @@
-#ifndef RENDERER_GEOMETRY_TESSELLATOR_H_
-#define RENDERER_GEOMETRY_TESSELLATOR_H_
+#ifndef RENDERER_TESSELLATOR_H_
+#define RENDERER_TESSELLATOR_H_
 
 #include <QPointF>
 #include <QPolygonF>
@@ -19,4 +19,4 @@ TessellatedPolygon tessellateSimplePolygon(const QVector<QPointF>& points);
 
 } // namespace renderer
 
-#endif  // RENDERER_GEOMETRY_TESSELLATOR_H_
+#endif  // RENDERER_TESSELLATOR_H_

@@ -1,4 +1,4 @@
-#include "renderer/geometry/tessellator.h"
+#include "renderer/tessellator.h"
 
 #include <QDebug>
 
