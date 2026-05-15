@@ -24,7 +24,6 @@
 namespace asdex {
 namespace {
 
-constexpr int kTempMapAreasBrightness = 95;
 constexpr int kTempMapAreasMinBrightness = 20;
 constexpr double kAdjacentEdgeMaxDistanceFeet = 20.0;
 constexpr double kAdjacentEdgeMaxAngleDegrees = 5.0;
@@ -137,7 +136,7 @@ bool edgesAreAdjacent(const EdgeRecord& first, const EdgeRecord& second) {
     return std::max(secondLineDistanceA, secondLineDistanceB) <= kAdjacentEdgeMaxDistanceFeet;
 }
 
-QColor areaColor(TempAreaType type, bool highlighted) {
+QColor areaColor(TempAreaType type, bool highlighted, int brightness) {
     QColor base;
     if (highlighted)
         base = QColor(0, 0, 255);
@@ -146,7 +145,7 @@ QColor areaColor(TempAreaType type, bool highlighted) {
     else
         base = QColor(255, 255, 0);
 
-    return applyBrightness(base, kTempMapAreasBrightness, kTempMapAreasMinBrightness);
+    return applyBrightness(base, brightness, kTempMapAreasMinBrightness);
 }
 
 constexpr double kCrossAngleDegrees = 15.0;
@@ -462,7 +461,8 @@ void TempAreaGeometry::rebuild() const {
 void TempAreaGeometry::draw(
     renderer::CommandBuffer* commandBuffer,
     const QMatrix4x4& worldProjection,
-    const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft) const {
+    const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft,
+    int brightness) const {
     if (!commandBuffer) return;
     if (dirty_) rebuild();
     if (groups_.isEmpty()) return;
@@ -473,7 +473,7 @@ void TempAreaGeometry::draw(
         for (const AreaGroup& group : groups_) {
             if (group.meshIndices.isEmpty() || group.type != type) continue;
 
-            const QColor color = areaColor(group.type, group.highlighted);
+            const QColor color = areaColor(group.type, group.highlighted, brightness);
             const QPointF firstScreen = worldToFramebufferTopLeft(group.hatchOriginFeet);
             const float offset =
                 -std::fmod(float(firstScreen.x() + 4.0 * firstScreen.y()), 50.0f);
@@ -505,8 +505,9 @@ void TempAreaGeometry::draw(
 void drawTempAreas(const TempAreaGeometry& geometry,
                    renderer::CommandBuffer* commandBuffer,
                    const QMatrix4x4& worldProjection,
-                   const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft) {
-    geometry.draw(commandBuffer, worldProjection, worldToFramebufferTopLeft);
+                   const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft,
+                   int brightness) {
+    geometry.draw(commandBuffer, worldProjection, worldToFramebufferTopLeft, brightness);
 }
 
 } // namespace asdex

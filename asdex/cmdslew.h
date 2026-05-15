@@ -21,7 +21,34 @@ enum class CommandType {
     VectorLength,
     LeaderLength,
     MapReposition,
+    Brightness,
+    HoldBarsBrightness,
+    MovementAreasBrightness,
+    BackgroundBrightness,
+    TrackBrightness,
+    DataBlocksBrightness,
+    ListsBrightness,
+    TempMapAreasBrightness,
+    TempMapTextBrightness,
+    DcbBrightness,
 };
+
+inline bool isBrightnessValueCommand(CommandType type) {
+    switch (type) {
+    case CommandType::HoldBarsBrightness:
+    case CommandType::MovementAreasBrightness:
+    case CommandType::BackgroundBrightness:
+    case CommandType::TrackBrightness:
+    case CommandType::DataBlocksBrightness:
+    case CommandType::ListsBrightness:
+    case CommandType::TempMapAreasBrightness:
+    case CommandType::TempMapTextBrightness:
+    case CommandType::DcbBrightness:
+        return true;
+    default:
+        return false;
+    }
+}
 
 struct EditedDbFields {
     QString callsign;
@@ -84,7 +111,7 @@ class DcbEntryCommand {
 public:
     struct Spec {
         CommandType type = CommandType::None;
-        QString label;
+        QStringList headingLines;
 
         int minValue = 0;
         int maxValue = 0;
@@ -93,59 +120,88 @@ public:
         QString invalidMessage = QStringLiteral("INVALID ENTRY");
         bool numericOnly = true;
         bool wrapWheel = false;
+        QString initialEntry;
+        int wheelBaseValue = 0;
     };
 
     static DcbEntryCommand range(int currentRange) {
         Spec spec;
         spec.type = CommandType::Range;
-        spec.label = QStringLiteral("RANGE");
+        spec.headingLines = {QStringLiteral("RANGE")};
         spec.minValue = 6;
         spec.maxValue = 300;
         spec.wheelStep = 1;
         spec.invalidMessage = QStringLiteral("INVALID RANGE");
         spec.numericOnly = true;
-        return DcbEntryCommand(spec, QString::number(currentRange));
+        spec.initialEntry = QString::number(currentRange);
+        spec.wheelBaseValue = currentRange;
+        return DcbEntryCommand(spec);
     }
 
     static DcbEntryCommand rotate(int currentRotation) {
         Spec spec;
         spec.type = CommandType::Rotate;
-        spec.label = QStringLiteral("ROTATE");
+        spec.headingLines = {QStringLiteral("ROTATE")};
         spec.minValue = 0;
         spec.maxValue = 359;
         spec.wheelStep = 1;
         spec.invalidMessage = QStringLiteral("INVALID ENTRY");
         spec.numericOnly = true;
         spec.wrapWheel = true;
-        return DcbEntryCommand(spec, QString::number(currentRotation));
+        spec.initialEntry = QString::number(currentRotation);
+        spec.wheelBaseValue = currentRotation;
+        return DcbEntryCommand(spec);
     }
 
     static DcbEntryCommand vectorLength(int currentVectorLength) {
         Spec spec;
         spec.type = CommandType::VectorLength;
-        spec.label = QStringLiteral("VECTOR LENGTH");
+        spec.headingLines = {QStringLiteral("VECTOR LENGTH")};
         spec.minValue = 1;
         spec.maxValue = 20;
         spec.wheelStep = 1;
         spec.invalidMessage = QStringLiteral("INVALID ENTRY");
         spec.numericOnly = true;
-        return DcbEntryCommand(spec, QString::number(currentVectorLength));
+        spec.initialEntry = QString::number(currentVectorLength);
+        spec.wheelBaseValue = currentVectorLength;
+        return DcbEntryCommand(spec);
     }
 
     static DcbEntryCommand leaderLength(int currentLeaderLength) {
         Spec spec;
         spec.type = CommandType::LeaderLength;
-        spec.label = QStringLiteral("LDR LNG");
+        spec.headingLines = {QStringLiteral("LDR LNG")};
         spec.minValue = 0;
         spec.maxValue = 15;
         spec.wheelStep = 1;
         spec.invalidMessage = QStringLiteral("INVALID LNG");
         spec.numericOnly = true;
-        return DcbEntryCommand(spec, QString::number(currentLeaderLength));
+        spec.initialEntry = QString::number(currentLeaderLength);
+        spec.wheelBaseValue = currentLeaderLength;
+        return DcbEntryCommand(spec);
     }
 
-    QStringList displayLines() const { return {spec_.label, value_}; }
-    int cursorLine() const { return 2; }
+    static DcbEntryCommand brightness(CommandType type, QString label, int currentValue) {
+        Spec spec;
+        spec.type = type;
+        spec.headingLines = {QStringLiteral("BRITE"), std::move(label)};
+        spec.minValue = 1;
+        spec.maxValue = 99;
+        spec.wheelStep = 1;
+        spec.invalidMessage = QStringLiteral("INVALID ENTRY");
+        spec.numericOnly = true;
+        spec.initialEntry = QString();
+        spec.wheelBaseValue = currentValue;
+        return DcbEntryCommand(spec);
+    }
+
+    QStringList displayLines() const {
+        QStringList lines = spec_.headingLines;
+        lines << value_;
+        return lines;
+    }
+
+    int cursorLine() const { return spec_.headingLines.size() + 1; }
     int cursorColumn() const { return cursor_; }
     CommandType type() const { return spec_.type; }
     QString invalidMessage() const { return spec_.invalidMessage; }
@@ -214,16 +270,16 @@ public:
     }
 
 private:
-    DcbEntryCommand(Spec spec, QString initialValue)
+    explicit DcbEntryCommand(Spec spec)
         : spec_(std::move(spec)),
-          value_(std::move(initialValue)),
+          value_(spec_.initialEntry),
           cursor_(value_.size()) {}
 
     int currentOrMinimum() const {
         bool ok = false;
         const int value = value_.trimmed().toInt(&ok);
-        if (!ok) return spec_.minValue;
-        return std::clamp(value, spec_.minValue, spec_.maxValue);
+        if (ok) return std::clamp(value, spec_.minValue, spec_.maxValue);
+        return std::clamp(spec_.wheelBaseValue, spec_.minValue, spec_.maxValue);
     }
 
     Spec spec_;

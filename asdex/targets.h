@@ -18,7 +18,8 @@ void drawTargets(const QVector<AsdexTarget>& targets,
                  const QMatrix4x4& worldProjection,
                  Mode mode,
                  int vectorSeconds,
-                 bool showVectorLine);
+                 bool showVectorLine,
+                 int brightness = 95);
 
 int clampedTargetVectorSeconds(int seconds);
 

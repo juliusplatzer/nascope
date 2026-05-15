@@ -59,7 +59,8 @@ public:
     void setAreas(QVector<TempArea> areas);
     void draw(renderer::CommandBuffer* commandBuffer,
               const QMatrix4x4& worldProjection,
-              const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft) const;
+              const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft,
+              int brightness = 95) const;
 
 private:
     struct AreaMesh {
@@ -91,7 +92,8 @@ private:
 void drawTempAreas(const TempAreaGeometry& geometry,
                    renderer::CommandBuffer* commandBuffer,
                    const QMatrix4x4& worldProjection,
-                   const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft);
+                   const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft,
+                   int brightness = 95);
 
 } // namespace asdex
 

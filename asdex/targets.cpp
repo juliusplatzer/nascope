@@ -16,11 +16,11 @@ constexpr int kMinTargetVectorSeconds = 1;
 constexpr int kMaxTargetVectorSeconds = 20;
 constexpr int kHistoryColors[] = {219, 187, 161, 138, 118, 101, 87};
 
-QColor normalTargetColor() { return applyBrightness(QColor(248, 248, 248)); }
-QColor heavyTargetColor() { return applyBrightness(QColor(248, 128, 0)); }
-QColor unknownTargetColor() { return applyBrightness(QColor(0, 255, 255)); }
-QColor vectorColor() { return applyBrightness(QColor(140, 140, 140)); }
-QColor highlightColor() { return applyBrightness(QColor(255, 255, 255)); }
+QColor normalTargetColor(int brightness) { return applyBrightness(QColor(248, 248, 248), brightness); }
+QColor heavyTargetColor(int brightness) { return applyBrightness(QColor(248, 128, 0), brightness); }
+QColor unknownTargetColor(int brightness) { return applyBrightness(QColor(0, 255, 255), brightness); }
+QColor vectorColor(int brightness) { return applyBrightness(QColor(140, 140, 140), brightness); }
+QColor highlightColor(int brightness) { return applyBrightness(QColor(255, 255, 255), brightness); }
 
 QPointF transformPoint(const QPointF& point,
                        const QPointF& translate,
@@ -141,7 +141,9 @@ void addTransformedIndexed(renderer::TrianglesBuilder& builder,
     builder.addIndexed(transformed, indices);
 }
 
-void addTargetSymbols(const QVector<AsdexTarget>& targets, renderer::CommandBuffer* cb) {
+void addTargetSymbols(const QVector<AsdexTarget>& targets,
+                      renderer::CommandBuffer* cb,
+                      int brightness) {
     const QVector<QPointF> aircraftPoints = aircraftShapeFeet();
     renderer::TessellatedPolygon aircraftTess = renderer::tessellateSimplePolygon(aircraftPoints);
     if (aircraftTess.indices.isEmpty()) {
@@ -175,11 +177,11 @@ void addTargetSymbols(const QVector<AsdexTarget>& targets, renderer::CommandBuff
         }
     }
 
-    cb->setRgba(renderer::RGBA::fromQColor(normalTargetColor()));
+    cb->setRgba(renderer::RGBA::fromQColor(normalTargetColor(brightness)));
     normalBuilder->generateCommands(cb);
-    cb->setRgba(renderer::RGBA::fromQColor(heavyTargetColor()));
+    cb->setRgba(renderer::RGBA::fromQColor(heavyTargetColor(brightness)));
     heavyBuilder->generateCommands(cb);
-    cb->setRgba(renderer::RGBA::fromQColor(unknownTargetColor()));
+    cb->setRgba(renderer::RGBA::fromQColor(unknownTargetColor(brightness)));
     unknownBuilder->generateCommands(cb);
 
     renderer::returnTrianglesBuilder(unknownBuilder);
@@ -198,7 +200,8 @@ void drawTargets(const QVector<AsdexTarget>& targets,
                  const QMatrix4x4& worldProjection,
                  Mode mode,
                  int vectorSeconds,
-                 bool showVectorLine) {
+                 bool showVectorLine,
+                 int brightness) {
     Q_UNUSED(mode);
     if (!commandBuffer) return;
 
@@ -225,7 +228,8 @@ void drawTargets(const QVector<AsdexTarget>& targets,
             }
         }
         const int value = kHistoryColors[colorIndex];
-        commandBuffer->setRgba(renderer::RGBA::fromQColor(applyBrightness(QColor(value, value, value))));
+        commandBuffer->setRgba(
+            renderer::RGBA::fromQColor(applyBrightness(QColor(value, value, value), brightness)));
         builder->generateCommands(commandBuffer);
         renderer::returnTrianglesBuilder(builder);
     }
@@ -241,12 +245,12 @@ void drawTargets(const QVector<AsdexTarget>& targets,
             transformed.push_back(target.positionFeet + point * (target.heavy ? 1.5 : 1.0));
         ringBuilder->addLineStrip(transformed);
     }
-    commandBuffer->setRgba(renderer::RGBA::fromQColor(highlightColor()));
+    commandBuffer->setRgba(renderer::RGBA::fromQColor(highlightColor(brightness)));
     commandBuffer->lineWidth(1.0f);
     ringBuilder->generateCommands(commandBuffer);
     renderer::returnLinesBuilder(ringBuilder);
 
-    addTargetSymbols(targets, commandBuffer);
+    addTargetSymbols(targets, commandBuffer, brightness);
 
     if (showVectorLine) {
         renderer::LinesBuilder* vectorBuilder = renderer::getLinesBuilder();
@@ -258,7 +262,7 @@ void drawTargets(const QVector<AsdexTarget>& targets,
                                                  target.groundTrackDegrees,
                                                  vectorSeconds));
         }
-        commandBuffer->setRgba(renderer::RGBA::fromQColor(vectorColor()));
+        commandBuffer->setRgba(renderer::RGBA::fromQColor(vectorColor(brightness)));
         commandBuffer->lineWidth(1.0f);
         vectorBuilder->generateCommands(commandBuffer);
         renderer::returnLinesBuilder(vectorBuilder);
