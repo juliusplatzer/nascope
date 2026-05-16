@@ -58,7 +58,7 @@ DcbEntryCommand DcbEntryCommand::range(int currentRange) {
     spec.wheelStep = 1;
     spec.invalidMessage = QStringLiteral("INVALID RANGE");
     spec.numericOnly = true;
-    spec.initialEntry = QString::number(currentRange);
+    spec.initialEntry = QString();
     spec.wheelBaseValue = currentRange;
     return DcbEntryCommand(spec);
 }
@@ -73,7 +73,7 @@ DcbEntryCommand DcbEntryCommand::rotate(int currentRotation) {
     spec.invalidMessage = QStringLiteral("INVALID ENTRY");
     spec.numericOnly = true;
     spec.wrapWheel = true;
-    spec.initialEntry = QString::number(currentRotation);
+    spec.initialEntry = QString();
     spec.wheelBaseValue = currentRotation;
     return DcbEntryCommand(spec);
 }
@@ -87,7 +87,7 @@ DcbEntryCommand DcbEntryCommand::vectorLength(int currentVectorLength) {
     spec.wheelStep = 1;
     spec.invalidMessage = QStringLiteral("INVALID ENTRY");
     spec.numericOnly = true;
-    spec.initialEntry = QString::number(currentVectorLength);
+    spec.initialEntry = QString();
     spec.wheelBaseValue = currentVectorLength;
     return DcbEntryCommand(spec);
 }
@@ -101,7 +101,7 @@ DcbEntryCommand DcbEntryCommand::leaderLength(int currentLeaderLength) {
     spec.wheelStep = 1;
     spec.invalidMessage = QStringLiteral("INVALID LNG");
     spec.numericOnly = true;
-    spec.initialEntry = QString::number(currentLeaderLength);
+    spec.initialEntry = QString();
     spec.wheelBaseValue = currentLeaderLength;
     return DcbEntryCommand(spec);
 }
