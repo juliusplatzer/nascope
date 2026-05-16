@@ -31,6 +31,7 @@ enum class DcbPosition {
 enum class DcbMenu {
     Main,
     Brightness,
+    CharSize,
     Off,
 };
 
@@ -80,6 +81,11 @@ enum class DcbFunction {
     TempMapAreasBrightness,
     TempMapTextBrightness,
     DcbBrightness,
+    DataBlockCharSize,
+    DcbCharSize,
+    CoastSuspendCharSize,
+    TempDataCharSize,
+    PreviewAreaCharSize,
     Done,
     Vacant,
 };
@@ -144,6 +150,12 @@ struct DcbState {
     int tempMapAreasBrightness = 95;
     int tempMapTextBrightness = 95;
     int dcbBrightness = 95;
+
+    int dataBlockCharSize = 2;
+    int dcbCharSize = 2;
+    int coastSuspendCharSize = 2;
+    int tempDataCharSize = 2;
+    int previewAreaCharSize = 2;
 };
 
 class Dcb {
@@ -196,6 +208,7 @@ public:
 private:
     static QVector<DcbButtonSpec> mainButtonSpecs(const DcbState& state);
     static QVector<DcbButtonSpec> brightnessButtonSpecs(const DcbState& state);
+    static QVector<DcbButtonSpec> charSizeButtonSpecs(const DcbState& state);
     static QVector<DcbButtonSpec> offButtonSpecs(const DcbState& state);
     static bool isHorizontal(DcbPosition position);
     static bool isLargeFunction(DcbFunction function);

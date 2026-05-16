@@ -128,6 +128,11 @@ bool Dcb::isLargeFunction(DcbFunction function) {
     case DcbFunction::TempMapAreasBrightness:
     case DcbFunction::TempMapTextBrightness:
     case DcbFunction::DcbBrightness:
+    case DcbFunction::DataBlockCharSize:
+    case DcbFunction::DcbCharSize:
+    case DcbFunction::CoastSuspendCharSize:
+    case DcbFunction::TempDataCharSize:
+    case DcbFunction::PreviewAreaCharSize:
     case DcbFunction::Done:
     case DcbFunction::Vacant:
         return true;
@@ -295,6 +300,58 @@ QVector<DcbButtonSpec> Dcb::brightnessButtonSpecs(const DcbState& state) {
     return out;
 }
 
+QVector<DcbButtonSpec> Dcb::charSizeButtonSpecs(const DcbState& state) {
+    QVector<DcbButtonSpec> out;
+    out.reserve(14);
+
+    auto vacant = [&out]() {
+        DcbButtonSpec button;
+        button.function = DcbFunction::Vacant;
+        button.kind = DcbButtonKind::Vacant;
+        button.large = true;
+        out.push_back(std::move(button));
+    };
+
+    auto value = [&out](DcbFunction function, QStringList lines, int value) {
+        DcbButtonSpec button;
+        button.function = function;
+        button.kind = DcbButtonKind::Value;
+        button.lines = std::move(lines);
+        button.large = true;
+        button.value = value;
+        button.showValue = true;
+        out.push_back(std::move(button));
+    };
+
+    auto normal = [&out](DcbFunction function, QStringList lines) {
+        DcbButtonSpec button;
+        button.function = function;
+        button.kind = DcbButtonKind::Normal;
+        button.lines = std::move(lines);
+        button.large = true;
+        out.push_back(std::move(button));
+    };
+
+    vacant();
+    vacant();
+    vacant();
+    vacant();
+    value(DcbFunction::DataBlockCharSize, {"DATA", "BLOCK"}, state.dataBlockCharSize);
+    value(DcbFunction::DcbCharSize, {"DCB"}, state.dcbCharSize);
+    value(DcbFunction::CoastSuspendCharSize,
+          {"COAST", "SUSPEND"},
+          state.coastSuspendCharSize);
+    value(DcbFunction::TempDataCharSize, {"TEMP DATA"}, state.tempDataCharSize);
+    value(DcbFunction::PreviewAreaCharSize, {"PREVIEW", "AREA"}, state.previewAreaCharSize);
+    normal(DcbFunction::Done, {"DONE"});
+    vacant();
+    vacant();
+    vacant();
+    vacant();
+
+    return out;
+}
+
 QSize Dcb::buttonSizeForFont(const renderer::BitmapFont& font, int autoSize) {
     const QSize charSize = font.charSize(autoSize);
     const int charHeight = std::max(1, charSize.height());
@@ -354,6 +411,7 @@ DcbLayout Dcb::layout(QSize displaySize,
 
     const QVector<DcbButtonSpec> specs =
         menu_ == DcbMenu::Brightness ? brightnessButtonSpecs(state)
+        : menu_ == DcbMenu::CharSize ? charSizeButtonSpecs(state)
                                      : offMenu ? offButtonSpecs(state) : mainButtonSpecs(state);
 
     int row = 1;

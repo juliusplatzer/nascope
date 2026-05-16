@@ -10,6 +10,7 @@
 namespace asdex {
 
 bool isBrightnessValueCommand(CommandType type);
+bool isCharSizeValueCommand(CommandType type);
 
 class DcbEntryCommand {
 public:
@@ -33,6 +34,7 @@ public:
     static DcbEntryCommand vectorLength(int currentVectorLength);
     static DcbEntryCommand leaderLength(int currentLeaderLength);
     static DcbEntryCommand brightness(CommandType type, QString label, int currentValue);
+    static DcbEntryCommand charSize(CommandType type, QString label, int currentValue);
 
     QStringList displayLines() const;
     int cursorLine() const;
