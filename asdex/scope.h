@@ -92,6 +92,7 @@ private:
     void startCharSizeMenu();
     void startCharSizeValueCommand(DcbFunction function);
     void startDbAreaMenu();
+    void startDbEditMenu();
     void startDefineTraitAreaCommand();
     void startDefineOffAreaCommand();
     void startModifyTraitAreaCommand();
@@ -104,6 +105,7 @@ private:
     bool deleteDbAreaAt(const QPointF& logicalPoint);
     bool showsDbAreas() const;
     std::optional<DcbFunction> activeDcbFunctionForCommand() const;
+    void toggleDbEditField(DcbFunction function);
     bool targetInsideDbOffArea(const AsdexTarget& target) const;
     void addDbAreaPoint(const QPointF& worldFeet);
     void completeDbAreaPolygon();
@@ -231,6 +233,14 @@ private:
     int coastSuspendCharSize_ = 2;
     int tempDataCharSize_ = 2;
     int previewAreaCharSize_ = 2;
+    bool fullDataBlocks_ = true;
+    bool showAltitudeInDb_ = false;
+    bool showAircraftTypeInDb_ = true;
+    bool showSensorsInDb_ = false;
+    bool showAircraftCategoryInDb_ = false;
+    bool showFixInDb_ = true;
+    bool showVelocityInDb_ = false;
+    bool showScratchpadsInDb_ = true;
     CursorMode currentCursorMode_ = CursorMode::Hidden;
     bool fontLoaded_ = false;
     bool fontTexturesReady_ = false;

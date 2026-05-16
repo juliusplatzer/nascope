@@ -138,6 +138,8 @@ bool Dcb::isLargeFunction(DcbFunction function) {
     case DcbFunction::ModifyDbTraitArea:
     case DcbFunction::DeleteAllDbAreas:
     case DcbFunction::DeleteOneDbArea:
+    case DcbFunction::DbFullPart:
+    case DcbFunction::DbScratchpadOnOff:
     case DcbFunction::Done:
     case DcbFunction::Vacant:
         return true;
@@ -396,6 +398,64 @@ QVector<DcbButtonSpec> Dcb::dbAreaButtonSpecs() {
     return out;
 }
 
+QVector<DcbButtonSpec> Dcb::dbEditButtonSpecs(const DcbState& state) {
+    QVector<DcbButtonSpec> out;
+    out.reserve(17);
+
+    auto vacant = [&out]() {
+        DcbButtonSpec button;
+        button.function = DcbFunction::Vacant;
+        button.kind = DcbButtonKind::Vacant;
+        button.large = true;
+        out.push_back(std::move(button));
+    };
+
+    auto toggle = [&out](DcbFunction function,
+                         QStringList lines,
+                         bool on,
+                         QString onLabel = QStringLiteral("ON"),
+                         QString offLabel = QStringLiteral("OFF")) {
+        DcbButtonSpec button;
+        button.function = function;
+        button.kind = DcbButtonKind::Toggle;
+        button.lines = std::move(lines);
+        button.large = isLargeFunction(function);
+        button.toggleOn = on;
+        button.onLabel = std::move(onLabel);
+        button.offLabel = std::move(offLabel);
+        out.push_back(std::move(button));
+    };
+
+    auto normal = [&out](DcbFunction function, QStringList lines) {
+        DcbButtonSpec button;
+        button.function = function;
+        button.kind = DcbButtonKind::Normal;
+        button.lines = std::move(lines);
+        button.large = isLargeFunction(function);
+        out.push_back(std::move(button));
+    };
+
+    vacant();
+    vacant();
+    vacant();
+    vacant();
+    toggle(DcbFunction::DbFullPart, {}, state.fullDataBlocks, "FULL", "PART");
+    toggle(DcbFunction::DbAltitudeOnOff, {"ALTITUDE"}, state.showAltitudeInDb);
+    toggle(DcbFunction::DbTypeOnOff, {"TYPE"}, state.showAircraftTypeInDb);
+    toggle(DcbFunction::DbSensorsOnOff, {"SENSORS"}, state.showSensorsInDb);
+    toggle(DcbFunction::DbCategoryOnOff, {"CAT"}, state.showAircraftCategoryInDb);
+    toggle(DcbFunction::DbFixOnOff, {"FIX"}, state.showFixInDb);
+    toggle(DcbFunction::DbVelocityOnOff, {"VELOCITY"}, state.showVelocityInDb);
+    toggle(DcbFunction::DbScratchpadOnOff, {"SCRATCH", "PAD"}, state.showScratchpadsInDb);
+    normal(DcbFunction::Done, {"DONE"});
+    vacant();
+    vacant();
+    vacant();
+    vacant();
+
+    return out;
+}
+
 QSize Dcb::buttonSizeForFont(const renderer::BitmapFont& font, int autoSize) {
     const QSize charSize = font.charSize(autoSize);
     const int charHeight = std::max(1, charSize.height());
@@ -457,6 +517,7 @@ DcbLayout Dcb::layout(QSize displaySize,
         menu_ == DcbMenu::Brightness ? brightnessButtonSpecs(state)
         : menu_ == DcbMenu::CharSize ? charSizeButtonSpecs(state)
         : menu_ == DcbMenu::DbArea ? dbAreaButtonSpecs()
+        : menu_ == DcbMenu::DbEdit ? dbEditButtonSpecs(state)
                                      : offMenu ? offButtonSpecs(state) : mainButtonSpecs(state);
 
     int row = 1;

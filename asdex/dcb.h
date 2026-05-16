@@ -33,6 +33,7 @@ enum class DcbMenu {
     Brightness,
     CharSize,
     DbArea,
+    DbEdit,
     Off,
 };
 
@@ -92,6 +93,14 @@ enum class DcbFunction {
     ModifyDbTraitArea,
     DeleteAllDbAreas,
     DeleteOneDbArea,
+    DbFullPart,
+    DbAltitudeOnOff,
+    DbTypeOnOff,
+    DbSensorsOnOff,
+    DbCategoryOnOff,
+    DbFixOnOff,
+    DbVelocityOnOff,
+    DbScratchpadOnOff,
     Done,
     Vacant,
 };
@@ -164,6 +173,15 @@ struct DcbState {
     int tempDataCharSize = 2;
     int previewAreaCharSize = 2;
 
+    bool fullDataBlocks = true;
+    bool showAltitudeInDb = false;
+    bool showAircraftTypeInDb = true;
+    bool showSensorsInDb = false;
+    bool showAircraftCategoryInDb = false;
+    bool showFixInDb = true;
+    bool showVelocityInDb = false;
+    bool showScratchpadsInDb = true;
+
     std::optional<DcbFunction> activeFunction;
 };
 
@@ -219,6 +237,7 @@ private:
     static QVector<DcbButtonSpec> brightnessButtonSpecs(const DcbState& state);
     static QVector<DcbButtonSpec> charSizeButtonSpecs(const DcbState& state);
     static QVector<DcbButtonSpec> dbAreaButtonSpecs();
+    static QVector<DcbButtonSpec> dbEditButtonSpecs(const DcbState& state);
     static QVector<DcbButtonSpec> offButtonSpecs(const DcbState& state);
     static bool isHorizontal(DcbPosition position);
     static bool isLargeFunction(DcbFunction function);

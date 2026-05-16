@@ -684,6 +684,7 @@ void AsdexScopeWidget::keyPressEvent(QKeyEvent* event) {
 
     if ((commandType_ == CommandType::Brightness
          || commandType_ == CommandType::CharSize
+         || commandType_ == CommandType::DbEdit
          || isDbAreaCommand(commandType_))
         && event->key() == Qt::Key_Escape) {
         cancelCommand();
@@ -1183,6 +1184,8 @@ DcbMenu AsdexScopeWidget::currentDcbMenu() const {
 
     if (isDbAreaCommand(commandType_)) return DcbMenu::DbArea;
 
+    if (commandType_ == CommandType::DbEdit) return DcbMenu::DbEdit;
+
     return DcbMenu::Main;
 }
 
@@ -1263,6 +1266,9 @@ void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
         case DcbFunction::DataBlockArea:
             startDbAreaMenu();
             return;
+        case DcbFunction::DataBlockEdit:
+            startDbEditMenu();
+            return;
         case DcbFunction::Brightness:
             startBrightnessMenu();
             return;
@@ -1301,6 +1307,16 @@ void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
             return;
         case DcbFunction::DeleteOneDbArea:
             startDeleteOneDbAreaCommand();
+            return;
+        case DcbFunction::DbFullPart:
+        case DcbFunction::DbAltitudeOnOff:
+        case DcbFunction::DbTypeOnOff:
+        case DcbFunction::DbSensorsOnOff:
+        case DcbFunction::DbCategoryOnOff:
+        case DcbFunction::DbFixOnOff:
+        case DcbFunction::DbVelocityOnOff:
+        case DcbFunction::DbScratchpadOnOff:
+            toggleDbEditField(function);
             return;
         case DcbFunction::Done:
             handleDcbDone();
@@ -1416,6 +1432,22 @@ void AsdexScopeWidget::startDbAreaMenu() {
     update();
 }
 
+void AsdexScopeWidget::startDbEditMenu() {
+    if (commandType_ != CommandType::None) return;
+
+    commandType_ = CommandType::DbEdit;
+    dcb_.setMenu(DcbMenu::DbEdit);
+    datablockEdit_.reset();
+    dcbEntryCommand_.reset();
+    editingTrackId_.clear();
+    clearDbAreaDraft();
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Scope);
+    update();
+}
+
 void AsdexScopeWidget::startDefineTraitAreaCommand() {
     commandType_ = CommandType::DefineTraitArea;
     dcb_.setMenu(DcbMenu::DbArea);
@@ -1520,6 +1552,40 @@ bool AsdexScopeWidget::showsDbAreas() const {
     return isDbAreaCommand(commandType_);
 }
 
+void AsdexScopeWidget::toggleDbEditField(DcbFunction function) {
+    switch (function) {
+        case DcbFunction::DbFullPart:
+            fullDataBlocks_ = !fullDataBlocks_;
+            break;
+        case DcbFunction::DbAltitudeOnOff:
+            showAltitudeInDb_ = !showAltitudeInDb_;
+            break;
+        case DcbFunction::DbTypeOnOff:
+            showAircraftTypeInDb_ = !showAircraftTypeInDb_;
+            break;
+        case DcbFunction::DbSensorsOnOff:
+            showSensorsInDb_ = !showSensorsInDb_;
+            break;
+        case DcbFunction::DbCategoryOnOff:
+            showAircraftCategoryInDb_ = !showAircraftCategoryInDb_;
+            break;
+        case DcbFunction::DbFixOnOff:
+            showFixInDb_ = !showFixInDb_;
+            break;
+        case DcbFunction::DbVelocityOnOff:
+            showVelocityInDb_ = !showVelocityInDb_;
+            break;
+        case DcbFunction::DbScratchpadOnOff:
+            showScratchpadsInDb_ = !showScratchpadsInDb_;
+            break;
+        default:
+            return;
+    }
+
+    clearDcbHover();
+    update();
+}
+
 std::optional<DcbFunction> AsdexScopeWidget::activeDcbFunctionForCommand() const {
     switch (commandType_) {
         case CommandType::Brightness:
@@ -1536,6 +1602,8 @@ std::optional<DcbFunction> AsdexScopeWidget::activeDcbFunctionForCommand() const
             return DcbFunction::ModifyDbTraitArea;
         case CommandType::DeleteOneDbArea:
             return DcbFunction::DeleteOneDbArea;
+        case CommandType::DbEdit:
+            return DcbFunction::DataBlockEdit;
         default:
             return std::nullopt;
     }
@@ -2069,6 +2137,7 @@ QStringList AsdexScopeWidget::activeCommandLines() const {
     if (isMapRepositionCommandActive()) return {QStringLiteral("MAP RPOS")};
     if (commandType_ == CommandType::Brightness) return {QStringLiteral("BRITE")};
     if (commandType_ == CommandType::CharSize) return {QStringLiteral("CHAR SIZE")};
+    if (commandType_ == CommandType::DbEdit) return {QStringLiteral("DB EDIT")};
 
     switch (commandType_) {
         case CommandType::DbArea:
@@ -2195,12 +2264,21 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
     const std::uint32_t datablockFontTexture = fontTextureId(dataBlockCharSize_);
     if (fontTexturesReady_ && datablockFontTexture != 0) {
         DataBlockSettings datablockSettings;
+        datablockSettings.showDataBlocks = showDataBlocks_;
+        datablockSettings.fullDataBlocks = fullDataBlocks_;
         datablockSettings.fontSize = dataBlockCharSize_;
         datablockSettings.brightness = dataBlocksBrightness_;
         datablockSettings.leaderLength = currentLeaderLengthValue();
         datablockSettings.leaderDirection = LeaderDirection::NE;
         datablockSettings.timesharePrimary = timesharePrimary_;
         datablockSettings.alertInProgress = false;
+        datablockSettings.showAltitude = showAltitudeInDb_;
+        datablockSettings.showAircraftType = showAircraftTypeInDb_;
+        datablockSettings.showSensors = showSensorsInDb_;
+        datablockSettings.showAircraftCategory = showAircraftCategoryInDb_;
+        datablockSettings.showFix = showFixInDb_;
+        datablockSettings.showVelocity = showVelocityInDb_;
+        datablockSettings.showScratchpads = showScratchpadsInDb_;
 
         renderer::CommandBuffer& datablockBuffer = layers.layer(z::Datablocks);
         prepareLayer(datablockBuffer, projection);
@@ -2297,6 +2375,14 @@ DcbState AsdexScopeWidget::makeDcbState() const {
     state.coastSuspendCharSize = coastSuspendCharSize_;
     state.tempDataCharSize = tempDataCharSize_;
     state.previewAreaCharSize = previewAreaCharSize_;
+    state.fullDataBlocks = fullDataBlocks_;
+    state.showAltitudeInDb = showAltitudeInDb_;
+    state.showAircraftTypeInDb = showAircraftTypeInDb_;
+    state.showSensorsInDb = showSensorsInDb_;
+    state.showAircraftCategoryInDb = showAircraftCategoryInDb_;
+    state.showFixInDb = showFixInDb_;
+    state.showVelocityInDb = showVelocityInDb_;
+    state.showScratchpadsInDb = showScratchpadsInDb_;
     state.activeFunction = activeDcbFunctionForCommand();
     return state;
 }

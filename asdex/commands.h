@@ -44,6 +44,8 @@ enum class CommandType {
     ModifyTraitArea,
     DeleteAllDbAreas,
     DeleteOneDbArea,
+
+    DbEdit,
 };
 
 }  // namespace asdex

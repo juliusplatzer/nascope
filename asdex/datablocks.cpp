@@ -143,6 +143,19 @@ BuiltDataBlock buildDataBlock(const AsdexTarget& target,
     BuiltDataBlock out;
     out.lines << (target.duplicateBeaconCode ? QStringLiteral("DUP BCN") : QString());
 
+    if (!settings.fullDataBlocks) {
+        QString partial;
+        if (!target.callsign.trimmed().isEmpty())
+            partial = target.callsign.trimmed();
+        else
+            partial = beaconOrNoBeacon(target.beaconCode);
+
+        out.lines << partial;
+        updateMeasuredWidth(out, out.lines.value(0), 0, settings.fontSize, font);
+        updateMeasuredWidth(out, partial, 1, settings.fontSize, font);
+        return out;
+    }
+
     QString line1;
     if (!target.callsign.trimmed().isEmpty())
         line1 = target.callsign.trimmed();
@@ -238,7 +251,7 @@ void drawDatablocks(const QVector<AsdexTarget>& targets,
                     const renderer::BitmapFont& font,
                     std::uint32_t fontTextureId,
                     const DataBlockSettings& settings) {
-    if (!commandBuffer || !settings.showDataBlocks || fontTextureId == 0) return;
+    if (!commandBuffer || fontTextureId == 0) return;
 
     renderer::LinesBuilder* lineBuilder = renderer::getLinesBuilder();
     renderer::TextBuilder* textBuilder = renderer::getTextBuilder();
@@ -246,7 +259,11 @@ void drawDatablocks(const QVector<AsdexTarget>& targets,
 
     for (const AsdexTarget& target : targets) {
         if (!target.correlated) continue;
-        if (isVisible && !isVisible(target)) continue;
+        if (isVisible) {
+            if (!isVisible(target)) continue;
+        } else if (!settings.showDataBlocks) {
+            continue;
+        }
         drawOneDataBlock(target,
                          worldToScreen(target.positionFeet),
                          *lineBuilder,
