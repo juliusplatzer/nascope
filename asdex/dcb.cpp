@@ -468,8 +468,11 @@ DcbLayout Dcb::layout(QSize displaySize,
                                         : (2 * kButtonSpacing + buttonSize.height()));
         const int height =
             spec.large ? (buttonSize.height() * 2 + kButtonSpacing) : buttonSize.height();
+        const bool active =
+            state.activeFunction.has_value() && *state.activeFunction == spec.function;
 
-        out.buttons.push_back(DcbButtonLayout{spec, QRectF(x, y, buttonSize.width(), height)});
+        out.buttons.push_back(
+            DcbButtonLayout{spec, QRectF(x, y, buttonSize.width(), height), active});
 
         if (row == 2 || (row == 1 && spec.large)) {
             ++column;
@@ -574,6 +577,7 @@ void Dcb::drawText(renderer::TextBuilder& textBuilder,
     for (int buttonIndex = 0; buttonIndex < layout.buttons.size(); ++buttonIndex) {
         const DcbButtonLayout& button = layout.buttons[buttonIndex];
         const bool hovered = buttonIndex == hoveredButtonIndex;
+        const bool active = button.active;
 
         const QVector<DcbTextLine> lines = displayTextLinesForButton(button.spec);
         if (lines.isEmpty()) continue;
@@ -590,8 +594,8 @@ void Dcb::drawText(renderer::TextBuilder& textBuilder,
                 renderer::TextStyle style;
                 style.size = layout.renderFontSize;
                 style.background = Qt::transparent;
-                style.color = fragment.active ? textColor(true, false)
-                                              : textColor(false, hovered);
+                style.color = fragment.active || active ? textColor(true, false)
+                                                        : textColor(false, hovered);
 
                 textBuilder.addText(QStringView(fragment.text), QPointF(x, y), style, fontTextureId);
                 x += font.measureText(QStringView(fragment.text), layout.renderFontSize).width();

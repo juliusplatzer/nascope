@@ -9,6 +9,7 @@ add_library(nascope_asdex STATIC
     cmdslew.cpp
     cursors.cpp
     dcb.cpp
+    dbareas.cpp
     videomaps.cpp
     tempdata.cpp
     targets.cpp

@@ -14,6 +14,7 @@
 #include <QCursor>
 #include <QDebug>
 #include <QSurfaceFormat>
+#include <QUuid>
 #include <QtGlobal>
 
 #include <algorithm>
@@ -39,6 +40,7 @@ constexpr int RunwayClosures = -800;
 
 constexpr int RestrictedArea = -700;
 constexpr int ClosedArea = -690;
+constexpr int DbAreas = -600;
 
 constexpr int Targets = -500;
 constexpr int Datablocks = -480;
@@ -269,6 +271,20 @@ void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
         return;
     }
 
+    if (commandType_ == CommandType::DefineOffArea) {
+        if (event->button() == Qt::LeftButton) {
+            addDbAreaPoint(screenToWorldFeet(event->position(), framebufferRenderSize()));
+            event->accept();
+            return;
+        }
+
+        if (event->button() == Qt::MiddleButton) {
+            completeDbAreaPolygon();
+            event->accept();
+            return;
+        }
+    }
+
     if (event->button() == Qt::RightButton) {
         clearDcbHover();
         panning_ = true;
@@ -339,6 +355,16 @@ void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
         clearHighlightedTarget();
         updateDcbHover(event->position());
         setAsdexCursor(CursorMode::Dcb);
+        event->accept();
+        return;
+    }
+
+    if (isDrawingDbArea()) {
+        dbAreaDraftMouse_ = screenToWorldFeet(event->position(), framebufferRenderSize());
+        clearHighlightedTarget();
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Scope);
+        update();
         event->accept();
         return;
     }
@@ -437,6 +463,12 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
         updateDcbHover(event->position());
         setAsdexCursor(CursorMode::Dcb);
         update();
+        event->accept();
+        return;
+    }
+
+    if (isDrawingDbArea()
+        && (event->button() == Qt::LeftButton || event->button() == Qt::MiddleButton)) {
         event->accept();
         return;
     }
@@ -897,6 +929,27 @@ void AsdexScopeWidget::cancelCommand() {
         return;
     }
 
+    if (isDbAreaCommand(commandType_)) {
+        clearDbAreaDraft();
+
+        if (commandType_ != CommandType::DbArea) {
+            commandType_ = CommandType::DbArea;
+            dcb_.setMenu(DcbMenu::DbArea);
+        } else {
+            commandType_ = CommandType::None;
+            dcb_.setMenu(currentDcbMenu());
+        }
+
+        dcbEntryCommand_.reset();
+        editingTrackId_.clear();
+        previewArea_.setSystemResponse({});
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Scope);
+        clearHighlightedTarget();
+        update();
+        return;
+    }
+
     if (isBrightnessValueCommand(commandType_)
         || (dcbEntryCommand_ && isBrightnessValueCommand(dcbEntryCommand_->type()))) {
         commandType_ = CommandType::Brightness;
@@ -1083,7 +1136,15 @@ bool AsdexScopeWidget::defaultDataBlockVisibleForTarget(const AsdexTarget& targe
     return showDataBlocks_;
 }
 
+bool AsdexScopeWidget::targetInsideDbOffArea(const AsdexTarget& target) const {
+    return dbAreaStore_.pointInsideOffArea(target.positionFeet);
+}
+
 bool AsdexScopeWidget::isDataBlockVisible(const AsdexTarget& target) const {
+    if (targetInsideDbOffArea(target)) {
+        return dbOffAreaDatablockOverride_.value(target.id, false);
+    }
+
     const DataBlockVisibility visibility =
         datablockVisibility_.value(target.id, DataBlockVisibility::Inherit);
 
@@ -1100,6 +1161,12 @@ bool AsdexScopeWidget::isDataBlockVisible(const AsdexTarget& target) const {
 }
 
 void AsdexScopeWidget::toggleDataBlockForTarget(const AsdexTarget& target) {
+    if (targetInsideDbOffArea(target)) {
+        const bool current = dbOffAreaDatablockOverride_.value(target.id, false);
+        dbOffAreaDatablockOverride_[target.id] = !current;
+        return;
+    }
+
     const DataBlockVisibility current =
         datablockVisibility_.value(target.id, DataBlockVisibility::Inherit);
 
@@ -1286,6 +1353,7 @@ void AsdexScopeWidget::startDbAreaMenu() {
     datablockEdit_.reset();
     dcbEntryCommand_.reset();
     editingTrackId_.clear();
+    clearDbAreaDraft();
     clearHighlightedTarget();
     clearDcbHover();
     previewArea_.setSystemResponse(QString());
@@ -1296,6 +1364,7 @@ void AsdexScopeWidget::startDbAreaMenu() {
 void AsdexScopeWidget::startDefineTraitAreaCommand() {
     commandType_ = CommandType::DefineTraitArea;
     dcb_.setMenu(DcbMenu::DbArea);
+    clearDbAreaDraft();
     clearHighlightedTarget();
     clearDcbHover();
     previewArea_.setSystemResponse(QString());
@@ -1306,6 +1375,7 @@ void AsdexScopeWidget::startDefineTraitAreaCommand() {
 void AsdexScopeWidget::startDefineOffAreaCommand() {
     commandType_ = CommandType::DefineOffArea;
     dcb_.setMenu(DcbMenu::DbArea);
+    clearDbAreaDraft();
     clearHighlightedTarget();
     clearDcbHover();
     previewArea_.setSystemResponse(QString());
@@ -1316,6 +1386,7 @@ void AsdexScopeWidget::startDefineOffAreaCommand() {
 void AsdexScopeWidget::startModifyTraitAreaCommand() {
     commandType_ = CommandType::ModifyTraitArea;
     dcb_.setMenu(DcbMenu::DbArea);
+    clearDbAreaDraft();
     clearHighlightedTarget();
     clearDcbHover();
     previewArea_.setSystemResponse(QString());
@@ -1326,6 +1397,7 @@ void AsdexScopeWidget::startModifyTraitAreaCommand() {
 void AsdexScopeWidget::startDeleteAllDbAreasCommand() {
     commandType_ = CommandType::DeleteAllDbAreas;
     dcb_.setMenu(DcbMenu::DbArea);
+    clearDbAreaDraft();
     clearHighlightedTarget();
     clearDcbHover();
     previewArea_.setSystemResponse(QString());
@@ -1336,11 +1408,166 @@ void AsdexScopeWidget::startDeleteAllDbAreasCommand() {
 void AsdexScopeWidget::startDeleteOneDbAreaCommand() {
     commandType_ = CommandType::DeleteOneDbArea;
     dcb_.setMenu(DcbMenu::DbArea);
+    clearDbAreaDraft();
     clearHighlightedTarget();
     clearDcbHover();
     previewArea_.setSystemResponse(QString());
     setAsdexCursor(CursorMode::Scope);
     update();
+}
+
+bool AsdexScopeWidget::isDrawingDbArea() const {
+    return commandType_ == CommandType::DefineOffArea;
+}
+
+bool AsdexScopeWidget::showsDbAreas() const {
+    return isDbAreaCommand(commandType_);
+}
+
+std::optional<DcbFunction> AsdexScopeWidget::activeDcbFunctionForCommand() const {
+    switch (commandType_) {
+        case CommandType::Brightness:
+            return DcbFunction::Brightness;
+        case CommandType::CharSize:
+            return DcbFunction::CharSize;
+        case CommandType::DbArea:
+            return DcbFunction::DataBlockArea;
+        case CommandType::DefineTraitArea:
+            return DcbFunction::DefineDbTraitArea;
+        case CommandType::DefineOffArea:
+            return DcbFunction::DefineDbOffArea;
+        case CommandType::ModifyTraitArea:
+            return DcbFunction::ModifyDbTraitArea;
+        case CommandType::DeleteAllDbAreas:
+            return DcbFunction::DeleteAllDbAreas;
+        case CommandType::DeleteOneDbArea:
+            return DcbFunction::DeleteOneDbArea;
+        default:
+            return std::nullopt;
+    }
+}
+
+void AsdexScopeWidget::addDbAreaPoint(const QPointF& worldFeet) {
+    if (dbAreaDraftWouldSelfIntersect(worldFeet)
+        || dbAreaDraftWouldOverlapExisting(worldFeet)) {
+        update();
+        return;
+    }
+
+    dbAreaDraftPoints_.push_back(worldFeet);
+    dbAreaDraftMouse_.reset();
+
+    if (dbAreaDraftPoints_.size() >= 20) {
+        completeDbAreaPolygon();
+        return;
+    }
+
+    update();
+}
+
+void AsdexScopeWidget::completeDbAreaPolygon() {
+    if (dbAreaDraftPoints_.size() < 3) {
+        clearDbAreaDraft();
+        previewArea_.setSystemResponse(QStringLiteral("BAD POLYGON,REDRAW POINT"));
+        update();
+        return;
+    }
+
+    if (!dbAreaPolygonIsValidOnClose()) {
+        update();
+        return;
+    }
+
+    QVector<QPointF> closed = dbAreaDraftPoints_;
+    closed.push_back(closed.first());
+
+    DbArea area;
+    area.id =
+        QStringLiteral("db-off-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    area.kind = DbAreaKind::Off;
+    area.traits.dataBlocksOff = true;
+    area.polygonFeet = std::move(closed);
+
+    dbAreaStore_.add(std::move(area));
+    clearDbAreaDraft();
+
+    commandType_ = CommandType::DbArea;
+    dcb_.setMenu(DcbMenu::DbArea);
+    previewArea_.setSystemResponse(QString());
+    update();
+}
+
+void AsdexScopeWidget::clearDbAreaDraft() {
+    dbAreaDraftPoints_.clear();
+    dbAreaDraftMouse_.reset();
+}
+
+bool AsdexScopeWidget::dbAreaDraftWouldSelfIntersect(const QPointF& nextPoint) const {
+    if (dbAreaDraftPoints_.size() < 2) return false;
+
+    const QPointF a = dbAreaDraftPoints_.last();
+    const QPointF b = nextPoint;
+
+    for (int i = 0; i + 1 < dbAreaDraftPoints_.size() - 1; ++i) {
+        if (utils::lineSegmentsIntersect(a, b, dbAreaDraftPoints_[i], dbAreaDraftPoints_[i + 1])) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool AsdexScopeWidget::dbAreaDraftWouldOverlapExisting(const QPointF& nextPoint) const {
+    if (dbAreaStore_.firstAreaContaining(nextPoint)) return true;
+    if (dbAreaDraftPoints_.isEmpty()) return false;
+
+    const QPointF a = dbAreaDraftPoints_.last();
+    const QPointF b = nextPoint;
+
+    for (const DbArea& area : dbAreaStore_.areas()) {
+        const QVector<QPointF>& polygon = area.polygonFeet;
+        for (int i = 0; i + 1 < polygon.size(); ++i) {
+            if (utils::lineSegmentsIntersect(a, b, polygon[i], polygon[i + 1])) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool AsdexScopeWidget::dbAreaPolygonIsValidOnClose() const {
+    if (dbAreaDraftPoints_.size() < 3) return false;
+
+    const QPointF a = dbAreaDraftPoints_.last();
+    const QPointF b = dbAreaDraftPoints_.first();
+
+    for (int i = 0; i + 1 < dbAreaDraftPoints_.size() - 1; ++i) {
+        if (i == 0) continue;
+        if (utils::lineSegmentsIntersect(a, b, dbAreaDraftPoints_[i], dbAreaDraftPoints_[i + 1])) {
+            return false;
+        }
+    }
+
+    for (const DbArea& area : dbAreaStore_.areas()) {
+        const QVector<QPointF>& polygon = area.polygonFeet;
+        for (int i = 0; i + 1 < polygon.size(); ++i) {
+            if (utils::lineSegmentsIntersect(a, b, polygon[i], polygon[i + 1])) {
+                return false;
+            }
+        }
+    }
+
+    QVector<QPointF> closed = dbAreaDraftPoints_;
+    closed.push_back(closed.first());
+
+    for (const DbArea& area : dbAreaStore_.areas()) {
+        for (const QPointF& point : area.polygonFeet) {
+            if (pointInPolygon(closed, point)) return false;
+        }
+    }
+
+    return true;
 }
 
 void AsdexScopeWidget::handleDcbDone() {
@@ -1349,6 +1576,7 @@ void AsdexScopeWidget::handleDcbDone() {
     dcbEntryCommand_.reset();
     datablockEdit_.reset();
     editingTrackId_.clear();
+    clearDbAreaDraft();
     clearDcbHover();
     previewArea_.setSystemResponse(QString());
     setAsdexCursor(CursorMode::Scope);
@@ -1811,6 +2039,16 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
                                TempAreaType::ClosedArea,
                                tempMapAreasBrightness_);
 
+    if (showsDbAreas()) {
+        renderer::CommandBuffer& dbAreaBuffer = layers.layer(z::DbAreas);
+        prepareLayer(dbAreaBuffer, worldProjection);
+        drawDbAreas(dbAreaStore_, &dbAreaBuffer);
+
+        if (isDrawingDbArea()) {
+            drawDbAreaDraft(dbAreaDraftPoints_, dbAreaDraftMouse_, &dbAreaBuffer);
+        }
+    }
+
     renderer::CommandBuffer& targetBuffer = layers.layer(z::Targets);
     prepareLayer(targetBuffer, worldProjection);
     drawTargets(targets_,
@@ -1961,6 +2199,7 @@ DcbState AsdexScopeWidget::makeDcbState() const {
     state.coastSuspendCharSize = coastSuspendCharSize_;
     state.tempDataCharSize = tempDataCharSize_;
     state.previewAreaCharSize = previewAreaCharSize_;
+    state.activeFunction = activeDcbFunctionForCommand();
     return state;
 }
 

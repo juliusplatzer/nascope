@@ -11,6 +11,7 @@
 #include "asdex/cursors.h"
 #include "asdex/dcb.h"
 #include "asdex/datablocks.h"
+#include "asdex/dbareas.h"
 #include "asdex/tempdata.h"
 #include "asdex/targets.h"
 #include "renderer/font.h"
@@ -96,6 +97,16 @@ private:
     void startDeleteAllDbAreasCommand();
     void startDeleteOneDbAreaCommand();
     void handleDcbDone();
+    bool isDrawingDbArea() const;
+    bool showsDbAreas() const;
+    std::optional<DcbFunction> activeDcbFunctionForCommand() const;
+    bool targetInsideDbOffArea(const AsdexTarget& target) const;
+    void addDbAreaPoint(const QPointF& worldFeet);
+    void completeDbAreaPolygon();
+    void clearDbAreaDraft();
+    bool dbAreaDraftWouldSelfIntersect(const QPointF& nextPoint) const;
+    bool dbAreaDraftWouldOverlapExisting(const QPointF& nextPoint) const;
+    bool dbAreaPolygonIsValidOnClose() const;
     CommandType commandForBrightnessFunction(DcbFunction function) const;
     QString brightnessCommandLabel(CommandType type) const;
     int brightnessValue(CommandType type) const;
@@ -165,8 +176,12 @@ private:
     TempAreaGeometry tempAreaGeometry_;
     QVector<asdex::AsdexTarget> targets_;
     QHash<QString, DataBlockVisibility> datablockVisibility_;
+    QHash<QString, bool> dbOffAreaDatablockOverride_;
     QHash<QString, EditedDbFields> pendingDatablockEdits_;
     QVector<TempArea> restrictedTempAreas_;
+    DbAreaStore dbAreaStore_;
+    QVector<QPointF> dbAreaDraftPoints_;
+    std::optional<QPointF> dbAreaDraftMouse_;
     CoastList coastList_;
     QString highlightedTargetId_;
     CommandType commandType_ = CommandType::None;

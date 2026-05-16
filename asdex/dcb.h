@@ -113,6 +113,7 @@ struct DcbButtonSpec {
 struct DcbButtonLayout {
     DcbButtonSpec spec;
     QRectF bounds;
+    bool active = false;
 };
 
 struct DcbLayout {
@@ -162,6 +163,8 @@ struct DcbState {
     int coastSuspendCharSize = 2;
     int tempDataCharSize = 2;
     int previewAreaCharSize = 2;
+
+    std::optional<DcbFunction> activeFunction;
 };
 
 class Dcb {

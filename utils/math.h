@@ -13,6 +13,10 @@ inline constexpr double kFeetPerNm = 6076.12;
 QTransform lonLatToNm(const QPointF& anchorLonLat);
 QTransform lonLatToFeet(const QPointF& anchorLonLat);
 QTransform nmToScreen(const QPointF& centerNm, double halfRangeNm, const QSize& view);
+bool lineSegmentsIntersect(const QPointF& a,
+                           const QPointF& b,
+                           const QPointF& c,
+                           const QPointF& d);
 
 } // namespace utils
 
