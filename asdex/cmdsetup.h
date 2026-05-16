@@ -28,6 +28,8 @@ public:
         bool wrapWheel = false;
         QString initialEntry;
         int wheelBaseValue = 0;
+        QString entryPrefix;
+        int entryColumnOffset = 0;
     };
 
     static DcbEntryCommand range(int currentRange);
@@ -36,6 +38,7 @@ public:
     static DcbEntryCommand leaderLength(int currentLeaderLength);
     static DcbEntryCommand brightness(CommandType type, QString label, int currentValue);
     static DcbEntryCommand charSize(CommandType type, QString label, int currentValue);
+    static DcbEntryCommand deleteAllDbAreas();
 
     QStringList displayLines() const;
     int cursorLine() const;

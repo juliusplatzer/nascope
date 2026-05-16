@@ -138,9 +138,33 @@ DcbEntryCommand DcbEntryCommand::charSize(CommandType type,
     return DcbEntryCommand(spec);
 }
 
+DcbEntryCommand DcbEntryCommand::deleteAllDbAreas() {
+    Spec spec;
+    spec.type = CommandType::DeleteAllDbAreas;
+    spec.headingLines = {
+        QStringLiteral("DB AREA"),
+        QStringLiteral("DELETE ALL AREAS?"),
+        QStringLiteral("1 = NO"),
+        QStringLiteral("2 = YES"),
+    };
+    spec.minValue = 1;
+    spec.maxValue = 2;
+    spec.wheelStep = 1;
+    spec.invalidMessage = QStringLiteral("INVALID ENTRY");
+    spec.numericOnly = true;
+    spec.initialEntry = QString();
+    spec.wheelBaseValue = 1;
+    spec.entryPrefix = QStringLiteral("(1 OR 2):");
+    spec.entryColumnOffset = 10;
+    return DcbEntryCommand(spec);
+}
+
 QStringList DcbEntryCommand::displayLines() const {
     QStringList lines = spec_.headingLines;
-    lines << value_;
+    if (spec_.entryPrefix.isEmpty())
+        lines << value_;
+    else
+        lines << spec_.entryPrefix + QStringLiteral(" ") + value_;
     return lines;
 }
 
@@ -149,6 +173,7 @@ int DcbEntryCommand::cursorLine() const {
 }
 
 int DcbEntryCommand::cursorColumn() const {
+    if (spec_.entryColumnOffset > 0) return spec_.entryColumnOffset + cursor_;
     return cursor_;
 }
 

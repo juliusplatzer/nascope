@@ -448,7 +448,10 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
     }
 
     if (dcbEntryCommand_) {
-        if (event->button() == Qt::LeftButton) submitDcbEntryCommand();
+        if (event->button() == Qt::LeftButton
+            && dcbEntryCommand_->type() != CommandType::DeleteAllDbAreas) {
+            submitDcbEntryCommand();
+        }
 
         event->accept();
         return;
@@ -546,6 +549,11 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
     }
 
     if (dcbEntryCommand_) {
+        if (dcbEntryCommand_->type() == CommandType::DeleteAllDbAreas) {
+            event->accept();
+            return;
+        }
+
         int steps = 0;
         switch (dcbEntryCommand_->type()) {
             case CommandType::Rotate:
@@ -1066,6 +1074,8 @@ void AsdexScopeWidget::submitDcbEntryCommand() {
             commandType_ = CommandType::Brightness;
         } else if (isCharSizeValueCommand(dcbEntryCommand_->type())) {
             commandType_ = CommandType::CharSize;
+        } else if (dcbEntryCommand_->type() == CommandType::DeleteAllDbAreas) {
+            commandType_ = CommandType::DbArea;
         } else {
             commandType_ = CommandType::None;
         }
@@ -1114,11 +1124,24 @@ void AsdexScopeWidget::submitDcbEntryCommand() {
             setCharSizeValue(dcbEntryCommand_->type(), value);
             commandType_ = CommandType::CharSize;
             break;
+        case CommandType::DeleteAllDbAreas:
+            if (value == 2) {
+                dbAreaStore_.clear();
+                dbOffAreaDatablockOverride_.clear();
+                clearDbAreaDraft();
+            }
+            commandType_ = CommandType::DbArea;
+            break;
         case CommandType::None:
         case CommandType::EditDatablockFields:
         case CommandType::MapReposition:
         case CommandType::Brightness:
         case CommandType::CharSize:
+        case CommandType::DbArea:
+        case CommandType::DefineTraitArea:
+        case CommandType::DefineOffArea:
+        case CommandType::ModifyTraitArea:
+        case CommandType::DeleteOneDbArea:
         default:
             commandType_ = CommandType::None;
             break;
@@ -1429,11 +1452,13 @@ void AsdexScopeWidget::startModifyTraitAreaCommand() {
 void AsdexScopeWidget::startDeleteAllDbAreasCommand() {
     commandType_ = CommandType::DeleteAllDbAreas;
     dcb_.setMenu(DcbMenu::DbArea);
+    dcbEntryCommand_ = DcbEntryCommand::deleteAllDbAreas();
+    datablockEdit_.reset();
     clearDbAreaDraft();
     clearHighlightedTarget();
     clearDcbHover();
     previewArea_.setSystemResponse(QString());
-    setAsdexCursor(CursorMode::Scope);
+    setAsdexCursor(CursorMode::Hidden);
     update();
 }
 
@@ -1509,8 +1534,6 @@ std::optional<DcbFunction> AsdexScopeWidget::activeDcbFunctionForCommand() const
             return DcbFunction::DefineDbOffArea;
         case CommandType::ModifyTraitArea:
             return DcbFunction::ModifyDbTraitArea;
-        case CommandType::DeleteAllDbAreas:
-            return DcbFunction::DeleteAllDbAreas;
         case CommandType::DeleteOneDbArea:
             return DcbFunction::DeleteOneDbArea;
         default:
@@ -2057,7 +2080,11 @@ QStringList AsdexScopeWidget::activeCommandLines() const {
         case CommandType::ModifyTraitArea:
             return {QStringLiteral("DB AREA"), QStringLiteral("MODIFY TRAIT AREA")};
         case CommandType::DeleteAllDbAreas:
-            return {QStringLiteral("DB AREA"), QStringLiteral("DELETE ALL AREAS")};
+            return {QStringLiteral("DB AREA"),
+                    QStringLiteral("DELETE ALL AREAS?"),
+                    QStringLiteral("1 = NO"),
+                    QStringLiteral("2 = YES"),
+                    QStringLiteral("(1 OR 2):")};
         case CommandType::DeleteOneDbArea:
             return {QStringLiteral("DB AREA"), QStringLiteral("DELETE ONE AREA")};
         default:
