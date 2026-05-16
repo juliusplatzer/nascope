@@ -62,6 +62,7 @@ private:
         Scope,
         Dcb,
         Captured,
+        Select,
         Hidden,
     };
 
@@ -98,6 +99,9 @@ private:
     void startDeleteOneDbAreaCommand();
     void handleDcbDone();
     bool isDrawingDbArea() const;
+    bool isSelectingDbArea() const;
+    bool dbAreaSelectableAt(const QPointF& logicalPoint) const;
+    bool deleteDbAreaAt(const QPointF& logicalPoint);
     bool showsDbAreas() const;
     std::optional<DcbFunction> activeDcbFunctionForCommand() const;
     bool targetInsideDbOffArea(const AsdexTarget& target) const;
@@ -206,6 +210,7 @@ private:
     QPointF mapRepositionLastMouseFramebuffer_;
     bool suppressNextMapRepositionMove_ = false;
     bool suppressNextMapRepositionRelease_ = false;
+    bool suppressNextDbAreaSelectionRelease_ = false;
     QPointF panStartMouseFramebuffer_;
     QPointF panStartCenterFeet_;
 

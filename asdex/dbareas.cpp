@@ -50,6 +50,27 @@ const DbArea* DbAreaStore::firstAreaContaining(const QPointF& pointFeet) const {
     return nullptr;
 }
 
+int DbAreaStore::indexOfAreaContaining(const QPointF& pointFeet,
+                                       bool includeOffAreas) const {
+    for (int i = 0; i < areas_.size(); ++i) {
+        const DbArea& area = areas_[i];
+        if (!includeOffAreas && area.kind == DbAreaKind::Off) continue;
+
+        if (pointInPolygon(area.polygonFeet, pointFeet)) return i;
+    }
+
+    return -1;
+}
+
+bool DbAreaStore::removeAreaContaining(const QPointF& pointFeet,
+                                       bool includeOffAreas) {
+    const int index = indexOfAreaContaining(pointFeet, includeOffAreas);
+    if (index < 0) return false;
+
+    areas_.removeAt(index);
+    return true;
+}
+
 bool pointInPolygon(const QVector<QPointF>& polygon, const QPointF& point) {
     if (polygon.size() < 3) return false;
 

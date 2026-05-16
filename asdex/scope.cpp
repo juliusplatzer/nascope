@@ -271,6 +271,15 @@ void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
         return;
     }
 
+    if (isSelectingDbArea()) {
+        if (event->button() != Qt::RightButton) {
+            suppressNextDbAreaSelectionRelease_ = true;
+            deleteDbAreaAt(event->position());
+            event->accept();
+            return;
+        }
+    }
+
     if (commandType_ == CommandType::DefineOffArea) {
         if (event->button() == Qt::LeftButton) {
             addDbAreaPoint(screenToWorldFeet(event->position(), framebufferRenderSize()));
@@ -359,6 +368,16 @@ void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
         return;
     }
 
+    if (isSelectingDbArea()) {
+        clearHighlightedTarget();
+        clearDcbHover();
+        setAsdexCursor(dbAreaSelectableAt(event->position()) ? CursorMode::Select
+                                                             : CursorMode::Scope);
+        update();
+        event->accept();
+        return;
+    }
+
     if (isDrawingDbArea()) {
         dbAreaDraftMouse_ = screenToWorldFeet(event->position(), framebufferRenderSize());
         clearHighlightedTarget();
@@ -377,6 +396,12 @@ void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
+    if (suppressNextDbAreaSelectionRelease_ && event->button() != Qt::RightButton) {
+        suppressNextDbAreaSelectionRelease_ = false;
+        event->accept();
+        return;
+    }
+
     if (suppressNextMapRepositionRelease_ && event->button() == Qt::LeftButton) {
         suppressNextMapRepositionRelease_ = false;
         event->accept();
@@ -463,6 +488,11 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
         updateDcbHover(event->position());
         setAsdexCursor(CursorMode::Dcb);
         update();
+        event->accept();
+        return;
+    }
+
+    if (isSelectingDbArea() && event->button() != Qt::RightButton) {
         event->accept();
         return;
     }
@@ -931,6 +961,7 @@ void AsdexScopeWidget::cancelCommand() {
 
     if (isDbAreaCommand(commandType_)) {
         clearDbAreaDraft();
+        suppressNextDbAreaSelectionRelease_ = false;
 
         if (commandType_ != CommandType::DbArea) {
             commandType_ = CommandType::DbArea;
@@ -984,6 +1015,7 @@ void AsdexScopeWidget::cancelCommand() {
     mapRepositionOriginalCenter_.reset();
     suppressNextMapRepositionMove_ = false;
     suppressNextMapRepositionRelease_ = false;
+    suppressNextDbAreaSelectionRelease_ = false;
     editingTrackId_.clear();
     previewArea_.setSystemResponse({});
     dcb_.setMenu(currentDcbMenu());
@@ -1418,6 +1450,45 @@ void AsdexScopeWidget::startDeleteOneDbAreaCommand() {
 
 bool AsdexScopeWidget::isDrawingDbArea() const {
     return commandType_ == CommandType::DefineOffArea;
+}
+
+bool AsdexScopeWidget::isSelectingDbArea() const {
+    return commandType_ == CommandType::DeleteOneDbArea
+        || commandType_ == CommandType::ModifyTraitArea;
+}
+
+bool AsdexScopeWidget::dbAreaSelectableAt(const QPointF& logicalPoint) const {
+    if (!isSelectingDbArea()) return false;
+
+    const QPointF world = screenToWorldFeet(logicalPoint, framebufferRenderSize());
+    if (commandType_ == CommandType::DeleteOneDbArea) {
+        return dbAreaStore_.indexOfAreaContaining(world, true) >= 0;
+    }
+
+    if (commandType_ == CommandType::ModifyTraitArea) {
+        return dbAreaStore_.indexOfAreaContaining(world, false) >= 0;
+    }
+
+    return false;
+}
+
+bool AsdexScopeWidget::deleteDbAreaAt(const QPointF& logicalPoint) {
+    if (commandType_ != CommandType::DeleteOneDbArea) return false;
+
+    const QPointF world = screenToWorldFeet(logicalPoint, framebufferRenderSize());
+    if (!dbAreaStore_.removeAreaContaining(world, true)) {
+        update();
+        return false;
+    }
+
+    dbOffAreaDatablockOverride_.clear();
+    commandType_ = CommandType::DbArea;
+    dcb_.setMenu(DcbMenu::DbArea);
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Scope);
+    update();
+    return true;
 }
 
 bool AsdexScopeWidget::showsDbAreas() const {
@@ -2417,6 +2488,12 @@ void AsdexScopeWidget::updateHoverCursor(const QPointF& logicalPoint) {
         return;
     }
 
+    if (isSelectingDbArea()) {
+        setAsdexCursor(dbAreaSelectableAt(logicalPoint) ? CursorMode::Select
+                                                        : CursorMode::Scope);
+        return;
+    }
+
     setAsdexCursor(CursorMode::Scope);
 }
 
@@ -2449,6 +2526,14 @@ void AsdexScopeWidget::setAsdexCursor(CursorMode mode) {
                 setCursor(cursors_.cursor(asdex::CursorType::Captured));
             else if (cursors_.has(asdex::CursorType::Dcb))
                 setCursor(cursors_.cursor(asdex::CursorType::Dcb));
+            else if (cursors_.has(asdex::CursorType::Scope))
+                setCursor(cursors_.cursor(asdex::CursorType::Scope));
+            else
+                unsetCursor();
+            break;
+        case CursorMode::Select:
+            if (cursors_.has(asdex::CursorType::Select))
+                setCursor(cursors_.cursor(asdex::CursorType::Select));
             else if (cursors_.has(asdex::CursorType::Scope))
                 setCursor(cursors_.cursor(asdex::CursorType::Scope));
             else

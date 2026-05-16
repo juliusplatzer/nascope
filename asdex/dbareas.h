@@ -42,6 +42,10 @@ public:
 
     bool pointInsideOffArea(const QPointF& pointFeet) const;
     const DbArea* firstAreaContaining(const QPointF& pointFeet) const;
+    int indexOfAreaContaining(const QPointF& pointFeet,
+                              bool includeOffAreas = true) const;
+    bool removeAreaContaining(const QPointF& pointFeet,
+                              bool includeOffAreas = true);
 
 private:
     QVector<DbArea> areas_;
