@@ -32,6 +32,7 @@ enum class DcbMenu {
     Main,
     Brightness,
     CharSize,
+    DbArea,
     Off,
 };
 
@@ -86,6 +87,11 @@ enum class DcbFunction {
     CoastSuspendCharSize,
     TempDataCharSize,
     PreviewAreaCharSize,
+    DefineDbTraitArea,
+    DefineDbOffArea,
+    ModifyDbTraitArea,
+    DeleteAllDbAreas,
+    DeleteOneDbArea,
     Done,
     Vacant,
 };
@@ -209,6 +215,7 @@ private:
     static QVector<DcbButtonSpec> mainButtonSpecs(const DcbState& state);
     static QVector<DcbButtonSpec> brightnessButtonSpecs(const DcbState& state);
     static QVector<DcbButtonSpec> charSizeButtonSpecs(const DcbState& state);
+    static QVector<DcbButtonSpec> dbAreaButtonSpecs();
     static QVector<DcbButtonSpec> offButtonSpecs(const DcbState& state);
     static bool isHorizontal(DcbPosition position);
     static bool isLargeFunction(DcbFunction function);

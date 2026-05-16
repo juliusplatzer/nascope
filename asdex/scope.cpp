@@ -612,7 +612,9 @@ void AsdexScopeWidget::keyPressEvent(QKeyEvent* event) {
     if (datablockEdit_ && handleDatablockEditKey(event)) return;
     if (dcbEntryCommand_ && handleDcbEntryCommandKey(event)) return;
 
-    if ((commandType_ == CommandType::Brightness || commandType_ == CommandType::CharSize)
+    if ((commandType_ == CommandType::Brightness
+         || commandType_ == CommandType::CharSize
+         || isDbAreaCommand(commandType_))
         && event->key() == Qt::Key_Escape) {
         cancelCommand();
         event->accept();
@@ -1071,6 +1073,8 @@ DcbMenu AsdexScopeWidget::currentDcbMenu() const {
     if (commandType_ == CommandType::CharSize || isCharSizeValueCommand(commandType_))
         return DcbMenu::CharSize;
 
+    if (isDbAreaCommand(commandType_)) return DcbMenu::DbArea;
+
     return DcbMenu::Main;
 }
 
@@ -1134,6 +1138,9 @@ void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
         case DcbFunction::DataBlocksOnOff:
             toggleAllDataBlocks();
             return;
+        case DcbFunction::DataBlockArea:
+            startDbAreaMenu();
+            return;
         case DcbFunction::Brightness:
             startBrightnessMenu();
             return;
@@ -1157,6 +1164,21 @@ void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
         case DcbFunction::TempDataCharSize:
         case DcbFunction::PreviewAreaCharSize:
             startCharSizeValueCommand(function);
+            return;
+        case DcbFunction::DefineDbTraitArea:
+            startDefineTraitAreaCommand();
+            return;
+        case DcbFunction::DefineDbOffArea:
+            startDefineOffAreaCommand();
+            return;
+        case DcbFunction::ModifyDbTraitArea:
+            startModifyTraitAreaCommand();
+            return;
+        case DcbFunction::DeleteAllDbAreas:
+            startDeleteAllDbAreasCommand();
+            return;
+        case DcbFunction::DeleteOneDbArea:
+            startDeleteOneDbAreaCommand();
             return;
         case DcbFunction::Done:
             handleDcbDone();
@@ -1256,10 +1278,77 @@ void AsdexScopeWidget::startCharSizeValueCommand(DcbFunction function) {
     update();
 }
 
+void AsdexScopeWidget::startDbAreaMenu() {
+    if (commandType_ != CommandType::None) return;
+
+    commandType_ = CommandType::DbArea;
+    dcb_.setMenu(DcbMenu::DbArea);
+    datablockEdit_.reset();
+    dcbEntryCommand_.reset();
+    editingTrackId_.clear();
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Scope);
+    update();
+}
+
+void AsdexScopeWidget::startDefineTraitAreaCommand() {
+    commandType_ = CommandType::DefineTraitArea;
+    dcb_.setMenu(DcbMenu::DbArea);
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Scope);
+    update();
+}
+
+void AsdexScopeWidget::startDefineOffAreaCommand() {
+    commandType_ = CommandType::DefineOffArea;
+    dcb_.setMenu(DcbMenu::DbArea);
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Scope);
+    update();
+}
+
+void AsdexScopeWidget::startModifyTraitAreaCommand() {
+    commandType_ = CommandType::ModifyTraitArea;
+    dcb_.setMenu(DcbMenu::DbArea);
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Scope);
+    update();
+}
+
+void AsdexScopeWidget::startDeleteAllDbAreasCommand() {
+    commandType_ = CommandType::DeleteAllDbAreas;
+    dcb_.setMenu(DcbMenu::DbArea);
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Scope);
+    update();
+}
+
+void AsdexScopeWidget::startDeleteOneDbAreaCommand() {
+    commandType_ = CommandType::DeleteOneDbArea;
+    dcb_.setMenu(DcbMenu::DbArea);
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Scope);
+    update();
+}
+
 void AsdexScopeWidget::handleDcbDone() {
     commandType_ = CommandType::None;
     dcb_.setMenu(currentDcbMenu());
     dcbEntryCommand_.reset();
+    datablockEdit_.reset();
+    editingTrackId_.clear();
     clearDcbHover();
     previewArea_.setSystemResponse(QString());
     setAsdexCursor(CursorMode::Scope);
@@ -1658,6 +1747,24 @@ QStringList AsdexScopeWidget::activeCommandLines() const {
     if (isMapRepositionCommandActive()) return {QStringLiteral("MAP RPOS")};
     if (commandType_ == CommandType::Brightness) return {QStringLiteral("BRITE")};
     if (commandType_ == CommandType::CharSize) return {QStringLiteral("CHAR SIZE")};
+
+    switch (commandType_) {
+        case CommandType::DbArea:
+            return {QStringLiteral("DB AREA")};
+        case CommandType::DefineTraitArea:
+            return {QStringLiteral("DB AREA"), QStringLiteral("DEFINE TRAIT AREA")};
+        case CommandType::DefineOffArea:
+            return {QStringLiteral("DB AREA"), QStringLiteral("DEFINE OFF AREA")};
+        case CommandType::ModifyTraitArea:
+            return {QStringLiteral("DB AREA"), QStringLiteral("MODIFY TRAIT AREA")};
+        case CommandType::DeleteAllDbAreas:
+            return {QStringLiteral("DB AREA"), QStringLiteral("DELETE ALL AREAS")};
+        case CommandType::DeleteOneDbArea:
+            return {QStringLiteral("DB AREA"), QStringLiteral("DELETE ONE AREA")};
+        default:
+            break;
+    }
+
     return {};
 }
 

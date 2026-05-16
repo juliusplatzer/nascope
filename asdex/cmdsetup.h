@@ -11,6 +11,7 @@ namespace asdex {
 
 bool isBrightnessValueCommand(CommandType type);
 bool isCharSizeValueCommand(CommandType type);
+bool isDbAreaCommand(CommandType type);
 
 class DcbEntryCommand {
 public:

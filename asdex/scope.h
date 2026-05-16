@@ -89,6 +89,12 @@ private:
     void startBrightnessValueCommand(DcbFunction function);
     void startCharSizeMenu();
     void startCharSizeValueCommand(DcbFunction function);
+    void startDbAreaMenu();
+    void startDefineTraitAreaCommand();
+    void startDefineOffAreaCommand();
+    void startModifyTraitAreaCommand();
+    void startDeleteAllDbAreasCommand();
+    void startDeleteOneDbAreaCommand();
     void handleDcbDone();
     CommandType commandForBrightnessFunction(DcbFunction function) const;
     QString brightnessCommandLabel(CommandType type) const;

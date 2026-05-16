@@ -133,6 +133,11 @@ bool Dcb::isLargeFunction(DcbFunction function) {
     case DcbFunction::CoastSuspendCharSize:
     case DcbFunction::TempDataCharSize:
     case DcbFunction::PreviewAreaCharSize:
+    case DcbFunction::DefineDbTraitArea:
+    case DcbFunction::DefineDbOffArea:
+    case DcbFunction::ModifyDbTraitArea:
+    case DcbFunction::DeleteAllDbAreas:
+    case DcbFunction::DeleteOneDbArea:
     case DcbFunction::Done:
     case DcbFunction::Vacant:
         return true;
@@ -352,6 +357,45 @@ QVector<DcbButtonSpec> Dcb::charSizeButtonSpecs(const DcbState& state) {
     return out;
 }
 
+QVector<DcbButtonSpec> Dcb::dbAreaButtonSpecs() {
+    QVector<DcbButtonSpec> out;
+    out.reserve(14);
+
+    auto vacant = [&out]() {
+        DcbButtonSpec button;
+        button.function = DcbFunction::Vacant;
+        button.kind = DcbButtonKind::Vacant;
+        button.large = true;
+        out.push_back(std::move(button));
+    };
+
+    auto normal = [&out](DcbFunction function, QStringList lines) {
+        DcbButtonSpec button;
+        button.function = function;
+        button.kind = DcbButtonKind::Normal;
+        button.lines = std::move(lines);
+        button.large = true;
+        out.push_back(std::move(button));
+    };
+
+    vacant();
+    vacant();
+    vacant();
+    vacant();
+    normal(DcbFunction::DefineDbTraitArea, {"DEFINE", "TRAIT", "AREA"});
+    normal(DcbFunction::DefineDbOffArea, {"DEFINE", "OFF", "AREA"});
+    normal(DcbFunction::ModifyDbTraitArea, {"MODIFY", "TRAIT", "AREA"});
+    normal(DcbFunction::DeleteAllDbAreas, {"DELETE", "ALL", "AREAS"});
+    normal(DcbFunction::DeleteOneDbArea, {"DELETE", "ONE", "AREA"});
+    normal(DcbFunction::Done, {"DONE"});
+    vacant();
+    vacant();
+    vacant();
+    vacant();
+
+    return out;
+}
+
 QSize Dcb::buttonSizeForFont(const renderer::BitmapFont& font, int autoSize) {
     const QSize charSize = font.charSize(autoSize);
     const int charHeight = std::max(1, charSize.height());
@@ -412,6 +456,7 @@ DcbLayout Dcb::layout(QSize displaySize,
     const QVector<DcbButtonSpec> specs =
         menu_ == DcbMenu::Brightness ? brightnessButtonSpecs(state)
         : menu_ == DcbMenu::CharSize ? charSizeButtonSpecs(state)
+        : menu_ == DcbMenu::DbArea ? dbAreaButtonSpecs()
                                      : offMenu ? offButtonSpecs(state) : mainButtonSpecs(state);
 
     int row = 1;

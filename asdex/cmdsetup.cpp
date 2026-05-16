@@ -35,6 +35,20 @@ bool isCharSizeValueCommand(CommandType type) {
     }
 }
 
+bool isDbAreaCommand(CommandType type) {
+    switch (type) {
+    case CommandType::DbArea:
+    case CommandType::DefineTraitArea:
+    case CommandType::DefineOffArea:
+    case CommandType::ModifyTraitArea:
+    case CommandType::DeleteAllDbAreas:
+    case CommandType::DeleteOneDbArea:
+        return true;
+    default:
+        return false;
+    }
+}
+
 DcbEntryCommand DcbEntryCommand::range(int currentRange) {
     Spec spec;
     spec.type = CommandType::Range;

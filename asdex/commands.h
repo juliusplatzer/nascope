@@ -37,6 +37,13 @@ enum class CommandType {
     CoastSuspendCharSize,
     TempDataCharSize,
     PreviewAreaCharSize,
+
+    DbArea,
+    DefineTraitArea,
+    DefineOffArea,
+    ModifyTraitArea,
+    DeleteAllDbAreas,
+    DeleteOneDbArea,
 };
 
 }  // namespace asdex
