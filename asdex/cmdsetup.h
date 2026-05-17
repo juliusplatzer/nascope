@@ -39,6 +39,10 @@ public:
     static DcbEntryCommand brightness(CommandType type, QString label, int currentValue);
     static DcbEntryCommand charSize(CommandType type, QString label, int currentValue);
     static DcbEntryCommand deleteAllDbAreas();
+    static DcbEntryCommand traitAreaDbCharSize(int currentValue);
+    static DcbEntryCommand traitAreaDbBrightness(int currentValue);
+    static DcbEntryCommand traitAreaLeaderLength(int currentValue);
+    static DcbEntryCommand traitAreaLeaderDirection(int currentValue);
 
     QStringList displayLines() const;
     int cursorLine() const;
@@ -52,6 +56,7 @@ public:
     void moveLeft();
     void moveRight();
     void wheelDelta(int steps);
+    void setEntryValue(int value);
 
     bool valueInt(int* out) const;
 

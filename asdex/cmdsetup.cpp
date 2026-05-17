@@ -39,6 +39,11 @@ bool isDbAreaCommand(CommandType type) {
     switch (type) {
     case CommandType::DbArea:
     case CommandType::DefineTraitArea:
+    case CommandType::DefineTraitAreaTraits:
+    case CommandType::DefineTraitAreaDbCharSize:
+    case CommandType::DefineTraitAreaDbBrightness:
+    case CommandType::DefineTraitAreaLeaderLength:
+    case CommandType::DefineTraitAreaLeaderDirection:
     case CommandType::DefineOffArea:
     case CommandType::ModifyTraitArea:
     case CommandType::DeleteAllDbAreas:
@@ -159,6 +164,80 @@ DcbEntryCommand DcbEntryCommand::deleteAllDbAreas() {
     return DcbEntryCommand(spec);
 }
 
+DcbEntryCommand DcbEntryCommand::traitAreaDbCharSize(int currentValue) {
+    Spec spec;
+    spec.type = CommandType::DefineTraitAreaDbCharSize;
+    spec.headingLines = {
+        QStringLiteral("DB AREA"),
+        QStringLiteral("DEFINE TRAIT AREA"),
+        QStringLiteral("CHAR SIZE"),
+        QStringLiteral("DATA BLOCK"),
+    };
+    spec.minValue = 1;
+    spec.maxValue = 6;
+    spec.wheelStep = 1;
+    spec.invalidMessage = QStringLiteral("INVALID SIZE");
+    spec.numericOnly = true;
+    spec.initialEntry = QString();
+    spec.wheelBaseValue = currentValue;
+    return DcbEntryCommand(spec);
+}
+
+DcbEntryCommand DcbEntryCommand::traitAreaDbBrightness(int currentValue) {
+    Spec spec;
+    spec.type = CommandType::DefineTraitAreaDbBrightness;
+    spec.headingLines = {
+        QStringLiteral("DB AREA"),
+        QStringLiteral("DEFINE TRAIT AREA"),
+        QStringLiteral("BRITE"),
+        QStringLiteral("DATA BLOCK"),
+    };
+    spec.minValue = 1;
+    spec.maxValue = 99;
+    spec.wheelStep = 1;
+    spec.invalidMessage = QStringLiteral("INVALID ENTRY");
+    spec.numericOnly = true;
+    spec.initialEntry = QString();
+    spec.wheelBaseValue = currentValue;
+    return DcbEntryCommand(spec);
+}
+
+DcbEntryCommand DcbEntryCommand::traitAreaLeaderLength(int currentValue) {
+    Spec spec;
+    spec.type = CommandType::DefineTraitAreaLeaderLength;
+    spec.headingLines = {
+        QStringLiteral("DB AREA"),
+        QStringLiteral("DEFINE TRAIT AREA"),
+        QStringLiteral("LDR LNG"),
+    };
+    spec.minValue = 0;
+    spec.maxValue = 15;
+    spec.wheelStep = 1;
+    spec.invalidMessage = QStringLiteral("INVALID LNG");
+    spec.numericOnly = true;
+    spec.initialEntry = QString();
+    spec.wheelBaseValue = currentValue;
+    return DcbEntryCommand(spec);
+}
+
+DcbEntryCommand DcbEntryCommand::traitAreaLeaderDirection(int currentValue) {
+    Spec spec;
+    spec.type = CommandType::DefineTraitAreaLeaderDirection;
+    spec.headingLines = {
+        QStringLiteral("DB AREA"),
+        QStringLiteral("DEFINE TRAIT AREA"),
+        QStringLiteral("LDR DIR"),
+    };
+    spec.minValue = 1;
+    spec.maxValue = 9;
+    spec.wheelStep = 1;
+    spec.invalidMessage = QStringLiteral("INVALID ENTRY");
+    spec.numericOnly = true;
+    spec.initialEntry = QString();
+    spec.wheelBaseValue = currentValue;
+    return DcbEntryCommand(spec);
+}
+
 QStringList DcbEntryCommand::displayLines() const {
     QStringList lines = spec_.headingLines;
     if (spec_.entryPrefix.isEmpty())
@@ -233,6 +312,12 @@ void DcbEntryCommand::wheelDelta(int steps) {
         value = std::clamp(value, spec_.minValue, spec_.maxValue);
     }
 
+    value_ = QString::number(value);
+    cursor_ = value_.size();
+    resetOnFirstType_ = false;
+}
+
+void DcbEntryCommand::setEntryValue(int value) {
     value_ = QString::number(value);
     cursor_ = value_.size();
     resetOnFirstType_ = false;

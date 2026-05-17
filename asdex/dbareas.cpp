@@ -50,6 +50,22 @@ const DbArea* DbAreaStore::firstAreaContaining(const QPointF& pointFeet) const {
     return nullptr;
 }
 
+DbArea* DbAreaStore::areaById(const QString& id) {
+    for (DbArea& area : areas_) {
+        if (area.id == id) return &area;
+    }
+
+    return nullptr;
+}
+
+const DbArea* DbAreaStore::areaById(const QString& id) const {
+    for (const DbArea& area : areas_) {
+        if (area.id == id) return &area;
+    }
+
+    return nullptr;
+}
+
 int DbAreaStore::indexOfAreaContaining(const QPointF& pointFeet,
                                        bool includeOffAreas) const {
     for (int i = 0; i < areas_.size(); ++i) {

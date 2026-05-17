@@ -1,6 +1,8 @@
 #ifndef ASDEX_DBAREAS_H_
 #define ASDEX_DBAREAS_H_
 
+#include "asdex/datablocks.h"
+
 #include <QPointF>
 #include <QString>
 #include <QVector>
@@ -21,9 +23,20 @@ enum class DbAreaKind {
 struct DbAreaTraits {
     bool dataBlocksOff = false;
 
+    bool fullDataBlocks = true;
+    bool showAltitude = false;
+    bool showAircraftType = true;
+    bool showSensors = false;
+    bool showAircraftCategory = false;
+    bool showFix = true;
+    bool showVelocity = false;
+    bool showScratchpads = true;
+
     int dataBlockCharSize = 2;
     int dataBlockBrightness = 95;
+    bool showVector = true;
     int leaderLength = 2;
+    LeaderDirection leaderDirection = LeaderDirection::NE;
 };
 
 struct DbArea {
@@ -42,6 +55,8 @@ public:
 
     bool pointInsideOffArea(const QPointF& pointFeet) const;
     const DbArea* firstAreaContaining(const QPointF& pointFeet) const;
+    DbArea* areaById(const QString& id);
+    const DbArea* areaById(const QString& id) const;
     int indexOfAreaContaining(const QPointF& pointFeet,
                               bool includeOffAreas = true) const;
     bool removeAreaContaining(const QPointF& pointFeet,

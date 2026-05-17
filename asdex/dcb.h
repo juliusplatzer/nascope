@@ -34,6 +34,7 @@ enum class DcbMenu {
     CharSize,
     DbArea,
     DbEdit,
+    DefineTraitArea,
     Off,
 };
 
@@ -101,6 +102,9 @@ enum class DcbFunction {
     DbFixOnOff,
     DbVelocityOnOff,
     DbScratchpadOnOff,
+    DbAreaVectorOnOff,
+    DbAreaLeaderLength,
+    DbAreaLeaderDirection,
     Done,
     Vacant,
 };
@@ -182,6 +186,20 @@ struct DcbState {
     bool showVelocityInDb = false;
     bool showScratchpadsInDb = true;
 
+    bool selectedTraitFullDataBlocks = true;
+    bool selectedTraitShowAltitude = false;
+    bool selectedTraitShowAircraftType = true;
+    bool selectedTraitShowSensors = false;
+    bool selectedTraitShowAircraftCategory = false;
+    bool selectedTraitShowFix = true;
+    bool selectedTraitShowVelocity = false;
+    bool selectedTraitShowScratchpads = true;
+    int selectedTraitDataBlockCharSize = 2;
+    int selectedTraitDataBlockBrightness = 95;
+    bool selectedTraitShowVector = true;
+    int selectedTraitLeaderLength = 2;
+    int selectedTraitLeaderDirection = 9;
+
     std::optional<DcbFunction> activeFunction;
 };
 
@@ -238,6 +256,7 @@ private:
     static QVector<DcbButtonSpec> charSizeButtonSpecs(const DcbState& state);
     static QVector<DcbButtonSpec> dbAreaButtonSpecs();
     static QVector<DcbButtonSpec> dbEditButtonSpecs(const DcbState& state);
+    static QVector<DcbButtonSpec> defineTraitAreaButtonSpecs(const DcbState& state);
     static QVector<DcbButtonSpec> offButtonSpecs(const DcbState& state);
     static bool isHorizontal(DcbPosition position);
     static bool isLargeFunction(DcbFunction function);
