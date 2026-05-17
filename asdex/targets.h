@@ -7,6 +7,8 @@
 #include <QMatrix4x4>
 #include <QVector>
 
+#include <functional>
+
 namespace renderer {
 class CommandBuffer;
 }
@@ -18,7 +20,7 @@ void drawTargets(const QVector<AsdexTarget>& targets,
                  const QMatrix4x4& worldProjection,
                  Mode mode,
                  int vectorSeconds,
-                 bool showVectorLine,
+                 const std::function<bool(const AsdexTarget&)>& vectorVisibleForTarget,
                  int brightness = 95);
 
 int clampedTargetVectorSeconds(int seconds);

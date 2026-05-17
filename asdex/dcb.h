@@ -32,6 +32,10 @@ enum class DcbMenu {
     Main,
     Brightness,
     CharSize,
+    DbArea,
+    DbEdit,
+    DefineTraitArea,
+    ModifyTraitArea,
     Off,
 };
 
@@ -86,6 +90,22 @@ enum class DcbFunction {
     CoastSuspendCharSize,
     TempDataCharSize,
     PreviewAreaCharSize,
+    DefineDbTraitArea,
+    DefineDbOffArea,
+    ModifyDbTraitArea,
+    DeleteAllDbAreas,
+    DeleteOneDbArea,
+    DbFullPart,
+    DbAltitudeOnOff,
+    DbTypeOnOff,
+    DbSensorsOnOff,
+    DbCategoryOnOff,
+    DbFixOnOff,
+    DbVelocityOnOff,
+    DbScratchpadOnOff,
+    DbAreaVectorOnOff,
+    DbAreaLeaderLength,
+    DbAreaLeaderDirection,
     Done,
     Vacant,
 };
@@ -107,6 +127,7 @@ struct DcbButtonSpec {
 struct DcbButtonLayout {
     DcbButtonSpec spec;
     QRectF bounds;
+    bool active = false;
 };
 
 struct DcbLayout {
@@ -156,6 +177,31 @@ struct DcbState {
     int coastSuspendCharSize = 2;
     int tempDataCharSize = 2;
     int previewAreaCharSize = 2;
+
+    bool fullDataBlocks = true;
+    bool showAltitudeInDb = false;
+    bool showAircraftTypeInDb = true;
+    bool showSensorsInDb = false;
+    bool showAircraftCategoryInDb = false;
+    bool showFixInDb = true;
+    bool showVelocityInDb = false;
+    bool showScratchpadsInDb = true;
+
+    bool selectedTraitFullDataBlocks = true;
+    bool selectedTraitShowAltitude = false;
+    bool selectedTraitShowAircraftType = true;
+    bool selectedTraitShowSensors = false;
+    bool selectedTraitShowAircraftCategory = false;
+    bool selectedTraitShowFix = true;
+    bool selectedTraitShowVelocity = false;
+    bool selectedTraitShowScratchpads = true;
+    int selectedTraitDataBlockCharSize = 2;
+    int selectedTraitDataBlockBrightness = 95;
+    bool selectedTraitShowVector = true;
+    int selectedTraitLeaderLength = 2;
+    int selectedTraitLeaderDirection = 9;
+
+    std::optional<DcbFunction> activeFunction;
 };
 
 class Dcb {
@@ -209,6 +255,9 @@ private:
     static QVector<DcbButtonSpec> mainButtonSpecs(const DcbState& state);
     static QVector<DcbButtonSpec> brightnessButtonSpecs(const DcbState& state);
     static QVector<DcbButtonSpec> charSizeButtonSpecs(const DcbState& state);
+    static QVector<DcbButtonSpec> dbAreaButtonSpecs();
+    static QVector<DcbButtonSpec> dbEditButtonSpecs(const DcbState& state);
+    static QVector<DcbButtonSpec> traitAreaButtonSpecs(const DcbState& state);
     static QVector<DcbButtonSpec> offButtonSpecs(const DcbState& state);
     static bool isHorizontal(DcbPosition position);
     static bool isLargeFunction(DcbFunction function);

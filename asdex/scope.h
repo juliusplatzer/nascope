@@ -11,6 +11,7 @@
 #include "asdex/cursors.h"
 #include "asdex/dcb.h"
 #include "asdex/datablocks.h"
+#include "asdex/dbareas.h"
 #include "asdex/tempdata.h"
 #include "asdex/targets.h"
 #include "renderer/font.h"
@@ -23,6 +24,7 @@
 #include <QMouseEvent>
 #include <QOpenGLWidget>
 #include <QPointF>
+#include <QStringList>
 #include <QTimer>
 #include <QVector>
 #include <QWheelEvent>
@@ -57,10 +59,30 @@ protected:
     void leaveEvent(QEvent* event) override;
 
 private:
+    struct LeaderDirectionKeyboardCommand {
+        QString value;
+
+        QStringList displayLines() const {
+            return {QStringLiteral("LDR DIR"), value};
+        }
+
+        int cursorLine() const { return 2; }
+        int cursorColumn() const { return value.size(); }
+
+        bool valueInt(int* out) const {
+            bool ok = false;
+            const int parsed = value.trimmed().toInt(&ok);
+            if (!ok || parsed < 1 || parsed > 9) return false;
+            if (out) *out = parsed;
+            return true;
+        }
+    };
+
     enum class CursorMode {
         Scope,
         Dcb,
         Captured,
+        Select,
         Hidden,
     };
 
@@ -89,7 +111,51 @@ private:
     void startBrightnessValueCommand(DcbFunction function);
     void startCharSizeMenu();
     void startCharSizeValueCommand(DcbFunction function);
+    void startDbAreaMenu();
+    void startDbEditMenu();
+    void startDefineTraitAreaCommand();
+    void startTraitAreaDbCharSizeCommand();
+    void startTraitAreaDbBrightnessCommand();
+    void startTraitAreaLeaderLengthCommand();
+    void startTraitAreaLeaderDirectionCommand();
+    void startDefineOffAreaCommand();
+    void startModifyTraitAreaCommand();
+    void startDeleteAllDbAreasCommand();
+    void startDeleteOneDbAreaCommand();
     void handleDcbDone();
+    bool isDrawingDbArea() const;
+    bool isSelectingDbArea() const;
+    bool dbAreaSelectableAt(const QPointF& logicalPoint) const;
+    bool deleteDbAreaAt(const QPointF& logicalPoint);
+    bool selectTraitAreaAt(const QPointF& logicalPoint);
+    bool showsDbAreas() const;
+    std::optional<DcbFunction> activeDcbFunctionForCommand() const;
+    DbArea* selectedDbArea();
+    const DbArea* selectedDbArea() const;
+    void selectDbArea(const QString& id);
+    void toggleGlobalDbEditField(DcbFunction function);
+    void toggleSelectedTraitDbField(DcbFunction function);
+    void toggleSelectedTraitVector();
+    const DbArea* traitAreaForTarget(const AsdexTarget& target) const;
+    bool vectorVisibleForTarget(const AsdexTarget& target) const;
+    DataBlockSettings dataBlockSettingsForTarget(const AsdexTarget& target) const;
+    int selectedTraitDbCharSizeValue() const;
+    int selectedTraitDbBrightnessValue() const;
+    int selectedTraitLeaderLengthValue() const;
+    int selectedTraitLeaderDirectionValue() const;
+    void setSelectedTraitDbCharSizeValue(int value);
+    void setSelectedTraitDbBrightnessValue(int value);
+    void setSelectedTraitLeaderLengthValue(int value);
+    void setSelectedTraitLeaderDirectionValue(int value);
+    LeaderDirection leaderDirectionFromDcbValue(int value) const;
+    int nextLeaderDirectionValue(int current, int step) const;
+    bool targetInsideDbOffArea(const AsdexTarget& target) const;
+    void addDbAreaPoint(const QPointF& worldFeet);
+    void completeDbAreaPolygon();
+    void clearDbAreaDraft();
+    bool dbAreaDraftWouldSelfIntersect(const QPointF& nextPoint) const;
+    bool dbAreaDraftWouldOverlapExisting(const QPointF& nextPoint) const;
+    bool dbAreaPolygonIsValidOnClose() const;
     CommandType commandForBrightnessFunction(DcbFunction function) const;
     QString brightnessCommandLabel(CommandType type) const;
     int brightnessValue(CommandType type) const;
@@ -112,6 +178,14 @@ private:
     int currentLeaderLengthValue() const;
     void setLeaderLengthValue(int leaderLength);
     void startLeaderLengthCommand();
+    int currentLeaderDirectionValue() const;
+    void setLeaderDirectionValue(int value);
+    bool leaderDirectionCommandActive() const;
+    bool isValidLeaderDirectionValue(int value) const;
+    void startLeaderDirectionKeyboardCommand(int value);
+    void cancelLeaderDirectionKeyboardCommand();
+    void submitLeaderDirectionForAll();
+    void submitLeaderDirectionForTargetAt(const QPointF& logicalPoint);
     void startMapRepositionCommand();
     void commitMapRepositionCommand();
     void cancelMapRepositionCommand();
@@ -159,13 +233,19 @@ private:
     TempAreaGeometry tempAreaGeometry_;
     QVector<asdex::AsdexTarget> targets_;
     QHash<QString, DataBlockVisibility> datablockVisibility_;
+    QHash<QString, bool> dbOffAreaDatablockOverride_;
     QHash<QString, EditedDbFields> pendingDatablockEdits_;
     QVector<TempArea> restrictedTempAreas_;
+    DbAreaStore dbAreaStore_;
+    QVector<QPointF> dbAreaDraftPoints_;
+    std::optional<QPointF> dbAreaDraftMouse_;
     CoastList coastList_;
     QString highlightedTargetId_;
+    QString selectedDbAreaId_;
     CommandType commandType_ = CommandType::None;
     std::optional<DatablockEditCommand> datablockEdit_;
     std::optional<DcbEntryCommand> dcbEntryCommand_;
+    std::optional<LeaderDirectionKeyboardCommand> leaderDirectionCommand_;
     std::optional<QPointF> mapRepositionOriginalCenter_;
     QString editingTrackId_;
     QPointF centerFeet_;
@@ -185,12 +265,15 @@ private:
     QPointF mapRepositionLastMouseFramebuffer_;
     bool suppressNextMapRepositionMove_ = false;
     bool suppressNextMapRepositionRelease_ = false;
+    bool suppressNextDbAreaSelectionRelease_ = false;
     QPointF panStartMouseFramebuffer_;
     QPointF panStartCenterFeet_;
 
     int targetVectorSeconds_ = 5;
     bool showVectorLine_ = true;
     int leaderLength_ = 2;
+    LeaderDirection leaderDirection_ = LeaderDirection::NE;
+    QHash<QString, int> targetLeaderDirectionOverrides_;
     int holdBarsBrightness_ = 95;
     int movementAreasBrightness_ = 95;
     int backgroundBrightness_ = 95;
@@ -205,6 +288,14 @@ private:
     int coastSuspendCharSize_ = 2;
     int tempDataCharSize_ = 2;
     int previewAreaCharSize_ = 2;
+    bool fullDataBlocks_ = true;
+    bool showAltitudeInDb_ = false;
+    bool showAircraftTypeInDb_ = true;
+    bool showSensorsInDb_ = false;
+    bool showAircraftCategoryInDb_ = false;
+    bool showFixInDb_ = true;
+    bool showVelocityInDb_ = false;
+    bool showScratchpadsInDb_ = true;
     CursorMode currentCursorMode_ = CursorMode::Hidden;
     bool fontLoaded_ = false;
     bool fontTexturesReady_ = false;

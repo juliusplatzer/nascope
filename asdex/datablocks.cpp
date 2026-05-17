@@ -143,6 +143,19 @@ BuiltDataBlock buildDataBlock(const AsdexTarget& target,
     BuiltDataBlock out;
     out.lines << (target.duplicateBeaconCode ? QStringLiteral("DUP BCN") : QString());
 
+    if (!settings.fullDataBlocks) {
+        QString partial;
+        if (!target.callsign.trimmed().isEmpty())
+            partial = target.callsign.trimmed();
+        else
+            partial = beaconOrNoBeacon(target.beaconCode);
+
+        out.lines << partial;
+        updateMeasuredWidth(out, out.lines.value(0), 0, settings.fontSize, font);
+        updateMeasuredWidth(out, partial, 1, settings.fontSize, font);
+        return out;
+    }
+
     QString line1;
     if (!target.callsign.trimmed().isEmpty())
         line1 = target.callsign.trimmed();
@@ -235,18 +248,33 @@ void drawDatablocks(const QVector<AsdexTarget>& targets,
                     const QMatrix4x4& screenProjection,
                     const std::function<QPointF(QPointF)>& worldToScreen,
                     const std::function<bool(const AsdexTarget&)>& isVisible,
-                    const renderer::BitmapFont& font,
-                    std::uint32_t fontTextureId,
-                    const DataBlockSettings& settings) {
-    if (!commandBuffer || !settings.showDataBlocks || fontTextureId == 0) return;
+                    const std::function<DataBlockSettings(const AsdexTarget&)>& settingsForTarget,
+                    const std::function<std::uint32_t(int)>& fontTextureForSize,
+                    const renderer::BitmapFont& font) {
+    if (!commandBuffer) return;
 
-    renderer::LinesBuilder* lineBuilder = renderer::getLinesBuilder();
-    renderer::TextBuilder* textBuilder = renderer::getTextBuilder();
-    textBuilder->setFont(&font);
+    commandBuffer->loadProjectionMatrix(screenProjection);
 
     for (const AsdexTarget& target : targets) {
         if (!target.correlated) continue;
-        if (isVisible && !isVisible(target)) continue;
+
+        const DataBlockSettings settings =
+            settingsForTarget ? settingsForTarget(target) : DataBlockSettings{};
+
+        if (isVisible) {
+            if (!isVisible(target)) continue;
+        } else if (!settings.showDataBlocks) {
+            continue;
+        }
+
+        const std::uint32_t fontTextureId =
+            fontTextureForSize ? fontTextureForSize(settings.fontSize) : 0;
+        if (fontTextureId == 0) continue;
+
+        renderer::LinesBuilder* lineBuilder = renderer::getLinesBuilder();
+        renderer::TextBuilder* textBuilder = renderer::getTextBuilder();
+        textBuilder->setFont(&font);
+
         drawOneDataBlock(target,
                          worldToScreen(target.positionFeet),
                          *lineBuilder,
@@ -254,17 +282,18 @@ void drawDatablocks(const QVector<AsdexTarget>& targets,
                          font,
                          fontTextureId,
                          settings);
+
+        commandBuffer->setRgba(renderer::RGBA::fromQColor(applyBrightness(QColor(0, 208, 0),
+                                                                          settings.brightness,
+                                                                          20)));
+        commandBuffer->lineWidth(1.0f);
+
+        lineBuilder->generateCommands(commandBuffer);
+        textBuilder->generateCommands(commandBuffer);
+
+        renderer::returnTextBuilder(textBuilder);
+        renderer::returnLinesBuilder(lineBuilder);
     }
-
-    commandBuffer->loadProjectionMatrix(screenProjection);
-    commandBuffer->setRgba(renderer::RGBA::fromQColor(applyBrightness(QColor(0, 208, 0),
-                                                                      settings.brightness,
-                                                                      20)));
-    lineBuilder->generateCommands(commandBuffer);
-    textBuilder->generateCommands(commandBuffer);
-
-    renderer::returnTextBuilder(textBuilder);
-    renderer::returnLinesBuilder(lineBuilder);
 }
 
 } // namespace asdex

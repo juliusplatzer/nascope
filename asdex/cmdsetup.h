@@ -11,6 +11,7 @@ namespace asdex {
 
 bool isBrightnessValueCommand(CommandType type);
 bool isCharSizeValueCommand(CommandType type);
+bool isDbAreaCommand(CommandType type);
 
 class DcbEntryCommand {
 public:
@@ -27,6 +28,8 @@ public:
         bool wrapWheel = false;
         QString initialEntry;
         int wheelBaseValue = 0;
+        QString entryPrefix;
+        int entryColumnOffset = 0;
     };
 
     static DcbEntryCommand range(int currentRange);
@@ -35,6 +38,15 @@ public:
     static DcbEntryCommand leaderLength(int currentLeaderLength);
     static DcbEntryCommand brightness(CommandType type, QString label, int currentValue);
     static DcbEntryCommand charSize(CommandType type, QString label, int currentValue);
+    static DcbEntryCommand deleteAllDbAreas();
+    static DcbEntryCommand traitAreaDbCharSize(int currentValue);
+    static DcbEntryCommand traitAreaDbBrightness(int currentValue);
+    static DcbEntryCommand traitAreaLeaderLength(int currentValue);
+    static DcbEntryCommand traitAreaLeaderDirection(int currentValue);
+    static DcbEntryCommand modifyTraitAreaDbCharSize(int currentValue);
+    static DcbEntryCommand modifyTraitAreaDbBrightness(int currentValue);
+    static DcbEntryCommand modifyTraitAreaLeaderLength(int currentValue);
+    static DcbEntryCommand modifyTraitAreaLeaderDirection(int currentValue);
 
     QStringList displayLines() const;
     int cursorLine() const;
@@ -48,6 +60,7 @@ public:
     void moveLeft();
     void moveRight();
     void wheelDelta(int steps);
+    void setEntryValue(int value);
 
     bool valueInt(int* out) const;
 

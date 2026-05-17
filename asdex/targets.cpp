@@ -200,7 +200,7 @@ void drawTargets(const QVector<AsdexTarget>& targets,
                  const QMatrix4x4& worldProjection,
                  Mode mode,
                  int vectorSeconds,
-                 bool showVectorLine,
+                 const std::function<bool(const AsdexTarget&)>& vectorVisibleForTarget,
                  int brightness) {
     Q_UNUSED(mode);
     if (!commandBuffer) return;
@@ -252,21 +252,25 @@ void drawTargets(const QVector<AsdexTarget>& targets,
 
     addTargetSymbols(targets, commandBuffer, brightness);
 
-    if (showVectorLine) {
-        renderer::LinesBuilder* vectorBuilder = renderer::getLinesBuilder();
-        for (const AsdexTarget& target : targets) {
-            if (target.groundSpeedKnots <= 0.0) continue;
-            vectorBuilder->addLine(target.positionFeet,
-                                   vectorEndFeet(target.positionFeet,
-                                                 target.groundSpeedKnots,
-                                                 target.groundTrackDegrees,
-                                                 vectorSeconds));
-        }
-        commandBuffer->setRgba(renderer::RGBA::fromQColor(vectorColor(brightness)));
-        commandBuffer->lineWidth(1.0f);
-        vectorBuilder->generateCommands(commandBuffer);
-        renderer::returnLinesBuilder(vectorBuilder);
+    renderer::LinesBuilder* vectorBuilder = renderer::getLinesBuilder();
+    for (const AsdexTarget& target : targets) {
+        if (target.groundSpeedKnots <= 0.0) continue;
+
+        const bool visible = vectorVisibleForTarget
+                                 ? vectorVisibleForTarget(target)
+                                 : true;
+        if (!visible) continue;
+
+        vectorBuilder->addLine(target.positionFeet,
+                               vectorEndFeet(target.positionFeet,
+                                             target.groundSpeedKnots,
+                                             target.groundTrackDegrees,
+                                             vectorSeconds));
     }
+    commandBuffer->setRgba(renderer::RGBA::fromQColor(vectorColor(brightness)));
+    commandBuffer->lineWidth(1.0f);
+    vectorBuilder->generateCommands(commandBuffer);
+    renderer::returnLinesBuilder(vectorBuilder);
 }
 
 } // namespace asdex

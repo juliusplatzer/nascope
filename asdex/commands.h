@@ -19,6 +19,7 @@ enum class CommandType {
     Rotate,
     VectorLength,
     LeaderLength,
+    LeaderDirection,
     MapReposition,
     Brightness,
     HoldBarsBrightness,
@@ -37,6 +38,25 @@ enum class CommandType {
     CoastSuspendCharSize,
     TempDataCharSize,
     PreviewAreaCharSize,
+
+    DbArea,
+    DefineTraitArea,
+    DefineTraitAreaTraits,
+    DefineTraitAreaDbCharSize,
+    DefineTraitAreaDbBrightness,
+    DefineTraitAreaLeaderLength,
+    DefineTraitAreaLeaderDirection,
+    DefineOffArea,
+    ModifyTraitArea,
+    ModifyTraitAreaTraits,
+    ModifyTraitAreaDbCharSize,
+    ModifyTraitAreaDbBrightness,
+    ModifyTraitAreaLeaderLength,
+    ModifyTraitAreaLeaderDirection,
+    DeleteAllDbAreas,
+    DeleteOneDbArea,
+
+    DbEdit,
 };
 
 }  // namespace asdex

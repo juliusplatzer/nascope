@@ -59,9 +59,9 @@ void drawDatablocks(const QVector<AsdexTarget>& targets,
                     const QMatrix4x4& screenProjection,
                     const std::function<QPointF(QPointF)>& worldToScreen,
                     const std::function<bool(const AsdexTarget&)>& isVisible,
-                    const renderer::BitmapFont& font,
-                    std::uint32_t fontTextureId,
-                    const DataBlockSettings& settings);
+                    const std::function<DataBlockSettings(const AsdexTarget&)>& settingsForTarget,
+                    const std::function<std::uint32_t(int)>& fontTextureForSize,
+                    const renderer::BitmapFont& font);
 
 } // namespace asdex
 
