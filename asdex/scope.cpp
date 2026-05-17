@@ -128,6 +128,18 @@ bool isTraitAreaValueCommand(CommandType type) {
     }
 }
 
+bool isModifyTraitAreaValueCommand(CommandType type) {
+    switch (type) {
+        case CommandType::ModifyTraitAreaDbCharSize:
+        case CommandType::ModifyTraitAreaDbBrightness:
+        case CommandType::ModifyTraitAreaLeaderLength:
+        case CommandType::ModifyTraitAreaLeaderDirection:
+            return true;
+        default:
+            return false;
+    }
+}
+
 } // namespace
 
 AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
@@ -337,7 +349,10 @@ void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
     if (isSelectingDbArea()) {
         if (event->button() != Qt::RightButton) {
             suppressNextDbAreaSelectionRelease_ = true;
-            deleteDbAreaAt(event->position());
+            if (commandType_ == CommandType::DeleteOneDbArea)
+                deleteDbAreaAt(event->position());
+            else if (commandType_ == CommandType::ModifyTraitArea)
+                selectTraitAreaAt(event->position());
             event->accept();
             return;
         }
@@ -636,7 +651,8 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
             return;
         }
 
-        if (dcbEntryCommand_->type() == CommandType::DefineTraitAreaLeaderDirection) {
+        if (dcbEntryCommand_->type() == CommandType::DefineTraitAreaLeaderDirection
+            || dcbEntryCommand_->type() == CommandType::ModifyTraitAreaLeaderDirection) {
             int value = 0;
             const int current = dcbEntryCommand_->valueInt(&value)
                 ? value
@@ -673,8 +689,11 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
             case CommandType::TempDataCharSize:
             case CommandType::PreviewAreaCharSize:
             case CommandType::DefineTraitAreaDbCharSize:
+            case CommandType::ModifyTraitAreaDbCharSize:
             case CommandType::DefineTraitAreaDbBrightness:
+            case CommandType::ModifyTraitAreaDbBrightness:
             case CommandType::DefineTraitAreaLeaderLength:
+            case CommandType::ModifyTraitAreaLeaderLength:
                 steps = wheelY > 0 ? 1 : -1;
                 break;
             case CommandType::Range:
@@ -721,12 +740,15 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
                     setCharSizeValue(dcbEntryCommand_->type(), value);
                     break;
                 case CommandType::DefineTraitAreaDbCharSize:
+                case CommandType::ModifyTraitAreaDbCharSize:
                     setSelectedTraitDbCharSizeValue(value);
                     break;
                 case CommandType::DefineTraitAreaDbBrightness:
+                case CommandType::ModifyTraitAreaDbBrightness:
                     setSelectedTraitDbBrightnessValue(value);
                     break;
                 case CommandType::DefineTraitAreaLeaderLength:
+                case CommandType::ModifyTraitAreaLeaderLength:
                     setSelectedTraitLeaderLengthValue(value);
                     break;
                 default:
@@ -1248,6 +1270,8 @@ void AsdexScopeWidget::submitDcbEntryCommand() {
             commandType_ = CommandType::DbArea;
         } else if (isTraitAreaValueCommand(dcbEntryCommand_->type())) {
             commandType_ = CommandType::DefineTraitAreaTraits;
+        } else if (isModifyTraitAreaValueCommand(dcbEntryCommand_->type())) {
+            commandType_ = CommandType::ModifyTraitAreaTraits;
         } else {
             commandType_ = CommandType::None;
         }
@@ -1309,13 +1333,25 @@ void AsdexScopeWidget::submitDcbEntryCommand() {
             setSelectedTraitDbCharSizeValue(value);
             commandType_ = CommandType::DefineTraitAreaTraits;
             break;
+        case CommandType::ModifyTraitAreaDbCharSize:
+            setSelectedTraitDbCharSizeValue(value);
+            commandType_ = CommandType::ModifyTraitAreaTraits;
+            break;
         case CommandType::DefineTraitAreaDbBrightness:
             setSelectedTraitDbBrightnessValue(value);
             commandType_ = CommandType::DefineTraitAreaTraits;
             break;
+        case CommandType::ModifyTraitAreaDbBrightness:
+            setSelectedTraitDbBrightnessValue(value);
+            commandType_ = CommandType::ModifyTraitAreaTraits;
+            break;
         case CommandType::DefineTraitAreaLeaderLength:
             setSelectedTraitLeaderLengthValue(value);
             commandType_ = CommandType::DefineTraitAreaTraits;
+            break;
+        case CommandType::ModifyTraitAreaLeaderLength:
+            setSelectedTraitLeaderLengthValue(value);
+            commandType_ = CommandType::ModifyTraitAreaTraits;
             break;
         case CommandType::DefineTraitAreaLeaderDirection:
             if (value == 5) {
@@ -1331,6 +1367,20 @@ void AsdexScopeWidget::submitDcbEntryCommand() {
             setSelectedTraitLeaderDirectionValue(value);
             commandType_ = CommandType::DefineTraitAreaTraits;
             break;
+        case CommandType::ModifyTraitAreaLeaderDirection:
+            if (value == 5) {
+                previewArea_.setSystemResponse(QStringLiteral("INVALID ENTRY"));
+                commandType_ = CommandType::ModifyTraitAreaTraits;
+                dcb_.setMenu(currentDcbMenu());
+                dcbEntryCommand_.reset();
+                clearDcbHover();
+                setAsdexCursor(CursorMode::Scope);
+                update();
+                return;
+            }
+            setSelectedTraitLeaderDirectionValue(value);
+            commandType_ = CommandType::ModifyTraitAreaTraits;
+            break;
         case CommandType::None:
         case CommandType::EditDatablockFields:
         case CommandType::MapReposition:
@@ -1342,6 +1392,7 @@ void AsdexScopeWidget::submitDcbEntryCommand() {
         case CommandType::DefineTraitAreaTraits:
         case CommandType::DefineOffArea:
         case CommandType::ModifyTraitArea:
+        case CommandType::ModifyTraitAreaTraits:
         case CommandType::DeleteOneDbArea:
         default:
             commandType_ = CommandType::None;
@@ -1388,6 +1439,14 @@ DcbMenu AsdexScopeWidget::currentDcbMenu() const {
         || commandType_ == CommandType::DefineTraitAreaLeaderLength
         || commandType_ == CommandType::DefineTraitAreaLeaderDirection) {
         return DcbMenu::DefineTraitArea;
+    }
+
+    if (commandType_ == CommandType::ModifyTraitAreaTraits
+        || commandType_ == CommandType::ModifyTraitAreaDbCharSize
+        || commandType_ == CommandType::ModifyTraitAreaDbBrightness
+        || commandType_ == CommandType::ModifyTraitAreaLeaderLength
+        || commandType_ == CommandType::ModifyTraitAreaLeaderDirection) {
+        return DcbMenu::ModifyTraitArea;
     }
 
     if (isDbAreaCommand(commandType_)) return DcbMenu::DbArea;
@@ -1449,7 +1508,8 @@ void AsdexScopeWidget::toggleDataBlockForTarget(const AsdexTarget& target) {
 }
 
 void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
-    if (currentDcbMenu() == DcbMenu::DefineTraitArea) {
+    if (currentDcbMenu() == DcbMenu::DefineTraitArea
+        || currentDcbMenu() == DcbMenu::ModifyTraitArea) {
         switch (function) {
             case DcbFunction::DbFullPart:
             case DcbFunction::DbAltitudeOnOff:
@@ -1707,10 +1767,13 @@ void AsdexScopeWidget::startTraitAreaDbCharSizeCommand() {
     const DbArea* area = selectedDbArea();
     if (!area || area->kind != DbAreaKind::Trait) return;
 
-    commandType_ = CommandType::DefineTraitAreaDbCharSize;
-    dcb_.setMenu(DcbMenu::DefineTraitArea);
-    dcbEntryCommand_ =
-        DcbEntryCommand::traitAreaDbCharSize(selectedTraitDbCharSizeValue());
+    const bool modify = currentDcbMenu() == DcbMenu::ModifyTraitArea;
+    commandType_ = modify ? CommandType::ModifyTraitAreaDbCharSize
+                          : CommandType::DefineTraitAreaDbCharSize;
+    dcb_.setMenu(modify ? DcbMenu::ModifyTraitArea : DcbMenu::DefineTraitArea);
+    dcbEntryCommand_ = modify
+        ? DcbEntryCommand::modifyTraitAreaDbCharSize(selectedTraitDbCharSizeValue())
+        : DcbEntryCommand::traitAreaDbCharSize(selectedTraitDbCharSizeValue());
     datablockEdit_.reset();
     clearHighlightedTarget();
     clearDcbHover();
@@ -1723,10 +1786,13 @@ void AsdexScopeWidget::startTraitAreaDbBrightnessCommand() {
     const DbArea* area = selectedDbArea();
     if (!area || area->kind != DbAreaKind::Trait) return;
 
-    commandType_ = CommandType::DefineTraitAreaDbBrightness;
-    dcb_.setMenu(DcbMenu::DefineTraitArea);
-    dcbEntryCommand_ =
-        DcbEntryCommand::traitAreaDbBrightness(selectedTraitDbBrightnessValue());
+    const bool modify = currentDcbMenu() == DcbMenu::ModifyTraitArea;
+    commandType_ = modify ? CommandType::ModifyTraitAreaDbBrightness
+                          : CommandType::DefineTraitAreaDbBrightness;
+    dcb_.setMenu(modify ? DcbMenu::ModifyTraitArea : DcbMenu::DefineTraitArea);
+    dcbEntryCommand_ = modify
+        ? DcbEntryCommand::modifyTraitAreaDbBrightness(selectedTraitDbBrightnessValue())
+        : DcbEntryCommand::traitAreaDbBrightness(selectedTraitDbBrightnessValue());
     datablockEdit_.reset();
     clearHighlightedTarget();
     clearDcbHover();
@@ -1739,10 +1805,13 @@ void AsdexScopeWidget::startTraitAreaLeaderLengthCommand() {
     const DbArea* area = selectedDbArea();
     if (!area || area->kind != DbAreaKind::Trait) return;
 
-    commandType_ = CommandType::DefineTraitAreaLeaderLength;
-    dcb_.setMenu(DcbMenu::DefineTraitArea);
-    dcbEntryCommand_ =
-        DcbEntryCommand::traitAreaLeaderLength(selectedTraitLeaderLengthValue());
+    const bool modify = currentDcbMenu() == DcbMenu::ModifyTraitArea;
+    commandType_ = modify ? CommandType::ModifyTraitAreaLeaderLength
+                          : CommandType::DefineTraitAreaLeaderLength;
+    dcb_.setMenu(modify ? DcbMenu::ModifyTraitArea : DcbMenu::DefineTraitArea);
+    dcbEntryCommand_ = modify
+        ? DcbEntryCommand::modifyTraitAreaLeaderLength(selectedTraitLeaderLengthValue())
+        : DcbEntryCommand::traitAreaLeaderLength(selectedTraitLeaderLengthValue());
     datablockEdit_.reset();
     clearHighlightedTarget();
     clearDcbHover();
@@ -1755,10 +1824,13 @@ void AsdexScopeWidget::startTraitAreaLeaderDirectionCommand() {
     const DbArea* area = selectedDbArea();
     if (!area || area->kind != DbAreaKind::Trait) return;
 
-    commandType_ = CommandType::DefineTraitAreaLeaderDirection;
-    dcb_.setMenu(DcbMenu::DefineTraitArea);
-    dcbEntryCommand_ =
-        DcbEntryCommand::traitAreaLeaderDirection(selectedTraitLeaderDirectionValue());
+    const bool modify = currentDcbMenu() == DcbMenu::ModifyTraitArea;
+    commandType_ = modify ? CommandType::ModifyTraitAreaLeaderDirection
+                          : CommandType::DefineTraitAreaLeaderDirection;
+    dcb_.setMenu(modify ? DcbMenu::ModifyTraitArea : DcbMenu::DefineTraitArea);
+    dcbEntryCommand_ = modify
+        ? DcbEntryCommand::modifyTraitAreaLeaderDirection(selectedTraitLeaderDirectionValue())
+        : DcbEntryCommand::traitAreaLeaderDirection(selectedTraitLeaderDirectionValue());
     datablockEdit_.reset();
     clearHighlightedTarget();
     clearDcbHover();
@@ -1781,7 +1853,11 @@ void AsdexScopeWidget::startDefineOffAreaCommand() {
 void AsdexScopeWidget::startModifyTraitAreaCommand() {
     commandType_ = CommandType::ModifyTraitArea;
     dcb_.setMenu(DcbMenu::DbArea);
+    selectedDbAreaId_.clear();
     clearDbAreaDraft();
+    datablockEdit_.reset();
+    dcbEntryCommand_.reset();
+    editingTrackId_.clear();
     clearHighlightedTarget();
     clearDcbHover();
     previewArea_.setSystemResponse(QString());
@@ -1851,6 +1927,32 @@ bool AsdexScopeWidget::deleteDbAreaAt(const QPointF& logicalPoint) {
     selectedDbAreaId_.clear();
     commandType_ = CommandType::DbArea;
     dcb_.setMenu(DcbMenu::DbArea);
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Scope);
+    update();
+    return true;
+}
+
+bool AsdexScopeWidget::selectTraitAreaAt(const QPointF& logicalPoint) {
+    if (commandType_ != CommandType::ModifyTraitArea) return false;
+
+    const QPointF world = screenToWorldFeet(logicalPoint, framebufferRenderSize());
+    const int index = dbAreaStore_.indexOfAreaContaining(world, false);
+    if (index < 0) {
+        update();
+        return false;
+    }
+
+    DbArea* area = dbAreaStore_.areaAt(index);
+    if (!area || area->kind != DbAreaKind::Trait) {
+        update();
+        return false;
+    }
+
+    selectedDbAreaId_ = area->id;
+    commandType_ = CommandType::ModifyTraitAreaTraits;
+    dcb_.setMenu(DcbMenu::ModifyTraitArea);
     clearDcbHover();
     previewArea_.setSystemResponse(QString());
     setAsdexCursor(CursorMode::Scope);
@@ -2100,8 +2202,6 @@ std::optional<DcbFunction> AsdexScopeWidget::activeDcbFunctionForCommand() const
             return DcbFunction::DefineDbTraitArea;
         case CommandType::DefineOffArea:
             return DcbFunction::DefineDbOffArea;
-        case CommandType::ModifyTraitArea:
-            return DcbFunction::ModifyDbTraitArea;
         case CommandType::DeleteOneDbArea:
             return DcbFunction::DeleteOneDbArea;
         case CommandType::DbEdit:
@@ -2268,7 +2368,12 @@ void AsdexScopeWidget::handleDcbDone() {
         || commandType_ == CommandType::DefineTraitAreaDbCharSize
         || commandType_ == CommandType::DefineTraitAreaDbBrightness
         || commandType_ == CommandType::DefineTraitAreaLeaderLength
-        || commandType_ == CommandType::DefineTraitAreaLeaderDirection) {
+        || commandType_ == CommandType::DefineTraitAreaLeaderDirection
+        || commandType_ == CommandType::ModifyTraitAreaTraits
+        || commandType_ == CommandType::ModifyTraitAreaDbCharSize
+        || commandType_ == CommandType::ModifyTraitAreaDbBrightness
+        || commandType_ == CommandType::ModifyTraitAreaLeaderLength
+        || commandType_ == CommandType::ModifyTraitAreaLeaderDirection) {
         commandType_ = CommandType::DbArea;
         dcb_.setMenu(DcbMenu::DbArea);
         dcbEntryCommand_.reset();
@@ -2790,9 +2895,17 @@ QStringList AsdexScopeWidget::activeCommandLines() const {
         case CommandType::DefineTraitArea:
         case CommandType::DefineTraitAreaTraits:
             return {QStringLiteral("DB AREA"), QStringLiteral("DEFINE TRAIT AREA")};
+        case CommandType::ModifyTraitArea:
+        case CommandType::ModifyTraitAreaTraits:
+            return {QStringLiteral("DB AREA"), QStringLiteral("MODIFY TRAIT AREA")};
         case CommandType::DefineTraitAreaDbCharSize:
             return {QStringLiteral("DB AREA"),
                     QStringLiteral("DEFINE TRAIT AREA"),
+                    QStringLiteral("CHAR SIZE"),
+                    QStringLiteral("DATA BLOCK")};
+        case CommandType::ModifyTraitAreaDbCharSize:
+            return {QStringLiteral("DB AREA"),
+                    QStringLiteral("MODIFY TRAIT AREA"),
                     QStringLiteral("CHAR SIZE"),
                     QStringLiteral("DATA BLOCK")};
         case CommandType::DefineTraitAreaDbBrightness:
@@ -2800,18 +2913,29 @@ QStringList AsdexScopeWidget::activeCommandLines() const {
                     QStringLiteral("DEFINE TRAIT AREA"),
                     QStringLiteral("BRITE"),
                     QStringLiteral("DATA BLOCK")};
+        case CommandType::ModifyTraitAreaDbBrightness:
+            return {QStringLiteral("DB AREA"),
+                    QStringLiteral("MODIFY TRAIT AREA"),
+                    QStringLiteral("BRITE"),
+                    QStringLiteral("DATA BLOCK")};
         case CommandType::DefineTraitAreaLeaderLength:
             return {QStringLiteral("DB AREA"),
                     QStringLiteral("DEFINE TRAIT AREA"),
+                    QStringLiteral("LDR LNG")};
+        case CommandType::ModifyTraitAreaLeaderLength:
+            return {QStringLiteral("DB AREA"),
+                    QStringLiteral("MODIFY TRAIT AREA"),
                     QStringLiteral("LDR LNG")};
         case CommandType::DefineTraitAreaLeaderDirection:
             return {QStringLiteral("DB AREA"),
                     QStringLiteral("DEFINE TRAIT AREA"),
                     QStringLiteral("LDR DIR")};
+        case CommandType::ModifyTraitAreaLeaderDirection:
+            return {QStringLiteral("DB AREA"),
+                    QStringLiteral("MODIFY TRAIT AREA"),
+                    QStringLiteral("LDR DIR")};
         case CommandType::DefineOffArea:
             return {QStringLiteral("DB AREA"), QStringLiteral("DEFINE OFF AREA")};
-        case CommandType::ModifyTraitArea:
-            return {QStringLiteral("DB AREA"), QStringLiteral("MODIFY TRAIT AREA")};
         case CommandType::DeleteAllDbAreas:
             return {QStringLiteral("DB AREA"),
                     QStringLiteral("DELETE ALL AREAS?"),
@@ -3202,7 +3326,8 @@ bool AsdexScopeWidget::isPointOverDcb(const QPointF& logicalPoint) const {
 bool AsdexScopeWidget::handleDcbWheel(DcbFunction function, int wheelY) {
     const int step = wheelY > 0 ? 1 : -1;
 
-    if (currentDcbMenu() == DcbMenu::DefineTraitArea) {
+    if (currentDcbMenu() == DcbMenu::DefineTraitArea
+        || currentDcbMenu() == DcbMenu::ModifyTraitArea) {
         switch (function) {
             case DcbFunction::DataBlockCharSize:
                 setSelectedTraitDbCharSizeValue(selectedTraitDbCharSizeValue() + step);

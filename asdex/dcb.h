@@ -35,6 +35,7 @@ enum class DcbMenu {
     DbArea,
     DbEdit,
     DefineTraitArea,
+    ModifyTraitArea,
     Off,
 };
 
@@ -256,7 +257,7 @@ private:
     static QVector<DcbButtonSpec> charSizeButtonSpecs(const DcbState& state);
     static QVector<DcbButtonSpec> dbAreaButtonSpecs();
     static QVector<DcbButtonSpec> dbEditButtonSpecs(const DcbState& state);
-    static QVector<DcbButtonSpec> defineTraitAreaButtonSpecs(const DcbState& state);
+    static QVector<DcbButtonSpec> traitAreaButtonSpecs(const DcbState& state);
     static QVector<DcbButtonSpec> offButtonSpecs(const DcbState& state);
     static bool isHorizontal(DcbPosition position);
     static bool isLargeFunction(DcbFunction function);

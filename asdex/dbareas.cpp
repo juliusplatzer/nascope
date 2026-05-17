@@ -66,6 +66,16 @@ const DbArea* DbAreaStore::areaById(const QString& id) const {
     return nullptr;
 }
 
+DbArea* DbAreaStore::areaAt(int index) {
+    if (index < 0 || index >= areas_.size()) return nullptr;
+    return &areas_[index];
+}
+
+const DbArea* DbAreaStore::areaAt(int index) const {
+    if (index < 0 || index >= areas_.size()) return nullptr;
+    return &areas_[index];
+}
+
 int DbAreaStore::indexOfAreaContaining(const QPointF& pointFeet,
                                        bool includeOffAreas) const {
     for (int i = 0; i < areas_.size(); ++i) {

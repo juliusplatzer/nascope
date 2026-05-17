@@ -57,6 +57,8 @@ public:
     const DbArea* firstAreaContaining(const QPointF& pointFeet) const;
     DbArea* areaById(const QString& id);
     const DbArea* areaById(const QString& id) const;
+    DbArea* areaAt(int index);
+    const DbArea* areaAt(int index) const;
     int indexOfAreaContaining(const QPointF& pointFeet,
                               bool includeOffAreas = true) const;
     bool removeAreaContaining(const QPointF& pointFeet,

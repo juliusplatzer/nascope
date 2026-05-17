@@ -48,6 +48,11 @@ enum class CommandType {
     DefineTraitAreaLeaderDirection,
     DefineOffArea,
     ModifyTraitArea,
+    ModifyTraitAreaTraits,
+    ModifyTraitAreaDbCharSize,
+    ModifyTraitAreaDbBrightness,
+    ModifyTraitAreaLeaderLength,
+    ModifyTraitAreaLeaderDirection,
     DeleteAllDbAreas,
     DeleteOneDbArea,
 

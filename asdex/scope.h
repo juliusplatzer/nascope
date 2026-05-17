@@ -127,6 +127,7 @@ private:
     bool isSelectingDbArea() const;
     bool dbAreaSelectableAt(const QPointF& logicalPoint) const;
     bool deleteDbAreaAt(const QPointF& logicalPoint);
+    bool selectTraitAreaAt(const QPointF& logicalPoint);
     bool showsDbAreas() const;
     std::optional<DcbFunction> activeDcbFunctionForCommand() const;
     DbArea* selectedDbArea();

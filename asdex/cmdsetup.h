@@ -43,6 +43,10 @@ public:
     static DcbEntryCommand traitAreaDbBrightness(int currentValue);
     static DcbEntryCommand traitAreaLeaderLength(int currentValue);
     static DcbEntryCommand traitAreaLeaderDirection(int currentValue);
+    static DcbEntryCommand modifyTraitAreaDbCharSize(int currentValue);
+    static DcbEntryCommand modifyTraitAreaDbBrightness(int currentValue);
+    static DcbEntryCommand modifyTraitAreaLeaderLength(int currentValue);
+    static DcbEntryCommand modifyTraitAreaLeaderDirection(int currentValue);
 
     QStringList displayLines() const;
     int cursorLine() const;

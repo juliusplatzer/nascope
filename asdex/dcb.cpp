@@ -459,7 +459,7 @@ QVector<DcbButtonSpec> Dcb::dbEditButtonSpecs(const DcbState& state) {
     return out;
 }
 
-QVector<DcbButtonSpec> Dcb::defineTraitAreaButtonSpecs(const DcbState& state) {
+QVector<DcbButtonSpec> Dcb::traitAreaButtonSpecs(const DcbState& state) {
     QVector<DcbButtonSpec> out;
     out.reserve(17);
 
@@ -594,7 +594,8 @@ DcbLayout Dcb::layout(QSize displaySize,
         : menu_ == DcbMenu::CharSize ? charSizeButtonSpecs(state)
         : menu_ == DcbMenu::DbArea ? dbAreaButtonSpecs()
         : menu_ == DcbMenu::DbEdit ? dbEditButtonSpecs(state)
-        : menu_ == DcbMenu::DefineTraitArea ? defineTraitAreaButtonSpecs(state)
+        : menu_ == DcbMenu::DefineTraitArea ? traitAreaButtonSpecs(state)
+        : menu_ == DcbMenu::ModifyTraitArea ? traitAreaButtonSpecs(state)
                                      : offMenu ? offButtonSpecs(state) : mainButtonSpecs(state);
 
     int row = 1;

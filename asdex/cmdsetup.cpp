@@ -46,6 +46,11 @@ bool isDbAreaCommand(CommandType type) {
     case CommandType::DefineTraitAreaLeaderDirection:
     case CommandType::DefineOffArea:
     case CommandType::ModifyTraitArea:
+    case CommandType::ModifyTraitAreaTraits:
+    case CommandType::ModifyTraitAreaDbCharSize:
+    case CommandType::ModifyTraitAreaDbBrightness:
+    case CommandType::ModifyTraitAreaLeaderLength:
+    case CommandType::ModifyTraitAreaLeaderDirection:
     case CommandType::DeleteAllDbAreas:
     case CommandType::DeleteOneDbArea:
         return true;
@@ -226,6 +231,80 @@ DcbEntryCommand DcbEntryCommand::traitAreaLeaderDirection(int currentValue) {
     spec.headingLines = {
         QStringLiteral("DB AREA"),
         QStringLiteral("DEFINE TRAIT AREA"),
+        QStringLiteral("LDR DIR"),
+    };
+    spec.minValue = 1;
+    spec.maxValue = 9;
+    spec.wheelStep = 1;
+    spec.invalidMessage = QStringLiteral("INVALID ENTRY");
+    spec.numericOnly = true;
+    spec.initialEntry = QString();
+    spec.wheelBaseValue = currentValue;
+    return DcbEntryCommand(spec);
+}
+
+DcbEntryCommand DcbEntryCommand::modifyTraitAreaDbCharSize(int currentValue) {
+    Spec spec;
+    spec.type = CommandType::ModifyTraitAreaDbCharSize;
+    spec.headingLines = {
+        QStringLiteral("DB AREA"),
+        QStringLiteral("MODIFY TRAIT AREA"),
+        QStringLiteral("CHAR SIZE"),
+        QStringLiteral("DATA BLOCK"),
+    };
+    spec.minValue = 1;
+    spec.maxValue = 6;
+    spec.wheelStep = 1;
+    spec.invalidMessage = QStringLiteral("INVALID SIZE");
+    spec.numericOnly = true;
+    spec.initialEntry = QString();
+    spec.wheelBaseValue = currentValue;
+    return DcbEntryCommand(spec);
+}
+
+DcbEntryCommand DcbEntryCommand::modifyTraitAreaDbBrightness(int currentValue) {
+    Spec spec;
+    spec.type = CommandType::ModifyTraitAreaDbBrightness;
+    spec.headingLines = {
+        QStringLiteral("DB AREA"),
+        QStringLiteral("MODIFY TRAIT AREA"),
+        QStringLiteral("BRITE"),
+        QStringLiteral("DATA BLOCK"),
+    };
+    spec.minValue = 1;
+    spec.maxValue = 99;
+    spec.wheelStep = 1;
+    spec.invalidMessage = QStringLiteral("INVALID ENTRY");
+    spec.numericOnly = true;
+    spec.initialEntry = QString();
+    spec.wheelBaseValue = currentValue;
+    return DcbEntryCommand(spec);
+}
+
+DcbEntryCommand DcbEntryCommand::modifyTraitAreaLeaderLength(int currentValue) {
+    Spec spec;
+    spec.type = CommandType::ModifyTraitAreaLeaderLength;
+    spec.headingLines = {
+        QStringLiteral("DB AREA"),
+        QStringLiteral("MODIFY TRAIT AREA"),
+        QStringLiteral("LDR LNG"),
+    };
+    spec.minValue = 0;
+    spec.maxValue = 15;
+    spec.wheelStep = 1;
+    spec.invalidMessage = QStringLiteral("INVALID LNG");
+    spec.numericOnly = true;
+    spec.initialEntry = QString();
+    spec.wheelBaseValue = currentValue;
+    return DcbEntryCommand(spec);
+}
+
+DcbEntryCommand DcbEntryCommand::modifyTraitAreaLeaderDirection(int currentValue) {
+    Spec spec;
+    spec.type = CommandType::ModifyTraitAreaLeaderDirection;
+    spec.headingLines = {
+        QStringLiteral("DB AREA"),
+        QStringLiteral("MODIFY TRAIT AREA"),
         QStringLiteral("LDR DIR"),
     };
     spec.minValue = 1;
