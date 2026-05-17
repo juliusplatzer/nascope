@@ -7,6 +7,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
+
 namespace asdex {
 
 bool isBrightnessValueCommand(CommandType type);
@@ -30,29 +32,67 @@ public:
         int wheelBaseValue = 0;
         QString entryPrefix;
         int entryColumnOffset = 0;
+        std::function<void(int)> apply;
+        std::function<bool(int, QString*)> validate;
+        CommandType nextCommandType = CommandType::None;
     };
 
-    static DcbEntryCommand range(int currentRange);
-    static DcbEntryCommand rotate(int currentRotation);
-    static DcbEntryCommand vectorLength(int currentVectorLength);
-    static DcbEntryCommand leaderLength(int currentLeaderLength);
-    static DcbEntryCommand brightness(CommandType type, QString label, int currentValue);
-    static DcbEntryCommand charSize(CommandType type, QString label, int currentValue);
-    static DcbEntryCommand deleteAllDbAreas();
-    static DcbEntryCommand traitAreaDbCharSize(int currentValue);
-    static DcbEntryCommand traitAreaDbBrightness(int currentValue);
-    static DcbEntryCommand traitAreaLeaderLength(int currentValue);
-    static DcbEntryCommand traitAreaLeaderDirection(int currentValue);
-    static DcbEntryCommand modifyTraitAreaDbCharSize(int currentValue);
-    static DcbEntryCommand modifyTraitAreaDbBrightness(int currentValue);
-    static DcbEntryCommand modifyTraitAreaLeaderLength(int currentValue);
-    static DcbEntryCommand modifyTraitAreaLeaderDirection(int currentValue);
+    static DcbEntryCommand range(int currentRange,
+                                 std::function<void(int)> apply,
+                                 CommandType nextCommandType);
+    static DcbEntryCommand rotate(int currentRotation,
+                                  std::function<void(int)> apply,
+                                  CommandType nextCommandType);
+    static DcbEntryCommand vectorLength(int currentVectorLength,
+                                        std::function<void(int)> apply,
+                                        CommandType nextCommandType);
+    static DcbEntryCommand leaderLength(int currentLeaderLength,
+                                        std::function<void(int)> apply,
+                                        CommandType nextCommandType);
+    static DcbEntryCommand brightness(CommandType type,
+                                      QString label,
+                                      int currentValue,
+                                      std::function<void(int)> apply,
+                                      CommandType nextCommandType);
+    static DcbEntryCommand charSize(CommandType type,
+                                    QString label,
+                                    int currentValue,
+                                    std::function<void(int)> apply,
+                                    CommandType nextCommandType);
+    static DcbEntryCommand deleteAllDbAreas(std::function<void(int)> apply,
+                                            CommandType nextCommandType);
+    static DcbEntryCommand traitAreaDbCharSize(int currentValue,
+                                               std::function<void(int)> apply,
+                                               CommandType nextCommandType);
+    static DcbEntryCommand traitAreaDbBrightness(int currentValue,
+                                                 std::function<void(int)> apply,
+                                                 CommandType nextCommandType);
+    static DcbEntryCommand traitAreaLeaderLength(int currentValue,
+                                                 std::function<void(int)> apply,
+                                                 CommandType nextCommandType);
+    static DcbEntryCommand traitAreaLeaderDirection(int currentValue,
+                                                    std::function<void(int)> apply,
+                                                    CommandType nextCommandType);
+    static DcbEntryCommand modifyTraitAreaDbCharSize(int currentValue,
+                                                     std::function<void(int)> apply,
+                                                     CommandType nextCommandType);
+    static DcbEntryCommand modifyTraitAreaDbBrightness(int currentValue,
+                                                       std::function<void(int)> apply,
+                                                       CommandType nextCommandType);
+    static DcbEntryCommand modifyTraitAreaLeaderLength(int currentValue,
+                                                       std::function<void(int)> apply,
+                                                       CommandType nextCommandType);
+    static DcbEntryCommand modifyTraitAreaLeaderDirection(int currentValue,
+                                                          std::function<void(int)> apply,
+                                                          CommandType nextCommandType);
 
     QStringList displayLines() const;
     int cursorLine() const;
     int cursorColumn() const;
     CommandType type() const;
+    CommandType nextCommandType() const;
     QString invalidMessage() const;
+    void apply(int value) const;
 
     void insert(QChar c);
     void backspace();
