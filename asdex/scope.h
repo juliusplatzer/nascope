@@ -137,6 +137,7 @@ private:
     void toggleSelectedTraitDbField(DcbFunction function);
     void toggleSelectedTraitVector();
     const DbArea* traitAreaForTarget(const AsdexTarget& target) const;
+    bool vectorVisibleForTarget(const AsdexTarget& target) const;
     DataBlockSettings dataBlockSettingsForTarget(const AsdexTarget& target) const;
     int selectedTraitDbCharSizeValue() const;
     int selectedTraitDbBrightnessValue() const;

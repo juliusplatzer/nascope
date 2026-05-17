@@ -1989,6 +1989,14 @@ const DbArea* AsdexScopeWidget::traitAreaForTarget(const AsdexTarget& target) co
     return nullptr;
 }
 
+bool AsdexScopeWidget::vectorVisibleForTarget(const AsdexTarget& target) const {
+    if (const DbArea* area = traitAreaForTarget(target)) {
+        return area->traits.showVector;
+    }
+
+    return showVectorLine_;
+}
+
 DataBlockSettings AsdexScopeWidget::dataBlockSettingsForTarget(
     const AsdexTarget& target) const {
     DataBlockSettings settings;
@@ -3011,7 +3019,9 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
                 worldProjection,
                 mode_,
                 targetVectorSeconds_,
-                showVectorLine_,
+                [this](const AsdexTarget& target) {
+                    return vectorVisibleForTarget(target);
+                },
                 trackBrightness_);
 
     const DcbState dcbState = makeDcbState();
