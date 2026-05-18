@@ -50,9 +50,6 @@
     </dependencies>
 
     <build>
-        <!-- Flat source layout: reader/smes/{package}/{File}.java -->
-        <sourceDirectory>reader/smes</sourceDirectory>
-
         <plugins>
             <!-- Fat jar: java -jar target/faascope-stdds-1.0-SNAPSHOT.jar -->
             <plugin>

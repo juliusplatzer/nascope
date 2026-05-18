@@ -2,7 +2,7 @@
 #define ASDEX_CMDSLEW_H_
 
 #include "asdex/commands.h"
-#include "asdex/targetcache.h"
+#include "asdex/target.h"
 
 #include <QChar>
 #include <QString>

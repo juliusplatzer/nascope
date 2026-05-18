@@ -1,10 +1,10 @@
 #include "asdex/videomaps.h"
 
-#include "utils/math.h"
-#include "utils/resources.h"
+#include "math/latlong.h"
 #include "renderer/builders.h"
 #include "renderer/cmdbuffer.h"
 #include "renderer/tessellator.h"
+#include "util/resources.h"
 
 #include <QDebug>
 #include <QFile>
@@ -155,10 +155,15 @@ VideoMap::Mesh tessellate(const PolygonRings& polygon) {
 
 } // namespace
 
+QString videomapPath(const QString& icao) {
+    return util::findProjectRelativeFile(
+        QStringLiteral("resources/videomaps/asdex/%1.geojson.gz").arg(icao.toUpper()));
+}
+
 VideoMap VideoMap::load(const QString& icao) {
     VideoMap map;
 
-    const QString path = utils::videomapPath(icao);
+    const QString path = videomapPath(icao);
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
         qWarning().noquote() << "[renderer] cannot open videomap" << path << file.errorString();
@@ -211,7 +216,7 @@ VideoMap VideoMap::load(const QString& icao) {
 
     if (map.hasAny_) {
         map.anchor_ = lonLatBounds.center();
-        const QTransform toFeet = utils::lonLatToFeet(map.anchor_);
+        const QTransform toFeet = math::lonLatToFeet(map.anchor_);
         bool firstFeetRing = true;
 
         map.meshes_.reserve(polygons.size());

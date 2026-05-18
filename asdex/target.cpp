@@ -1,6 +1,6 @@
-#include "asdex/targets.h"
+#include "asdex/target.h"
 
-#include "utils/math.h"
+#include "math/core.h"
 #include "renderer/builders.h"
 #include "renderer/cmdbuffer.h"
 #include "renderer/tessellator.h"
@@ -40,7 +40,7 @@ QPointF vectorEndFeet(const QPointF& start,
                       double trackDegrees,
                       double vectorSeconds) {
     const double distanceNm = groundSpeedKnots * vectorSeconds / 3600.0;
-    const double distanceFeet = distanceNm * utils::kFeetPerNm;
+    const double distanceFeet = distanceNm * math::kFeetPerNm;
     const double rad = trackDegrees * M_PI / 180.0;
     return QPointF(start.x() + distanceFeet * std::sin(rad),
                    start.y() + distanceFeet * std::cos(rad));
@@ -209,7 +209,7 @@ void drawTargets(const QVector<AsdexTarget>& targets,
     vectorSeconds = clampedTargetVectorSeconds(vectorSeconds);
 
     constexpr int kHistoryColorCount = int(sizeof(kHistoryColors) / sizeof(kHistoryColors[0]));
-    const QVector<QPointF> dotPoints = circleShapeFeet(0.003 * utils::kFeetPerNm, 12);
+    const QVector<QPointF> dotPoints = circleShapeFeet(0.003 * math::kFeetPerNm, 12);
     const QVector<std::uint32_t> dotIndices = circleFanIndices(12);
 
     for (int colorIndex = 0; colorIndex < kHistoryColorCount; ++colorIndex) {
@@ -235,7 +235,7 @@ void drawTargets(const QVector<AsdexTarget>& targets,
     }
 
     renderer::LinesBuilder* ringBuilder = renderer::getLinesBuilder();
-    const QVector<QPointF> ring = regularRingFeet(20, 0.012 * utils::kFeetPerNm);
+    const QVector<QPointF> ring = regularRingFeet(20, 0.012 * math::kFeetPerNm);
     for (const AsdexTarget& target : targets) {
         if (!target.highlighted) continue;
 

@@ -1,7 +1,7 @@
 #include "asdex/tempdata.h"
 
 #include "asdex/colors.h"
-#include "utils/math.h"
+#include "math/latlong.h"
 #include "renderer/builders.h"
 #include "renderer/cmdbuffer.h"
 #include "renderer/tessellator.h"
@@ -278,7 +278,7 @@ bool RunwayClosureGeometry::loadSurfaceFile(const QString& path,
         return false;
     }
 
-    const QTransform toFeet = utils::lonLatToFeet(anchorLonLat);
+    const QTransform toFeet = math::lonLatToFeet(anchorLonLat);
     const QJsonArray runways = document.object().value(QStringLiteral("rwys")).toArray();
     runways_.clear();
     runways_.reserve(runways.size());

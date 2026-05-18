@@ -1,7 +1,7 @@
 #ifndef ASDEX_DBAREAS_H_
 #define ASDEX_DBAREAS_H_
 
-#include "asdex/datablocks.h"
+#include "asdex/datablock.h"
 
 #include <QPointF>
 #include <QString>

@@ -1,20 +1,21 @@
-#ifndef ASDEX_SCOPE_H_
-#define ASDEX_SCOPE_H_
+#ifndef ASDEX_ASDEX_H_
+#define ASDEX_ASDEX_H_
 
-#include "asdex/atiscache.h"
 #include "asdex/cmdsetup.h"
 #include "asdex/cmdslew.h"
 #include "asdex/lists.h"
 #include "asdex/notamcache.h"
-#include "asdex/targetcache.h"
 #include "asdex/colors.h"
 #include "asdex/cursors.h"
 #include "asdex/dcb.h"
-#include "asdex/datablocks.h"
+#include "asdex/datablock.h"
 #include "asdex/dbareas.h"
 #include "asdex/tempdata.h"
-#include "asdex/targets.h"
+#include "asdex/target.h"
+#include "io/smes.h"
+#include "io/atis.h"
 #include "renderer/font.h"
+#include "panes/display.h"
 #include "asdex/videomaps.h"
 
 #include <QEvent>
@@ -40,10 +41,10 @@ class Renderer;
 
 namespace asdex {
 
-class AsdexScopeWidget : public QOpenGLWidget {
+class Asdex : public panes::Display {
 public:
-    explicit AsdexScopeWidget(QString airport, QWidget* parent = nullptr);
-    ~AsdexScopeWidget() override;
+    explicit Asdex(QString airport, QWidget* parent = nullptr);
+    ~Asdex() override;
 
     QString airport() const { return airport_; }
 
@@ -90,7 +91,7 @@ private:
         CommandType command;
         DcbFunction function;
         const char* label;
-        int AsdexScopeWidget::*field;
+        int Asdex::*field;
         bool affectsDcb;
     };
 
@@ -98,7 +99,7 @@ private:
         CommandType command;
         DcbFunction function;
         const char* label;
-        int AsdexScopeWidget::*field;
+        int Asdex::*field;
         int maxValue;
         bool affectsDcb;
     };
@@ -113,7 +114,7 @@ private:
     };
 
     void fitMapToView();
-    void updateTargetsFromCache();
+    void updateTargetsFromSmes();
     void updateHighlightedTarget(const QPointF& mouseLogical);
     void clearHighlightedTarget();
     bool handleDatablockEditKey(QKeyEvent* event);
@@ -243,8 +244,8 @@ private:
 
     QString airport_;
     asdex::VideoMap map_;
-    ::asdex::TargetCache targetCache_;
-    ::asdex::AtisCache atisCache_;
+    io::SmesClient smes_;
+    io::AtisFeed atis_;
     ::asdex::RunwayClosureCache runwayClosureCache_;
     asdex::CursorSet cursors_;
     Dcb dcb_;
@@ -326,4 +327,4 @@ private:
 
 } // namespace asdex
 
-#endif  // ASDEX_SCOPE_H_
+#endif  // ASDEX_ASDEX_H_

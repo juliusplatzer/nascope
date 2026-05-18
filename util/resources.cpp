@@ -1,10 +1,10 @@
-#include "utils/resources.h"
+#include "util/resources.h"
 
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
 
-namespace utils {
+namespace util {
 namespace {
 
 QStringList candidateRoots() {
@@ -66,20 +66,4 @@ QString findProjectRelativeDir(const QString& relativePath) {
     return findProjectRelativePath(relativePath, true);
 }
 
-QString videomapPath(const QString& icao) {
-    return findProjectRelativeFile(
-        QStringLiteral("resources/videomaps/asdex/%1.geojson.gz").arg(icao.toUpper()));
-}
-
-QStringList availableAirports() {
-    const QDir dir(findProjectRelativeDir(QStringLiteral("resources/videomaps/asdex")));
-    QStringList icaos;
-    for (const QString& name : dir.entryList(QStringList{QStringLiteral("*.geojson.gz")},
-                                             QDir::Files,
-                                             QDir::Name)) {
-        icaos << name.left(name.indexOf(QLatin1Char('.')));
-    }
-    return icaos;
-}
-
-} // namespace utils
+} // namespace util

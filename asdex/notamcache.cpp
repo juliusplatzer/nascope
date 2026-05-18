@@ -1,6 +1,6 @@
 #include "asdex/notamcache.h"
 
-#include "utils/math.h"
+#include "math/latlong.h"
 
 #include <QFile>
 #include <QDebug>
@@ -576,7 +576,7 @@ bool RunwayClosureCache::loadSurfaceFile(const QString& path,
     twyIdsByIndex_.clear();
     exactTwyIndices_.clear();
 
-    const QTransform toFeet = utils::lonLatToFeet(anchorLonLat);
+    const QTransform toFeet = math::lonLatToFeet(anchorLonLat);
     const QJsonArray twys = surfaceJson_.value(QStringLiteral("twys")).toArray();
     twysByIndexFeet_.resize(twys.size());
     twyIdsByIndex_.resize(twys.size());

@@ -1,20 +1,10 @@
-#include "utils/math.h"
+#include "math/latlong.h"
 
-#include <algorithm>
+#include "math/core.h"
+
 #include <cmath>
 
-namespace utils {
-namespace {
-
-constexpr double kPi = 3.14159265358979323846;
-constexpr double kGeometryEpsilon = 1e-9;
-
-double orient(const QPointF& a, const QPointF& b, const QPointF& c) {
-    return (b.x() - a.x()) * (c.y() - a.y())
-         - (b.y() - a.y()) * (c.x() - a.x());
-}
-
-} // namespace
+namespace math {
 
 QTransform lonLatToNm(const QPointF& anchorLonLat) {
     const double cosLat = std::cos(anchorLonLat.y() * kPi / 180.0);
@@ -34,34 +24,4 @@ QTransform lonLatToFeet(const QPointF& anchorLonLat) {
     return transform;
 }
 
-QTransform nmToScreen(const QPointF& centerNm, double halfRangeNm, const QSize& view) {
-    if (view.isEmpty() || halfRangeNm <= 0.0) return {};
-
-    const double availW = view.width() * (1.0 - 2.0 * kViewportMargin);
-    const double availH = view.height() * (1.0 - 2.0 * kViewportMargin);
-    const double radiusPx = 0.5 * std::min(availW, availH);
-    const double pxPerNm = radiusPx / halfRangeNm;
-
-    QTransform transform;
-    transform.translate(view.width() * 0.5, view.height() * 0.5);
-    transform.scale(pxPerNm, -pxPerNm);
-    transform.translate(-centerNm.x(), -centerNm.y());
-    return transform;
-}
-
-bool lineSegmentsIntersect(const QPointF& a,
-                           const QPointF& b,
-                           const QPointF& c,
-                           const QPointF& d) {
-    const double o1 = orient(a, b, c);
-    const double o2 = orient(a, b, d);
-    const double o3 = orient(c, d, a);
-    const double o4 = orient(c, d, b);
-
-    return ((o1 > kGeometryEpsilon && o2 < -kGeometryEpsilon)
-            || (o1 < -kGeometryEpsilon && o2 > kGeometryEpsilon))
-        && ((o3 > kGeometryEpsilon && o4 < -kGeometryEpsilon)
-            || (o3 < -kGeometryEpsilon && o4 > kGeometryEpsilon));
-}
-
-} // namespace utils
+} // namespace math

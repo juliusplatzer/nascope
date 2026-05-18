@@ -1,4 +1,4 @@
-#include "asdex/atiscache.h"
+#include "io/atis.h"
 
 #include <QDebug>
 #include <QJsonArray>
@@ -14,7 +14,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace asdex {
+namespace io {
 namespace {
 
 constexpr int kRefreshIntervalMs = 60 * 1000;
@@ -263,18 +263,18 @@ void collectAtisData(const QJsonValue& value,
 
 } // namespace
 
-AtisCache::AtisCache(QString airport, QObject* parent)
+AtisFeed::AtisFeed(QString airport, QObject* parent)
     : QObject(parent),
       airport_(airport.toUpper()),
       network_(this) {
     state_.airport = airport_;
     refreshTimer_.setInterval(kRefreshIntervalMs);
-    connect(&refreshTimer_, &QTimer::timeout, this, &AtisCache::refreshNow);
+    connect(&refreshTimer_, &QTimer::timeout, this, &AtisFeed::refreshNow);
     refreshTimer_.start();
-    QTimer::singleShot(0, this, &AtisCache::refreshNow);
+    QTimer::singleShot(0, this, &AtisFeed::refreshNow);
 }
 
-void AtisCache::setAirport(const QString& airport) {
+void AtisFeed::setAirport(const QString& airport) {
     const QString next = airport.toUpper();
     if (next.isEmpty() || next == airport_) return;
 
@@ -285,7 +285,7 @@ void AtisCache::setAirport(const QString& airport) {
     refreshNow();
 }
 
-void AtisCache::refreshNow() {
+void AtisFeed::refreshNow() {
     if (airport_.isEmpty() || inFlight_) return;
 
     QNetworkRequest request(QUrl(endpointForAirport(airport_)));
@@ -310,7 +310,7 @@ void AtisCache::refreshNow() {
     });
 }
 
-void AtisCache::handlePayload(const QByteArray& bytes) {
+void AtisFeed::handlePayload(const QByteArray& bytes) {
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(bytes, &parseError);
     if (parseError.error != QJsonParseError::NoError) {
@@ -354,4 +354,4 @@ void AtisCache::handlePayload(const QByteArray& bytes) {
     emit changed();
 }
 
-} // namespace asdex
+} // namespace io

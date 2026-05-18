@@ -1,5 +1,5 @@
-#ifndef ASDEX_TARGETCACHE_H_
-#define ASDEX_TARGETCACHE_H_
+#ifndef IO_SMES_H_
+#define IO_SMES_H_
 
 #include <QHash>
 #include <QList>
@@ -7,74 +7,40 @@
 #include <QPointF>
 #include <QString>
 #include <QTimer>
-#include <QVector>
 #include <QtWebSockets/QWebSocket>
 
 #include <optional>
 
-namespace asdex {
+namespace io {
 
-struct TargetHistoryPoint {
-    QPointF positionFeet;
-};
-
-struct AsdexTarget {
-    QString id;
+struct SmesTarget {
+    QString airport;
+    QString tgtType;
     QString callsign;
-    QString aircraftType;
-    QString category;
-    QString beaconCode;
-    QString fix;
+    QString acType;
+    QString squawk;
+    QString exitFix;
+    QString wake;
     QString scratchpad1;
     QString scratchpad2;
 
-    QPointF positionFeet;
+    std::optional<double> lat;
+    std::optional<double> lon;
+    std::optional<double> altitude;
+    std::optional<double> speed;
+    std::optional<double> heading;
 
-    // Aviation convention: 0 = north, 90 = east, 180 = south, 270 = west.
-    double headingDegrees = 0.0;
-    double groundTrackDegrees = 0.0;
-    double groundSpeedKnots = 0.0;
-
-    std::optional<double> altitudeTrue;
-
-    bool correlated = true;
-    bool heavy = false;
-    bool duplicateBeaconCode = false;
-    bool coasting = false;
-    bool highlighted = false;
-
-    QVector<TargetHistoryPoint> history;
+    QList<QPointF> positionHistoryLonLat;
+    qint64 historyMs = 0;
 };
 
-class TargetCache : public QObject {
+class SmesClient : public QObject {
     Q_OBJECT
-
 public:
-    struct Target {
-        QString airport;
-        QString tgtType;
-        QString callsign;
-        QString acType;
-        QString squawk;
-        QString exitFix;
-        QString wake;
-        QString scratchpad1;
-        QString scratchpad2;
+    explicit SmesClient(QString icao, QObject* parent = nullptr);
+    ~SmesClient() override;
 
-        std::optional<double> lat;
-        std::optional<double> lon;
-        std::optional<double> altitude;
-        std::optional<double> speed;
-        std::optional<double> heading;
-
-        QList<QPointF> positionHistoryLonLat;
-        qint64 historyMs = 0;
-    };
-
-    explicit TargetCache(QString icao, QObject* parent = nullptr);
-    ~TargetCache() override;
-
-    const QHash<QString, Target>& targets() const { return targets_; }
+    const QHash<QString, SmesTarget>& targets() const { return targets_; }
     QString airport() const { return icao_; }
 
     void setAirport(const QString& icao);
@@ -101,9 +67,9 @@ private:
     QString icao_;
     QWebSocket socket_;
     QTimer reconnect_;
-    QHash<QString, Target> targets_;
+    QHash<QString, SmesTarget> targets_;
 };
 
-} // namespace asdex
+} // namespace io
 
-#endif  // ASDEX_TARGETCACHE_H_
+#endif  // IO_SMES_H_
