@@ -1,6 +1,8 @@
 #include "asdex/tempdata.h"
 
 #include "asdex/colors.h"
+#include "math/core.h"
+#include "math/geom.h"
 #include "math/latlong.h"
 #include "renderer/builders.h"
 #include "renderer/cmdbuffer.h"
@@ -29,40 +31,6 @@ constexpr double kAdjacentEdgeMaxDistanceFeet = 20.0;
 constexpr double kAdjacentEdgeMaxAngleDegrees = 5.0;
 constexpr double kAdjacentEdgeMinLengthRatio = 0.85;
 constexpr double kAdjacentEdgeMinOverlapRatio = 0.85;
-
-double dot(const QPointF& a, const QPointF& b) {
-    return a.x() * b.x() + a.y() * b.y();
-}
-
-double cross(const QPointF& a, const QPointF& b) {
-    return a.x() * b.y() - a.y() * b.x();
-}
-
-double length(const QPointF& v) {
-    return std::hypot(v.x(), v.y());
-}
-
-double distanceSquared(const QPointF& a, const QPointF& b) {
-    const QPointF d = b - a;
-    return dot(d, d);
-}
-
-bool samePoint(const QPointF& a, const QPointF& b, double toleranceFeet = 1e-4) {
-    return distanceSquared(a, b) <= toleranceFeet * toleranceFeet;
-}
-
-QVector<QPointF> normalizedRing(const QVector<QPointF>& polygonFeet) {
-    QVector<QPointF> ring;
-    ring.reserve(polygonFeet.size());
-
-    for (const QPointF& point : polygonFeet) {
-        if (!ring.isEmpty() && samePoint(ring.last(), point)) continue;
-        ring.push_back(point);
-    }
-
-    if (ring.size() > 1 && samePoint(ring.first(), ring.last())) ring.removeLast();
-    return ring;
-}
 
 struct EdgeRecord {
     int meshIndex = -1;
@@ -98,8 +66,8 @@ struct DisjointSet {
 bool edgesAreAdjacent(const EdgeRecord& first, const EdgeRecord& second) {
     const QPointF firstVector = first.b - first.a;
     const QPointF secondVector = second.b - second.a;
-    const double firstLength = length(firstVector);
-    const double secondLength = length(secondVector);
+    const double firstLength = math::length(firstVector);
+    const double secondLength = math::length(secondVector);
     if (firstLength <= 1e-6 || secondLength <= 1e-6) return false;
 
     const double lengthRatio =
@@ -107,18 +75,18 @@ bool edgesAreAdjacent(const EdgeRecord& first, const EdgeRecord& second) {
     if (lengthRatio < kAdjacentEdgeMinLengthRatio) return false;
 
     const double cosMaxAngle =
-        std::cos(kAdjacentEdgeMaxAngleDegrees * M_PI / 180.0);
+        std::cos(math::degreesToRadians(kAdjacentEdgeMaxAngleDegrees));
     const double parallel =
-        std::abs(dot(firstVector, secondVector) / (firstLength * secondLength));
+        std::abs(math::dot(firstVector, secondVector) / (firstLength * secondLength));
     if (parallel < cosMaxAngle) return false;
 
     const QPointF unitFirst(firstVector.x() / firstLength, firstVector.y() / firstLength);
     const QPointF unitSecond(secondVector.x() / secondLength, secondVector.y() / secondLength);
 
-    const double firstStart = dot(first.a, unitFirst);
-    const double firstEnd = dot(first.b, unitFirst);
-    const double secondStart = dot(second.a, unitFirst);
-    const double secondEnd = dot(second.b, unitFirst);
+    const double firstStart = math::dot(first.a, unitFirst);
+    const double firstEnd = math::dot(first.b, unitFirst);
+    const double secondStart = math::dot(second.a, unitFirst);
+    const double secondEnd = math::dot(second.b, unitFirst);
     const double overlap = std::min(std::max(firstStart, firstEnd),
                                     std::max(secondStart, secondEnd))
                          - std::max(std::min(firstStart, firstEnd),
@@ -126,13 +94,13 @@ bool edgesAreAdjacent(const EdgeRecord& first, const EdgeRecord& second) {
     if (overlap < std::min(firstLength, secondLength) * kAdjacentEdgeMinOverlapRatio)
         return false;
 
-    const double firstLineDistanceA = std::abs(cross(unitFirst, second.a - first.a));
-    const double firstLineDistanceB = std::abs(cross(unitFirst, second.b - first.a));
+    const double firstLineDistanceA = std::abs(math::cross(unitFirst, second.a - first.a));
+    const double firstLineDistanceB = std::abs(math::cross(unitFirst, second.b - first.a));
     if (std::max(firstLineDistanceA, firstLineDistanceB) > kAdjacentEdgeMaxDistanceFeet)
         return false;
 
-    const double secondLineDistanceA = std::abs(cross(unitSecond, first.a - second.a));
-    const double secondLineDistanceB = std::abs(cross(unitSecond, first.b - second.a));
+    const double secondLineDistanceA = std::abs(math::cross(unitSecond, first.a - second.a));
+    const double secondLineDistanceB = std::abs(math::cross(unitSecond, first.b - second.a));
     return std::max(secondLineDistanceA, secondLineDistanceB) <= kAdjacentEdgeMaxDistanceFeet;
 }
 
@@ -175,28 +143,8 @@ QSet<QString> runwayTokens(QString id) {
     return out;
 }
 
-QPointF rotateStandard(const QPointF& v, double degrees) {
-    const double radians = degrees * M_PI / 180.0;
-    const double c = std::cos(radians);
-    const double s = std::sin(radians);
-    return QPointF(v.x() * c - v.y() * s, v.x() * s + v.y() * c);
-}
-
 QPointF rotateBearing(const QPointF& v, double bearingDegrees) {
-    return rotateStandard(v, -bearingDegrees);
-}
-
-std::optional<QPointF> lineIntersection(const QPointF& a,
-                                        const QPointF& dirA,
-                                        const QPointF& b,
-                                        const QPointF& c) {
-    const QPointF dirB = c - b;
-    const double det = dirA.x() * dirB.y() - dirA.y() * dirB.x();
-    if (std::abs(det) < 1e-9) return std::nullopt;
-
-    const QPointF delta = b - a;
-    const double t = (delta.x() * dirB.y() - delta.y() * dirB.x()) / det;
-    return a + dirA * t;
+    return math::rotate(v, -bearingDegrees);
 }
 
 std::optional<std::array<QPointF, 4>> canonicalRunwayQuadForCrc(const QVector<QPointF>& polygon) {
@@ -246,10 +194,10 @@ void appendClosedRunwayCross(QVector<QPointF>& lines, const QVector<QPointF>& po
     const QPointF plus15 = rotateBearing(basis, kCrossAngleDegrees);
     const QPointF minus15 = rotateBearing(basis, -kCrossAngleDegrees);
 
-    const auto i0 = lineIntersection(p0, plus15, p1, p2);
-    const auto i1 = lineIntersection(p1, minus15, p3, p0);
-    const auto i2 = lineIntersection(p2, plus15, p3, p0);
-    const auto i3 = lineIntersection(p3, minus15, p1, p2);
+    const auto i0 = math::lineIntersectionByDirection(p0, plus15, p1, p2);
+    const auto i1 = math::lineIntersectionByDirection(p1, minus15, p3, p0);
+    const auto i2 = math::lineIntersectionByDirection(p2, plus15, p3, p0);
+    const auto i3 = math::lineIntersectionByDirection(p3, minus15, p1, p2);
 
     if (i0) appendLine(lines, p0, *i0);
     if (i1) appendLine(lines, p1, *i1);
@@ -390,7 +338,8 @@ void TempAreaGeometry::rebuild() const {
     const int meshCount = meshes_.size();
     QVector<EdgeRecord> edges;
     for (int meshIndex = 0; meshIndex < meshCount; ++meshIndex) {
-        const QVector<QPointF> ring = normalizedRing(meshes_[meshIndex].polygonFeet);
+        const QVector<QPointF> ring =
+            math::normalizedPolygonRing(meshes_[meshIndex].polygonFeet, 1e-4);
         if (ring.size() < 3) continue;
 
         for (int i = 0; i < ring.size(); ++i) {

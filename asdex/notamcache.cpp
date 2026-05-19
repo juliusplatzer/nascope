@@ -1,5 +1,6 @@
 #include "asdex/notamcache.h"
 
+#include "math/geom.h"
 #include "math/latlong.h"
 
 #include <QFile>
@@ -9,7 +10,6 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
-#include <QLineF>
 #include <QPolygonF>
 #include <QRectF>
 #include <QStringList>
@@ -30,19 +30,6 @@ constexpr int kRefreshIntervalMs = 10 * 60 * 1000;
 constexpr int kScraperTimeoutMs = 90 * 1000;
 constexpr double kTaxiwayAdjacencyToleranceM = 2.0;
 constexpr double kRunwayEndpointToleranceM = 10.0;
-constexpr double kEarthRadiusM = 6371008.8;
-
-struct LocalMeterProjector {
-    double lon0 = 0.0;
-    double lat0 = 0.0;
-    double cosLat0 = 1.0;
-
-    QPointF map(double lon, double lat) const {
-        const double degToRad = M_PI / 180.0;
-        return QPointF((lon - lon0) * degToRad * kEarthRadiusM * cosLat0,
-                       (lat - lat0) * degToRad * kEarthRadiusM);
-    }
-};
 
 struct TaxiwayClosureNode {
     int nodeIndex = -1;
@@ -150,7 +137,7 @@ bool runwayMatches(QString lhs, QString rhs) {
     return false;
 }
 
-bool chooseTaxiwayProjector(const QJsonArray& twys, LocalMeterProjector* projector) {
+bool chooseTaxiwayProjector(const QJsonArray& twys, math::LocalMeterProjector* projector) {
     double lonSum = 0.0;
     double latSum = 0.0;
     int count = 0;
@@ -168,13 +155,12 @@ bool chooseTaxiwayProjector(const QJsonArray& twys, LocalMeterProjector* project
 
     if (count == 0) return false;
 
-    projector->lon0 = lonSum / count;
-    projector->lat0 = latSum / count;
-    projector->cosLat0 = std::cos(projector->lat0 * M_PI / 180.0);
+    *projector = math::LocalMeterProjector(lonSum / count, latSum / count);
     return true;
 }
 
-QPolygonF projectedPolygon(const QJsonArray& points, const LocalMeterProjector& projector) {
+QPolygonF projectedPolygon(const QJsonArray& points,
+                           const math::LocalMeterProjector& projector) {
     QPolygonF polygon;
     polygon.reserve(points.size());
 
@@ -185,81 +171,6 @@ QPolygonF projectedPolygon(const QJsonArray& points, const LocalMeterProjector& 
     }
 
     return polygon;
-}
-
-QPointF polygonCentroid(const QPolygonF& polygon) {
-    double twiceArea = 0.0;
-    double cx = 0.0;
-    double cy = 0.0;
-
-    for (int i = 0; i < polygon.size(); ++i) {
-        const QPointF a = polygon.at(i);
-        const QPointF b = polygon.at((i + 1) % polygon.size());
-        const double cross = a.x() * b.y() - b.x() * a.y();
-        twiceArea += cross;
-        cx += (a.x() + b.x()) * cross;
-        cy += (a.y() + b.y()) * cross;
-    }
-
-    if (std::abs(twiceArea) > 1e-9) {
-        return QPointF(cx / (3.0 * twiceArea), cy / (3.0 * twiceArea));
-    }
-
-    QPointF average;
-    for (const QPointF& point : polygon) average += point;
-    return polygon.isEmpty() ? QPointF() : average / polygon.size();
-}
-
-bool bboxesNear(const QRectF& a, const QRectF& b, double toleranceM) {
-    return !(a.right() + toleranceM < b.left()
-          || b.right() + toleranceM < a.left()
-          || a.bottom() + toleranceM < b.top()
-          || b.bottom() + toleranceM < a.top());
-}
-
-double pointSegmentDistance(const QPointF& p, const QPointF& a, const QPointF& b) {
-    const QPointF ab = b - a;
-    const double lenSq = QPointF::dotProduct(ab, ab);
-    if (lenSq <= 0.0) return std::hypot(p.x() - a.x(), p.y() - a.y());
-
-    const double t = std::clamp(QPointF::dotProduct(p - a, ab) / lenSq, 0.0, 1.0);
-    const QPointF q = a + ab * t;
-    return std::hypot(p.x() - q.x(), p.y() - q.y());
-}
-
-double segmentDistance(const QPointF& a1,
-                       const QPointF& a2,
-                       const QPointF& b1,
-                       const QPointF& b2) {
-    QPointF ignored;
-    if (QLineF(a1, a2).intersects(QLineF(b1, b2), &ignored) == QLineF::BoundedIntersection) {
-        return 0.0;
-    }
-
-    return std::min({pointSegmentDistance(a1, b1, b2),
-                     pointSegmentDistance(a2, b1, b2),
-                     pointSegmentDistance(b1, a1, a2),
-                     pointSegmentDistance(b2, a1, a2)});
-}
-
-double polygonDistance(const QPolygonF& a, const QPolygonF& b) {
-    if (a.isEmpty() || b.isEmpty()) return std::numeric_limits<double>::infinity();
-    if (a.containsPoint(b.first(), Qt::OddEvenFill)
-        || b.containsPoint(a.first(), Qt::OddEvenFill)) {
-        return 0.0;
-    }
-
-    double best = std::numeric_limits<double>::infinity();
-    for (int i = 0; i < a.size(); ++i) {
-        const QPointF a1 = a.at(i);
-        const QPointF a2 = a.at((i + 1) % a.size());
-        for (int j = 0; j < b.size(); ++j) {
-            const double d = segmentDistance(a1, a2, b.at(j), b.at((j + 1) % b.size()));
-            best = std::min(best, d);
-            if (best <= 0.0) return 0.0;
-        }
-    }
-    return best;
 }
 
 QVector<int> taxiwayEndpointNodeIndices(const QVector<TaxiwayClosureNode>& nodes,
@@ -289,7 +200,7 @@ QVector<int> runwayEndpointNodeIndices(const QVector<TaxiwayClosureNode>& nodes,
                                        const QJsonObject& airportJson,
                                        const QString& closedTwy,
                                        const QString& runway,
-                                       const LocalMeterProjector& projector) {
+                                       const math::LocalMeterProjector& projector) {
     QVector<QPolygonF> holdbars;
     const QJsonArray hbs = airportJson.value(QStringLiteral("hbs")).toArray();
 
@@ -311,10 +222,10 @@ QVector<int> runwayEndpointNodeIndices(const QVector<TaxiwayClosureNode>& nodes,
         if (!node.tokens.contains(closedTwy)) continue;
 
         for (const QPolygonF& holdbar : holdbars) {
-            if (!bboxesNear(node.boundsM, holdbar.boundingRect(), kRunwayEndpointToleranceM)) {
+            if (!math::rectsNear(node.boundsM, holdbar.boundingRect(), kRunwayEndpointToleranceM)) {
                 continue;
             }
-            if (polygonDistance(node.geomM, holdbar) <= kRunwayEndpointToleranceM) {
+            if (math::polygonDistance(node.geomM, holdbar) <= kRunwayEndpointToleranceM) {
                 matches << node.nodeIndex;
                 break;
             }
@@ -329,7 +240,7 @@ QVector<int> endpointNodeIndices(const QVector<TaxiwayClosureNode>& nodes,
                                  const QString& closedTwy,
                                  const EndpointSpec& endpoint,
                                  const EndpointSpec& otherEndpoint,
-                                 const LocalMeterProjector& projector) {
+                                 const math::LocalMeterProjector& projector) {
     if (endpoint.kind == EndpointKind::Taxiway) {
         return taxiwayEndpointNodeIndices(nodes,
                                           closedTwy,
@@ -386,7 +297,7 @@ QJsonArray getClosedTwysFromNotam(const QJsonObject& airportJson,
         return {};
     }
 
-    LocalMeterProjector projector;
+    math::LocalMeterProjector projector;
     if (!chooseTaxiwayProjector(twys, &projector)) return {};
 
     QVector<TaxiwayClosureNode> nodes;
@@ -408,7 +319,7 @@ QJsonArray getClosedTwysFromNotam(const QJsonObject& airportJson,
         node.id = id;
         node.tokens = tokens;
         node.geomM = geom;
-        node.centroidM = polygonCentroid(geom);
+        node.centroidM = math::polygonCentroid(geom);
         node.boundsM = geom.boundingRect();
         nodes << node;
     }
@@ -427,9 +338,12 @@ QJsonArray getClosedTwysFromNotam(const QJsonObject& airportJson,
     QVector<QVector<std::pair<int, double>>> graph(nodes.size());
     for (int i = 0; i < nodes.size(); ++i) {
         for (int j = i + 1; j < nodes.size(); ++j) {
-            if (!bboxesNear(nodes.at(i).boundsM, nodes.at(j).boundsM, kTaxiwayAdjacencyToleranceM))
+            if (!math::rectsNear(nodes.at(i).boundsM,
+                                 nodes.at(j).boundsM,
+                                 kTaxiwayAdjacencyToleranceM))
                 continue;
-            if (polygonDistance(nodes.at(i).geomM, nodes.at(j).geomM) > kTaxiwayAdjacencyToleranceM)
+            if (math::polygonDistance(nodes.at(i).geomM, nodes.at(j).geomM)
+                > kTaxiwayAdjacencyToleranceM)
                 continue;
 
             const QPointF dc = nodes.at(i).centroidM - nodes.at(j).centroidM;

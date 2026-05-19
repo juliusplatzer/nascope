@@ -68,8 +68,6 @@ private:
     QVector<DbArea> areas_;
 };
 
-bool pointInPolygon(const QVector<QPointF>& polygon, const QPointF& point);
-
 void drawDbAreas(const DbAreaStore& store, renderer::CommandBuffer* commandBuffer);
 
 void drawDbAreaDraft(const QVector<QPointF>& committedPoints,

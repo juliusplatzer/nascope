@@ -4,6 +4,7 @@
 #include "asdex/tempdata.h"
 #include "asdex/target.h"
 #include "asdex/videomaps.h"
+#include "math/core.h"
 #include "math/geom.h"
 #include "math/latlong.h"
 #include "radar/tools.h"
@@ -33,7 +34,6 @@ constexpr double kWheelStepFeet = 400.0;
 constexpr double kCtrlWheelStepFeet = 1600.0;
 constexpr double kMaxHoverRangeFeet = 150.0;
 constexpr double kRightClickDragTolerancePx = 3.0;
-constexpr double kPi = 3.14159265358979323846;
 
 namespace z {
 
@@ -55,14 +55,6 @@ constexpr int DcbButtons = -99;
 constexpr int DcbText = -98;
 
 }  // namespace z
-
-int normalizedDegrees(int degrees) {
-    return ((degrees % 360) + 360) % 360;
-}
-
-double radiansFromDegrees(int degrees) {
-    return double(normalizedDegrees(degrees)) * kPi / 180.0;
-}
 
 bool isHeavyWake(QStringView wake) {
     if (wake.size() != 1) return false;
@@ -1725,7 +1717,7 @@ void Asdex::selectDbArea(const QString& id) {
 const DbArea* Asdex::traitAreaForTarget(const AsdexTarget& target) const {
     for (const DbArea& area : dbAreaStore_.areas()) {
         if (area.kind == DbAreaKind::Trait
-            && pointInPolygon(area.polygonFeet, target.positionFeet)) {
+            && math::pointInPolygon(area.polygonFeet, target.positionFeet)) {
             return &area;
         }
     }
@@ -2130,7 +2122,7 @@ bool Asdex::dbAreaPolygonIsValidOnClose() const {
 
     for (const DbArea& area : dbAreaStore_.areas()) {
         for (const QPointF& point : area.polygonFeet) {
-            if (pointInPolygon(closed, point)) return false;
+            if (math::pointInPolygon(closed, point)) return false;
         }
     }
 
@@ -2299,11 +2291,11 @@ void Asdex::startRangeCommand() {
 }
 
 int Asdex::currentRotationValue() const {
-    return normalizedDegrees(rotationDegrees_);
+    return math::normalizedDegrees(rotationDegrees_);
 }
 
 void Asdex::setRotationValue(int degrees) {
-    rotationDegrees_ = normalizedDegrees(degrees);
+    rotationDegrees_ = math::normalizedDegrees(degrees);
     update();
 }
 
@@ -2874,88 +2866,42 @@ QMatrix4x4 Asdex::screenProjection() const {
 
 QPointF Asdex::worldToScreenLogical(const QPointF& worldFeet,
                                                const QSize& renderSize) const {
-    const double ppf = pixelsPerFoot(renderSize);
-    const double theta = radiansFromDegrees(currentRotationValue());
-    const double c = std::cos(theta);
-    const double s = std::sin(theta);
-
-    const double dx = worldFeet.x() - centerFeet_.x();
-    const double dy = worldFeet.y() - centerFeet_.y();
-    const double rx = c * dx - s * dy;
-    const double ry = s * dx + c * dy;
-
-    const double framebufferX = renderSize.width() * 0.5 + rx * ppf;
-    const double framebufferY = renderSize.height() * 0.5 - ry * ppf;
-
-    const qreal dpr = devicePixelRatioF();
-    return QPointF(framebufferX / dpr, framebufferY / dpr);
+    return radar::ScopeTransform({centerFeet_, halfRangeFeet_, currentRotationValue()},
+                                 {renderSize, devicePixelRatioF()})
+        .worldToLogicalScreen(worldFeet);
 }
 
 QPointF Asdex::worldToFramebufferTopLeft(const QPointF& worldFeet,
                                                     const QSize& renderSize) const {
-    const double ppf = pixelsPerFoot(renderSize);
-    const double theta = radiansFromDegrees(currentRotationValue());
-    const double c = std::cos(theta);
-    const double s = std::sin(theta);
-
-    const double dx = worldFeet.x() - centerFeet_.x();
-    const double dy = worldFeet.y() - centerFeet_.y();
-    const double rx = c * dx - s * dy;
-    const double ry = s * dx + c * dy;
-
-    return QPointF(renderSize.width() * 0.5 + rx * ppf,
-                   renderSize.height() * 0.5 - ry * ppf);
+    return radar::ScopeTransform({centerFeet_, halfRangeFeet_, currentRotationValue()},
+                                 {renderSize, devicePixelRatioF()})
+        .worldToFramebufferTopLeft(worldFeet);
 }
 
 QPointF Asdex::framebufferPoint(const QPointF& logicalPoint) const {
-    const qreal ratio = devicePixelRatioF();
-    return QPointF(logicalPoint.x() * ratio, logicalPoint.y() * ratio);
+    return radar::ScopeTransform({centerFeet_, halfRangeFeet_, currentRotationValue()},
+                                 {framebufferRenderSize(), devicePixelRatioF()})
+        .logicalToFramebuffer(logicalPoint);
 }
 
 double Asdex::pixelsPerFoot(const QSize& renderSize) const {
-    if (renderSize.isEmpty() || halfRangeFeet_ <= 0.0) return 1.0;
-
-    const double availW = renderSize.width() * (1.0 - 2.0 * radar::kViewportMargin);
-    const double availH = renderSize.height() * (1.0 - 2.0 * radar::kViewportMargin);
-    const double radiusPx = 0.5 * std::min(availW, availH);
-    return radiusPx / halfRangeFeet_;
+    return radar::ScopeTransform({centerFeet_, halfRangeFeet_, currentRotationValue()},
+                                 {renderSize, devicePixelRatioF()})
+        .pixelsPerFoot();
 }
 
 QPointF Asdex::screenToWorldFeet(const QPointF& logicalPoint,
                                             const QSize& renderSize) const {
-    const QPointF point = framebufferPoint(logicalPoint);
-    const double ppf = pixelsPerFoot(renderSize);
-
-    if (ppf <= 0.0) return centerFeet_;
-
-    const double rx = (point.x() - renderSize.width() * 0.5) / ppf;
-    const double ry = (renderSize.height() * 0.5 - point.y()) / ppf;
-
-    const double theta = radiansFromDegrees(currentRotationValue());
-    const double c = std::cos(theta);
-    const double s = std::sin(theta);
-
-    const double dx = c * rx + s * ry;
-    const double dy = -s * rx + c * ry;
-
-    return QPointF(centerFeet_.x() + dx, centerFeet_.y() + dy);
+    return radar::ScopeTransform({centerFeet_, halfRangeFeet_, currentRotationValue()},
+                                 {renderSize, devicePixelRatioF()})
+        .logicalScreenToWorld(logicalPoint);
 }
 
 QPointF Asdex::screenDeltaToWorldDelta(const QPointF& framebufferDelta,
                                                   const QSize& renderSize) const {
-    const double ppf = pixelsPerFoot(renderSize);
-    if (ppf <= 0.0) return QPointF();
-
-    const double rx = framebufferDelta.x() / ppf;
-    const double ry = -framebufferDelta.y() / ppf;
-
-    const double theta = radiansFromDegrees(currentRotationValue());
-    const double c = std::cos(theta);
-    const double s = std::sin(theta);
-
-    const double dx = c * rx + s * ry;
-    const double dy = -s * rx + c * ry;
-    return QPointF(dx, dy);
+    return radar::ScopeTransform({centerFeet_, halfRangeFeet_, currentRotationValue()},
+                                 {renderSize, devicePixelRatioF()})
+        .framebufferDeltaToWorldDelta(framebufferDelta);
 }
 
 void Asdex::zoomByFeet(double deltaFeet) {
@@ -3142,30 +3088,9 @@ void Asdex::setAsdexCursor(CursorMode mode) {
 }
 
 QMatrix4x4 Asdex::viewProjection(const QSize& renderSize) const {
-    QMatrix4x4 matrix;
-    matrix.setToIdentity();
-    if (renderSize.isEmpty() || halfRangeFeet_ <= 0.0) return matrix;
-
-    const double availW = renderSize.width() * (1.0 - 2.0 * radar::kViewportMargin);
-    const double availH = renderSize.height() * (1.0 - 2.0 * radar::kViewportMargin);
-    const double radiusPx = 0.5 * std::min(availW, availH);
-    const double pxPerFoot = radiusPx / halfRangeFeet_;
-    const double sx = 2.0 * pxPerFoot / renderSize.width();
-    const double sy = 2.0 * pxPerFoot / renderSize.height();
-
-    const double theta = radiansFromDegrees(currentRotationValue());
-    const double c = std::cos(theta);
-    const double s = std::sin(theta);
-    const double cx = centerFeet_.x();
-    const double cy = centerFeet_.y();
-
-    matrix(0, 0) = static_cast<float>(sx * c);
-    matrix(0, 1) = static_cast<float>(-sx * s);
-    matrix(0, 3) = static_cast<float>(sx * (-c * cx + s * cy));
-    matrix(1, 0) = static_cast<float>(sy * s);
-    matrix(1, 1) = static_cast<float>(sy * c);
-    matrix(1, 3) = static_cast<float>(sy * (-s * cx - c * cy));
-    return matrix;
+    return radar::ScopeTransform({centerFeet_, halfRangeFeet_, currentRotationValue()},
+                                 {renderSize, devicePixelRatioF()})
+        .worldProjection();
 }
 
 } // namespace asdex

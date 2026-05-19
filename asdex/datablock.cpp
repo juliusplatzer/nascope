@@ -1,6 +1,7 @@
 #include "asdex/datablock.h"
 
 #include "asdex/colors.h"
+#include "math/core.h"
 #include "renderer/builders.h"
 #include "renderer/cmdbuffer.h"
 #include "renderer/font.h"
@@ -54,7 +55,7 @@ bool isLeftDatablock(LeaderDirection direction) {
 }
 
 QPointF leaderDelta(double distancePx, int headingDegrees) {
-    const double rad = headingDegrees * M_PI / 180.0;
+    const double rad = math::degreesToRadians(headingDegrees);
     const double dx = distancePx * std::sin(rad);
     const double dy = distancePx * std::cos(rad);
     return QPointF(static_cast<int>(dx), -static_cast<int>(dy));
