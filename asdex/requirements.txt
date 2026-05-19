@@ -1,2 +1,5 @@
+# asdex/notams.py
 selenium
 webdriver-manager
+
+# asdex/surface.py uses only the Python standard library.

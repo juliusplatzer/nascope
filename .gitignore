@@ -12,6 +12,11 @@ __MACOSX/
 .claude
 .claudeignore
 
+# Python bytecode/cache
+__pycache__/
+*.py[cod]
+*$py.class
+
 # Qt / CMake build output
 */build/
 CMakeCache.txt
