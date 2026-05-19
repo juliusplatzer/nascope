@@ -21,6 +21,9 @@ Output:
   ],
   "gates": [
     {"id": "A12", "position": [lon, lat]}
+  ],
+  "towers": [
+    {"id": "Tower", "position": [lon, lat]}
   ]
 }
 
@@ -32,6 +35,8 @@ Notes:
     polygon contains exactly two [longitude, latitude] points.
   - Gates are fetched from OpenStreetMap/Overpass as aeroway=gate
     elements near the airport's aeroway=aerodrome object.
+  - Towers are fetched from OpenStreetMap/Overpass as aeroway=control_tower
+    or building=control_tower elements near the airport.
   - AirNav is HTML, not an official API; it is used because it exposes the magnetic
     runway heading directly in simple text. For official-only data, use --heading-source bts.
   - Only Python standard library is required.
@@ -141,7 +146,7 @@ def http_text(url: str, params: dict[str, Any] | None = None, timeout: float = 3
     return raw.decode("utf-8", errors="replace")
 
 
-# ----------------------------- OSM Overpass gates -----------------------------
+# ----------------------------- OSM Overpass gates/towers -----------------------------
 
 
 def overpass_string(value: str) -> str:
@@ -183,6 +188,44 @@ nwr["aeroway"="aerodrome"]["icao"="{qicao}"]->.apt;
 
 out center;
 '''.strip()
+
+
+def build_overpass_towers_query(
+    icao: str,
+    overpass_timeout: int = 60,
+    around_m: float = 8000.0,
+) -> str:
+    """
+    Build an Overpass Turbo-compatible query for airport control towers.
+
+    Output candidates are intentionally narrow:
+      - aeroway=control_tower
+      - building=control_tower
+
+    Both are queried as node/way/relation around the airport aerodrome object.
+    """
+    qicao = overpass_string(icao.strip().upper())
+    timeout_s = max(1, int(round(overpass_timeout)))
+    radius_m = max(1.0, float(around_m))
+    radius_text = str(int(radius_m)) if radius_m.is_integer() else f"{radius_m:.3f}".rstrip("0").rstrip(".")
+    return "\n".join(
+        [
+            f"[out:json][timeout:{timeout_s}];",
+            "",
+            f"nwr[\"aeroway\"=\"aerodrome\"][\"icao\"=\"{qicao}\"]->.apt;",
+            "",
+            "(",
+            f"  node(around.apt:{radius_text})[\"aeroway\"=\"control_tower\"];",
+            f"  way(around.apt:{radius_text})[\"aeroway\"=\"control_tower\"];",
+            f"  relation(around.apt:{radius_text})[\"aeroway\"=\"control_tower\"];",
+            f"  node(around.apt:{radius_text})[\"building\"=\"control_tower\"];",
+            f"  way(around.apt:{radius_text})[\"building\"=\"control_tower\"];",
+            f"  relation(around.apt:{radius_text})[\"building\"=\"control_tower\"];",
+            ");",
+            "",
+            "out center;",
+        ]
+    )
 
 
 def build_overpass_gates_bbox_query(
@@ -430,6 +473,59 @@ def osm_gate_to_gate(element: dict[str, Any], digits: int) -> dict[str, Any] | N
     }
 
 
+def tower_position_from_osm_element(element: dict[str, Any]) -> list[float] | None:
+    """Return representative [lon, lat] for an OSM control tower element."""
+    etype = str(element.get("type") or "")
+
+    if etype == "node" and "lon" in element and "lat" in element:
+        return [float(element["lon"]), float(element["lat"])]
+
+    center = element.get("center")
+    if isinstance(center, dict) and "lon" in center and "lat" in center:
+        return [float(center["lon"]), float(center["lat"])]
+
+    geom = element.get("geometry")
+    if isinstance(geom, list) and geom:
+        lon_sum = 0.0
+        lat_sum = 0.0
+        count = 0
+        for point in geom:
+            if isinstance(point, dict) and "lon" in point and "lat" in point:
+                lon_sum += float(point["lon"])
+                lat_sum += float(point["lat"])
+                count += 1
+        if count:
+            return [lon_sum / count, lat_sum / count]
+
+    return None
+
+
+def osm_tower_to_tower(element: dict[str, Any], digits: int) -> dict[str, Any] | None:
+    """Convert one Overpass tower element into the minimal tower schema.
+
+    Output shape:
+        {"id": <ref|name|osm:type/id>, "position": [lon, lat]}
+    """
+    tags = element.get("tags") or {}
+    if not isinstance(tags, dict):
+        tags = {}
+
+    pos = tower_position_from_osm_element(element)
+    if pos is None:
+        return None
+
+    etype = str(element.get("type") or "unknown")
+    osm_id = element.get("id")
+    ref = str(tags.get("ref") or "").strip()
+    name = str(tags.get("name") or "").strip()
+    tower_id = ref or name or f"osm:{etype}/{osm_id}"
+
+    return {
+        "id": tower_id,
+        "position": rounded_lonlat(pos[0], pos[1], digits),
+    }
+
+
 def fetch_osm_gates(
     icao: str,
     digits: int,
@@ -465,6 +561,38 @@ def fetch_osm_gates(
 
     gates.sort(key=lambda x: natural_key(str(x.get("id", ""))))
     return gates
+
+
+def fetch_osm_towers(
+    icao: str,
+    digits: int,
+    overpass_url: str = OVERPASS_INTERPRETER_URL,
+    overpass_timeout: float = 30.0,
+    user_agent: str | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch OSM control tower elements and return them as JSON-ready towers."""
+    query = build_overpass_towers_query(icao, int(overpass_timeout))
+    data = http_overpass_json(query, overpass_url, overpass_timeout, user_agent=user_agent)
+    elements = data.get("elements", [])
+    if not isinstance(elements, list):
+        raise SurfaceFetchError("Overpass JSON did not contain an elements list")
+
+    towers: list[dict[str, Any]] = []
+    seen: set[tuple[str, Any]] = set()
+    for element in elements:
+        if not isinstance(element, dict):
+            continue
+        key = (str(element.get("type") or ""), element.get("id"))
+        if key in seen:
+            continue
+        seen.add(key)
+
+        tower = osm_tower_to_tower(element, digits)
+        if tower is not None:
+            towers.append(tower)
+
+    towers.sort(key=lambda x: natural_key(str(x.get("id", ""))))
+    return towers
 
 
 # ----------------------------- ArcGIS FAA AM polygons -----------------------------
@@ -1589,6 +1717,7 @@ def build_airport_json(
     holdbar_distance_m: float = 10.0,
     holdbar_angle_deg: float = 15.0,
     include_gates: bool = True,
+    include_towers: bool = True,
     overpass_url: str = OVERPASS_INTERPRETER_URL,
     overpass_timeout: float = 60.0,
     gate_bbox_padding_m: float = 300.0,
@@ -1655,7 +1784,7 @@ def build_airport_json(
             print(f"warning: BTS airport magnetic-variation lookup failed: {exc}", file=sys.stderr)
             magvar_index = {}
 
-    out: dict[str, Any] = {"icao": icao, "rwys": [], "twys": [], "hbs": [], "gates": []}
+    out: dict[str, Any] = {"icao": icao, "rwys": [], "twys": [], "hbs": [], "gates": [], "towers": []}
     missing_value = resolve_missing_value(missing_track_value)
     runway_entries: list[dict[str, Any]] = []
     taxiway_entries: list[dict[str, Any]] = []
@@ -1748,10 +1877,24 @@ def build_airport_json(
             print(f"warning: OSM/Overpass gate lookup failed for {icao}: {exc}", file=sys.stderr)
             out["gates"] = []
 
+    if include_towers:
+        try:
+            out["towers"] = fetch_osm_towers(
+                icao=icao,
+                digits=digits,
+                overpass_url=overpass_url,
+                overpass_timeout=overpass_timeout,
+                user_agent=user_agent,
+            )
+        except Exception as exc:
+            print(f"warning: OSM/Overpass tower lookup failed for {icao}: {exc}", file=sys.stderr)
+            out["towers"] = []
+
     out["rwys"].sort(key=lambda x: natural_key(str(x.get("id", ""))))
     out["twys"].sort(key=lambda x: natural_key(str(x.get("id", ""))))
     out["hbs"].sort(key=lambda x: natural_key(str(x.get("id", ""))))
     out["gates"].sort(key=lambda x: natural_key(str(x.get("id", ""))))
+    out["towers"].sort(key=lambda x: natural_key(str(x.get("id", ""))))
     return out
 
 
@@ -1807,10 +1950,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Maximum angular difference from runway heading in degrees. Default: 15.0.",
     )
     p.add_argument("--no-gates", action="store_true", help="Do not fetch OSM aeroway=gate elements via Overpass")
+    p.add_argument("--no-towers", action="store_true", help="Do not fetch OSM control tower elements via Overpass")
     p.add_argument(
         "--overpass-url",
         default=OVERPASS_INTERPRETER_URL,
-        help="Overpass API interpreter URL used for gates. Default: overpass-api.de.",
+        help="Overpass API interpreter URL used for gates/towers. Default: overpass-api.de.",
     )
     p.add_argument(
         "--overpass-timeout",
@@ -1835,7 +1979,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--print-overpass-query",
         action="store_true",
-        help="Print the Overpass Turbo query for this ICAO and exit.",
+        help="Print the Overpass Turbo gate query for this ICAO and exit.",
+    )
+    p.add_argument(
+        "--print-overpass-towers-query",
+        action="store_true",
+        help="Print the Overpass Turbo tower query for this ICAO and exit.",
     )
     p.add_argument("--runway-url", help="Override AM_Runway FeatureServer root URL")
     p.add_argument("--taxiway-url", help="Override AM_Taxiway FeatureServer root URL")
@@ -1857,6 +2006,10 @@ def main(argv: list[str] | None = None) -> int:
         print(build_overpass_gates_query(icao, int(args.overpass_timeout)))
         return 0
 
+    if args.print_overpass_towers_query:
+        print(build_overpass_towers_query(icao, int(args.overpass_timeout)))
+        return 0
+
     try:
         runway_url = choose_service_url("AM_Runway", args.runway_url, args.pending, args.timeout)
         taxiway_url = choose_service_url("AM_Taxiway", args.taxiway_url, args.pending, args.timeout)
@@ -1876,6 +2029,7 @@ def main(argv: list[str] | None = None) -> int:
             holdbar_distance_m=args.holdbar_distance_m,
             holdbar_angle_deg=args.holdbar_angle_deg,
             include_gates=not args.no_gates,
+            include_towers=not args.no_towers,
             overpass_url=args.overpass_url,
             overpass_timeout=args.overpass_timeout,
             gate_bbox_padding_m=args.gate_bbox_padding_m,
