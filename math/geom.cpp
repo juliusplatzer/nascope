@@ -73,12 +73,17 @@ bool pointOnSegment(const QPointF& point,
                     double epsilon) {
     const QPointF ab = segmentB - segmentA;
     const QPointF ap = point - segmentA;
+    const double abLen2 = lengthSquared(ab);
+
+    if (abLen2 <= epsilon * epsilon) {
+        return distanceSquared(point, segmentA) <= epsilon * epsilon;
+    }
 
     if (std::abs(cross(ab, ap)) > epsilon) return false;
 
     const double projection = dot(ap, ab);
     if (projection < -epsilon) return false;
-    if (projection > lengthSquared(ab) + epsilon) return false;
+    if (projection > abLen2 + epsilon) return false;
 
     return true;
 }
@@ -143,13 +148,18 @@ double segmentDistance(const QPointF& a0,
 }
 
 bool pointInPolygon(const QVector<QPointF>& polygon, const QPointF& point) {
-    if (polygon.size() < 3) return false;
+    int n = polygon.size();
+    while (n > 1 && pointsNear(polygon.first(), polygon.at(n - 1), kGeometryEpsilon)) {
+        --n;
+    }
+
+    if (n < 3) return false;
 
     bool inside = false;
 
-    for (int i = 0, j = polygon.size() - 1; i < polygon.size(); j = i++) {
-        const QPointF& a = polygon[j];
-        const QPointF& b = polygon[i];
+    for (int i = 0, j = n - 1; i < n; j = i++) {
+        const QPointF& a = polygon.at(j);
+        const QPointF& b = polygon.at(i);
 
         if (pointOnSegment(point, a, b)) return true;
 
