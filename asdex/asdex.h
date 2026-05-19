@@ -124,6 +124,7 @@ private:
     void cancelCommand();
     void submitDatablockEdit();
     void submitDcbEntryCommand();
+    bool handleTempTextEntryKey(QKeyEvent* event);
     void applyEditedFields(AsdexTarget& target, const EditedDbFields& fields) const;
     bool commandActive() const;
     DcbMenu currentDcbMenu() const;
@@ -142,6 +143,9 @@ private:
     void startDbAreaMenu();
     void startDbEditMenu();
     void startTempDataMenu();
+    void startDefineTempTextCommand();
+    void submitTempTextEntryCommand();
+    void placePendingTempTextAt(const QPointF& worldFeet);
     void startDefineTraitAreaCommand();
     void startTraitAreaValueCommand(DcbFunction function);
     void startDefineOffAreaCommand();
@@ -162,9 +166,16 @@ private:
     void toggleGlobalDbEditField(DcbFunction function);
     void toggleSelectedTraitDbField(DcbFunction function);
     void toggleSelectedTraitVector();
+    const DbArea* traitAreaForPoint(const QPointF& worldFeet) const;
     const DbArea* traitAreaForTarget(const AsdexTarget& target) const;
     bool vectorVisibleForTarget(const AsdexTarget& target) const;
     DataBlockSettings dataBlockSettingsForTarget(const AsdexTarget& target) const;
+    TempTextAnnotation* clickedTempTextAt(const QPointF& logicalPoint);
+    bool isTempTextDataBlockVisible(const TempTextAnnotation& text) const;
+    DataBlockSettings tempTextSettings(const TempTextAnnotation& text) const;
+    void toggleTempTextDataBlock(TempTextAnnotation& text);
+    void applyLeaderDirectionToTempText(TempTextAnnotation& text, int value);
+    void refreshTempTextTraits();
     int selectedTraitValue(CommandType type) const;
     void setSelectedTraitValue(CommandType type, int value);
     LeaderDirection leaderDirectionFromDcbValue(int value) const;
@@ -261,6 +272,7 @@ private:
     QHash<QString, bool> dbOffAreaDatablockOverride_;
     QHash<QString, EditedDbFields> pendingDatablockEdits_;
     QVector<TempArea> restrictedTempAreas_;
+    QVector<TempTextAnnotation> tempTexts_;
     DbAreaStore dbAreaStore_;
     QVector<QPointF> dbAreaDraftPoints_;
     std::optional<QPointF> dbAreaDraftMouse_;
@@ -271,7 +283,10 @@ private:
     std::optional<DatablockEditCommand> datablockEdit_;
     std::optional<DcbEntryCommand> dcbEntryCommand_;
     std::optional<LeaderDirectionKeyboardCommand> leaderDirectionCommand_;
+    std::optional<TempTextEntryCommand> tempTextEntry_;
     std::optional<QPointF> mapRepositionOriginalCenter_;
+    QString pendingTempTextLine1_;
+    QString pendingTempTextLine2_;
     QString editingTrackId_;
     QPointF centerFeet_;
     double halfRangeFeet_ = 1.0;
@@ -291,6 +306,7 @@ private:
     bool suppressNextMapRepositionMove_ = false;
     bool suppressNextMapRepositionRelease_ = false;
     bool suppressNextDbAreaSelectionRelease_ = false;
+    bool suppressNextTempTextPlacementRelease_ = false;
     QPointF panStartMouseFramebuffer_;
     QPointF panStartCenterFeet_;
 

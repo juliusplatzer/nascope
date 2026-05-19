@@ -7,6 +7,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <algorithm>
 #include <functional>
 
 namespace asdex {
@@ -113,6 +114,74 @@ private:
     QString value_;
     int cursor_ = 0;
     bool resetOnFirstType_ = true;
+};
+
+class TempTextEntryCommand {
+public:
+    QString line1;
+    QString line2;
+    int activeLine = 0;
+    int cursor = 0;
+
+    QStringList displayLines() const {
+        return {
+            QStringLiteral("TEMP DATA"),
+            QStringLiteral("DEFINE TEXT"),
+            QStringLiteral(">: ") + line1,
+            QStringLiteral(">: ") + line2,
+        };
+    }
+
+    int cursorLine() const { return activeLine == 0 ? 3 : 4; }
+    int cursorColumn() const { return 3 + cursor; }
+
+    QString& activeText() { return activeLine == 0 ? line1 : line2; }
+    const QString& activeText() const { return activeLine == 0 ? line1 : line2; }
+
+    void insert(QChar c) {
+        c = c.toUpper();
+        const bool allowed = c.isLetterOrNumber()
+                          || c == QLatin1Char(' ')
+                          || c == QLatin1Char('.')
+                          || c == QLatin1Char('/');
+        if (!allowed) return;
+
+        QString& text = activeText();
+        text.insert(cursor, c);
+        ++cursor;
+    }
+
+    void backspace() {
+        QString& text = activeText();
+        if (cursor <= 0) return;
+        text.remove(cursor - 1, 1);
+        --cursor;
+    }
+
+    void deleteForward() {
+        QString& text = activeText();
+        if (cursor < 0 || cursor >= text.size()) return;
+        text.remove(cursor, 1);
+    }
+
+    void moveLeft() { cursor = std::max(0, cursor - 1); }
+    void moveRight() { cursor = std::min(cursor + 1, int(activeText().size())); }
+
+    void setActiveLine(int line) {
+        activeLine = std::clamp(line, 0, 1);
+        cursor = activeText().size();
+    }
+
+    void cycleActiveLine(int delta) { setActiveLine(activeLine + delta); }
+
+    bool handleEnter() {
+        if (activeLine == 0) {
+            setActiveLine(1);
+            return false;
+        }
+
+        return true;
+    }
 };
 
 }  // namespace asdex

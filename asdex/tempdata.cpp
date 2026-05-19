@@ -6,6 +6,7 @@
 #include "math/latlong.h"
 #include "renderer/builders.h"
 #include "renderer/cmdbuffer.h"
+#include "renderer/font.h"
 #include "renderer/tessellator.h"
 
 #include <QFile>
@@ -27,6 +28,12 @@ namespace asdex {
 namespace {
 
 constexpr int kTempMapAreasMinBrightness = 20;
+constexpr int kTempMapTextMinBrightness = 20;
+constexpr int kTempTextLineSpacing = 2;
+constexpr int kLeaderStartOffsetPx = 7;
+constexpr int kLeaderStepPx = 15;
+constexpr int kZeroLengthAnchorPx = 10;
+constexpr double kFeetPerDegree = 364560.0;
 constexpr double kAdjacentEdgeMaxDistanceFeet = 20.0;
 constexpr double kAdjacentEdgeMaxAngleDegrees = 5.0;
 constexpr double kAdjacentEdgeMinLengthRatio = 0.85;
@@ -37,6 +44,165 @@ struct EdgeRecord {
     QPointF a;
     QPointF b;
 };
+
+struct BuiltTempText {
+    QStringList lines;
+    int maxLineWidth = 0;
+    int longestHighestLineNumber = 0;
+    int longestLowestLineNumber = 0;
+};
+
+const QVector<QPointF>& tempTextStarPointsNorthEastFeet() {
+    static const QVector<QPointF> kPoints = {
+        {9.9e-05 * kFeetPerDegree, 4.5e-06 * kFeetPerDegree},
+        {2.25e-05 * kFeetPerDegree, 3.15e-05 * kFeetPerDegree},
+        {2.25e-05 * kFeetPerDegree, 0.0001125 * kFeetPerDegree},
+        {-2.7e-05 * kFeetPerDegree, 4.95e-05 * kFeetPerDegree},
+        {-0.0001035 * kFeetPerDegree, 7.2e-05 * kFeetPerDegree},
+        {-5.85e-05 * kFeetPerDegree, 4.5e-06 * kFeetPerDegree},
+        {-0.0001035 * kFeetPerDegree, -6.3e-05 * kFeetPerDegree},
+        {-2.7e-05 * kFeetPerDegree, -4.05e-05 * kFeetPerDegree},
+        {2.25e-05 * kFeetPerDegree, -0.0001035 * kFeetPerDegree},
+        {2.25e-05 * kFeetPerDegree, -2.25e-05 * kFeetPerDegree},
+        {9.9e-05 * kFeetPerDegree, 4.5e-06 * kFeetPerDegree},
+    };
+    return kPoints;
+}
+
+int leaderHeadingDegrees(LeaderDirection direction) {
+    switch (direction) {
+        case LeaderDirection::N:
+            return 360;
+        case LeaderDirection::E:
+            return 90;
+        case LeaderDirection::SE:
+            return 135;
+        case LeaderDirection::S:
+            return 180;
+        case LeaderDirection::SW:
+            return 225;
+        case LeaderDirection::W:
+            return 270;
+        case LeaderDirection::NW:
+            return 315;
+        case LeaderDirection::NE:
+            return 45;
+    }
+    return 45;
+}
+
+bool isLeftDataBlock(LeaderDirection direction) {
+    return direction == LeaderDirection::SW
+        || direction == LeaderDirection::W
+        || direction == LeaderDirection::NW;
+}
+
+QPointF leaderDelta(double distancePx, int headingDegrees) {
+    const double rad = math::degreesToRadians(headingDegrees);
+    const double dx = distancePx * std::sin(rad);
+    const double dy = distancePx * std::cos(rad);
+    return QPointF(static_cast<int>(dx), -static_cast<int>(dy));
+}
+
+QPointF starOffsetToScreen(const QPointF& feetOffset, double logicalPixelsPerFoot) {
+    const double northFeet = feetOffset.x();
+    const double eastFeet = feetOffset.y();
+    return QPointF(eastFeet * logicalPixelsPerFoot,
+                   -northFeet * logicalPixelsPerFoot);
+}
+
+void addTempTextStar(renderer::LinesBuilder& builder,
+                     const QPointF& anchor,
+                     double logicalPixelsPerFoot) {
+    const QVector<QPointF>& points = tempTextStarPointsNorthEastFeet();
+    for (int i = 0; i + 1 < points.size(); ++i) {
+        builder.addLine(anchor + starOffsetToScreen(points.at(i), logicalPixelsPerFoot),
+                        anchor + starOffsetToScreen(points.at(i + 1), logicalPixelsPerFoot));
+    }
+}
+
+void updateMeasuredWidth(BuiltTempText& block,
+                         const QString& text,
+                         int lineNumber,
+                         int fontSize,
+                         const renderer::BitmapFont& font) {
+    const int width = font.measureText(QStringView(text), fontSize).width();
+    if (width > block.maxLineWidth) {
+        block.maxLineWidth = width;
+        block.longestHighestLineNumber = lineNumber;
+        block.longestLowestLineNumber = lineNumber;
+    } else if (width == block.maxLineWidth) {
+        block.longestLowestLineNumber = lineNumber;
+    }
+}
+
+BuiltTempText buildTempTextBlock(const TempTextAnnotation& text,
+                                 const DataBlockSettings& settings,
+                                 const renderer::BitmapFont& font) {
+    BuiltTempText block;
+    block.lines << text.line1;
+    if (!text.line2.trimmed().isEmpty()) block.lines << text.line2;
+
+    for (int i = 0; i < block.lines.size(); ++i) {
+        updateMeasuredWidth(block, block.lines.at(i), i, settings.fontSize, font);
+    }
+
+    return block;
+}
+
+void drawTempTextDataBlock(const TempTextAnnotation& text,
+                           const QPointF& anchorScreen,
+                           renderer::LinesBuilder& lineBuilder,
+                           renderer::TextBuilder& textBuilder,
+                           const renderer::BitmapFont& font,
+                           std::uint32_t fontTextureId,
+                           const DataBlockSettings& settings) {
+    const int fontSize = settings.fontSize;
+    const int height = font.lineHeight(fontSize);
+    if (height <= 0) return;
+
+    const BuiltTempText block = buildTempTextBlock(text, settings, font);
+    if (block.maxLineWidth <= 0 || block.lines.isEmpty()) return;
+
+    const LeaderDirection direction = settings.leaderDirection;
+    const int heading = leaderHeadingDegrees(direction);
+    const bool left = isLeftDataBlock(direction);
+    const int leaderLengthPx = std::max(0, settings.leaderLength) * kLeaderStepPx;
+
+    const QPointF leaderStart = anchorScreen + leaderDelta(kLeaderStartOffsetPx, heading);
+    const QPointF leaderEnd =
+        anchorScreen + leaderDelta(leaderLengthPx == 0 ? kZeroLengthAnchorPx : leaderLengthPx,
+                                   heading);
+
+    if (leaderLengthPx > 0) lineBuilder.addLine(leaderStart, leaderEnd);
+
+    int verticalLeftOffset = 0;
+    if (left) {
+        const int selectedLine = direction != LeaderDirection::NW
+            ? block.longestHighestLineNumber
+            : block.longestLowestLineNumber;
+        verticalLeftOffset = (height + kTempTextLineSpacing) * selectedLine;
+    }
+
+    const int textX = int(leaderEnd.x()) + (left ? (-2 - block.maxLineWidth) : 2);
+    const int textY = int(leaderEnd.y()) - height / 2 - verticalLeftOffset;
+
+    renderer::TextStyle style;
+    style.size = fontSize;
+    style.color = applyBrightness(QColor(255, 255, 255),
+                                  settings.brightness,
+                                  kTempMapTextMinBrightness);
+    style.background = Qt::transparent;
+
+    QPointF linePosition(textX, textY);
+    for (const QString& line : block.lines) {
+        if (!line.isEmpty()) textBuilder.addText(QStringView(line),
+                                                 linePosition,
+                                                 style,
+                                                 fontTextureId);
+        linePosition.ry() += height + kTempTextLineSpacing;
+    }
+}
 
 struct DisjointSet {
     explicit DisjointSet(int size)
@@ -470,6 +636,72 @@ void drawTempAreas(const TempAreaGeometry& geometry,
                    const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft,
                    int brightness) {
     geometry.draw(commandBuffer, worldProjection, worldToFramebufferTopLeft, brightness);
+}
+
+void drawTempTextAnnotations(
+    const QVector<TempTextAnnotation>& texts,
+    renderer::CommandBuffer* commandBuffer,
+    const QMatrix4x4& screenProjection,
+    const std::function<QPointF(QPointF)>& worldToScreen,
+    double logicalPixelsPerFoot,
+    const renderer::BitmapFont& font,
+    const std::function<std::uint32_t(int)>& fontTextureForSize,
+    const std::function<bool(const TempTextAnnotation&)>& isDataBlockVisible,
+    const std::function<DataBlockSettings(const TempTextAnnotation&)>& settingsForText,
+    int defaultBrightness) {
+    if (!commandBuffer) return;
+
+    commandBuffer->loadProjectionMatrix(screenProjection);
+
+    for (const TempTextAnnotation& text : texts) {
+        if (text.hidden) continue;
+
+        const QPointF anchor = worldToScreen ? worldToScreen(text.locationFeet)
+                                             : text.locationFeet;
+
+        renderer::LinesBuilder* starBuilder = renderer::getLinesBuilder();
+        addTempTextStar(*starBuilder, anchor, logicalPixelsPerFoot);
+        const QColor anchorColor = text.highlighted ? QColor(0, 0, 255)
+                                                    : QColor(255, 255, 255);
+        commandBuffer->setRgba(renderer::RGBA::fromQColor(
+            applyBrightness(anchorColor, defaultBrightness, kTempMapTextMinBrightness)));
+        commandBuffer->lineWidth(1.0f);
+        starBuilder->generateCommands(commandBuffer);
+        renderer::returnLinesBuilder(starBuilder);
+
+        const DataBlockSettings settings = settingsForText ? settingsForText(text)
+                                                           : DataBlockSettings{};
+        const bool visible = isDataBlockVisible ? isDataBlockVisible(text)
+                                                : settings.showDataBlocks;
+        if (!visible) continue;
+
+        const std::uint32_t fontTextureId =
+            fontTextureForSize ? fontTextureForSize(settings.fontSize) : 0;
+        if (fontTextureId == 0) continue;
+
+        renderer::LinesBuilder* lineBuilder = renderer::getLinesBuilder();
+        renderer::TextBuilder* textBuilder = renderer::getTextBuilder();
+        textBuilder->setFont(&font);
+
+        drawTempTextDataBlock(text,
+                              anchor,
+                              *lineBuilder,
+                              *textBuilder,
+                              font,
+                              fontTextureId,
+                              settings);
+
+        commandBuffer->setRgba(renderer::RGBA::fromQColor(
+            applyBrightness(QColor(255, 255, 255),
+                            settings.brightness,
+                            kTempMapTextMinBrightness)));
+        commandBuffer->lineWidth(1.0f);
+        lineBuilder->generateCommands(commandBuffer);
+        textBuilder->generateCommands(commandBuffer);
+
+        renderer::returnTextBuilder(textBuilder);
+        renderer::returnLinesBuilder(lineBuilder);
+    }
 }
 
 } // namespace asdex

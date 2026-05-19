@@ -1,6 +1,9 @@
 #ifndef ASDEX_TEMPDATA_H_
 #define ASDEX_TEMPDATA_H_
 
+#include "asdex/datablock.h"
+#include "asdex/dbareas.h"
+
 #include <QMatrix4x4>
 #include <QPointF>
 #include <QSet>
@@ -8,8 +11,11 @@
 #include <QVector>
 
 #include <functional>
+#include <cstdint>
+#include <optional>
 
 namespace renderer {
+class BitmapFont;
 class CommandBuffer;
 }
 
@@ -52,6 +58,24 @@ struct TempArea {
     TempAreaType type = TempAreaType::ClosedArea;
     QVector<QPointF> polygonFeet;
     bool highlighted = false;
+};
+
+struct TempTextAnnotation {
+    QString id;
+    QPointF locationFeet;
+    QString line1;
+    QString line2;
+
+    bool hidden = false;
+    bool highlighted = false;
+
+    std::optional<bool> showDataBlockOverride;
+    bool dbOffAreaOverride = false;
+
+    std::optional<LeaderDirection> leaderDirectionOverride;
+    std::optional<LeaderDirection> traitLeaderDirectionOverride;
+
+    std::optional<DbAreaTraits> dbTraits;
 };
 
 class TempAreaGeometry {
@@ -99,6 +123,18 @@ void drawTempAreas(const TempAreaGeometry& geometry,
                    const QMatrix4x4& worldProjection,
                    const std::function<QPointF(QPointF)>& worldToFramebufferTopLeft,
                    int brightness = 95);
+
+void drawTempTextAnnotations(
+    const QVector<TempTextAnnotation>& texts,
+    renderer::CommandBuffer* commandBuffer,
+    const QMatrix4x4& screenProjection,
+    const std::function<QPointF(QPointF)>& worldToScreen,
+    double logicalPixelsPerFoot,
+    const renderer::BitmapFont& font,
+    const std::function<std::uint32_t(int)>& fontTextureForSize,
+    const std::function<bool(const TempTextAnnotation&)>& isDataBlockVisible,
+    const std::function<DataBlockSettings(const TempTextAnnotation&)>& settingsForText,
+    int defaultBrightness = 95);
 
 } // namespace asdex
 

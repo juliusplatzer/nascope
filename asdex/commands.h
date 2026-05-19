@@ -40,6 +40,8 @@ enum class CommandType {
     PreviewAreaCharSize,
 
     TempData,
+    DefineTempText,
+    DefineTempTextLocation,
 
     DbArea,
     DefineTraitArea,

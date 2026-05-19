@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace asdex {
@@ -42,6 +43,7 @@ constexpr int RunwayClosures = -800;
 
 constexpr int RestrictedArea = -700;
 constexpr int ClosedArea = -690;
+constexpr int TempMapText = -680;
 constexpr int DbAreas = -600;
 
 constexpr int Targets = -500;
@@ -316,6 +318,16 @@ void Asdex::mousePressEvent(QMouseEvent* event) {
         return;
     }
 
+    if (commandType_ == CommandType::DefineTempTextLocation) {
+        if (event->button() == Qt::LeftButton) {
+            const QPointF world = screenToWorldFeet(event->position(), framebufferRenderSize());
+            suppressNextTempTextPlacementRelease_ = true;
+            placePendingTempTextAt(world);
+            event->accept();
+            return;
+        }
+    }
+
     if (isSelectingDbArea()) {
         if (event->button() != Qt::RightButton) {
             suppressNextDbAreaSelectionRelease_ = true;
@@ -465,6 +477,12 @@ void Asdex::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
 
+    if (suppressNextTempTextPlacementRelease_ && event->button() == Qt::LeftButton) {
+        suppressNextTempTextPlacementRelease_ = false;
+        event->accept();
+        return;
+    }
+
     if (isMapRepositionCommandActive()) {
         event->accept();
         return;
@@ -503,6 +521,12 @@ void Asdex::mouseReleaseEvent(QMouseEvent* event) {
     }
 
     if (datablockEdit_) {
+        clearDcbHover();
+        event->accept();
+        return;
+    }
+
+    if (tempTextEntry_) {
         clearDcbHover();
         event->accept();
         return;
@@ -574,6 +598,15 @@ void Asdex::mouseReleaseEvent(QMouseEvent* event) {
     }
 
     if (event->button() == Qt::LeftButton && event->modifiers() == Qt::NoModifier) {
+        if (TempTextAnnotation* text = clickedTempTextAt(event->position())) {
+            clearDcbHover();
+            toggleTempTextDataBlock(*text);
+            event->accept();
+            return;
+        }
+    }
+
+    if (event->button() == Qt::LeftButton && event->modifiers() == Qt::NoModifier) {
         clearDcbHover();
         updateHighlightedTarget(event->position());
         if (AsdexTarget* target = highlightedTarget()) {
@@ -610,6 +643,14 @@ void Asdex::wheelEvent(QWheelEvent* event) {
             datablockEdit_->moveUp();
         else
             datablockEdit_->moveDown();
+        update();
+        event->accept();
+        return;
+    }
+
+    if (tempTextEntry_) {
+        clearDcbHover();
+        tempTextEntry_->cycleActiveLine(wheelY > 0 ? -1 : 1);
         update();
         event->accept();
         return;
@@ -726,6 +767,7 @@ void Asdex::keyPressEvent(QKeyEvent* event) {
         return;
     }
 
+    if (tempTextEntry_ && handleTempTextEntryKey(event)) return;
     if (datablockEdit_ && handleDatablockEditKey(event)) return;
     if (dcbEntryCommand_ && handleDcbEntryCommandKey(event)) return;
 
@@ -771,6 +813,8 @@ void Asdex::keyPressEvent(QKeyEvent* event) {
     if ((commandType_ == CommandType::Brightness
          || commandType_ == CommandType::CharSize
          || commandType_ == CommandType::DbEdit
+         || commandType_ == CommandType::TempData
+         || commandType_ == CommandType::DefineTempTextLocation
          || isDbAreaCommand(commandType_))
         && event->key() == Qt::Key_Escape) {
         cancelCommand();
@@ -882,6 +926,73 @@ bool Asdex::handleDatablockEditKey(QKeyEvent* event) {
     const QString text = event->text();
     if (!text.isEmpty()) {
         for (const QChar c : text) datablockEdit_->insert(c);
+        update();
+        event->accept();
+        return true;
+    }
+
+    event->accept();
+    return true;
+}
+
+bool Asdex::handleTempTextEntryKey(QKeyEvent* event) {
+    if (!tempTextEntry_) return false;
+
+    switch (event->key()) {
+        case Qt::Key_Escape:
+            cancelCommand();
+            event->accept();
+            return true;
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+            if (tempTextEntry_->handleEnter()) submitTempTextEntryCommand();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Backspace:
+            tempTextEntry_->backspace();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Delete:
+            tempTextEntry_->deleteForward();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Left:
+            tempTextEntry_->moveLeft();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Right:
+            tempTextEntry_->moveRight();
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Up:
+            tempTextEntry_->cycleActiveLine(-1);
+            update();
+            event->accept();
+            return true;
+        case Qt::Key_Down:
+            tempTextEntry_->cycleActiveLine(1);
+            update();
+            event->accept();
+            return true;
+        default:
+            break;
+    }
+
+    if (event->modifiers().testFlag(Qt::ControlModifier)
+        || event->modifiers().testFlag(Qt::MetaModifier)) {
+        event->accept();
+        return true;
+    }
+
+    const QString text = event->text();
+    if (text.size() == 1) {
+        tempTextEntry_->insert(text.at(0));
+        previewArea_.setSystemResponse(QString());
         update();
         event->accept();
         return true;
@@ -1073,6 +1184,35 @@ void Asdex::cancelCommand() {
         return;
     }
 
+    if (tempTextEntry_) {
+        tempTextEntry_.reset();
+        commandType_ = CommandType::TempData;
+        pendingTempTextLine1_.clear();
+        pendingTempTextLine2_.clear();
+        suppressNextTempTextPlacementRelease_ = false;
+        previewArea_.setSystemResponse({});
+        dcb_.setMenu(DcbMenu::TempData);
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Scope);
+        clearHighlightedTarget();
+        update();
+        return;
+    }
+
+    if (commandType_ == CommandType::DefineTempTextLocation) {
+        commandType_ = CommandType::TempData;
+        pendingTempTextLine1_.clear();
+        pendingTempTextLine2_.clear();
+        suppressNextTempTextPlacementRelease_ = false;
+        previewArea_.setSystemResponse({});
+        dcb_.setMenu(DcbMenu::TempData);
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Scope);
+        clearHighlightedTarget();
+        update();
+        return;
+    }
+
     if (dcbEntryCommand_) {
         commandType_ = dcbEntryCommand_->nextCommandType();
         dcbEntryCommand_.reset();
@@ -1137,10 +1277,14 @@ void Asdex::cancelCommand() {
     commandType_ = CommandType::None;
     datablockEdit_.reset();
     dcbEntryCommand_.reset();
+    tempTextEntry_.reset();
+    pendingTempTextLine1_.clear();
+    pendingTempTextLine2_.clear();
     mapRepositionOriginalCenter_.reset();
     suppressNextMapRepositionMove_ = false;
     suppressNextMapRepositionRelease_ = false;
     suppressNextDbAreaSelectionRelease_ = false;
+    suppressNextTempTextPlacementRelease_ = false;
     editingTrackId_.clear();
     previewArea_.setSystemResponse({});
     dcb_.setMenu(currentDcbMenu());
@@ -1233,6 +1377,7 @@ void Asdex::applyEditedFields(AsdexTarget& target,
 bool Asdex::commandActive() const {
     return datablockEdit_.has_value()
         || dcbEntryCommand_.has_value()
+        || tempTextEntry_.has_value()
         || isMapRepositionCommandActive();
 }
 
@@ -1259,7 +1404,11 @@ DcbMenu Asdex::currentDcbMenu() const {
     if (isDbAreaCommand(commandType_)) return DcbMenu::DbArea;
 
     if (commandType_ == CommandType::DbEdit) return DcbMenu::DbEdit;
-    if (commandType_ == CommandType::TempData) return DcbMenu::TempData;
+    if (commandType_ == CommandType::TempData
+        || commandType_ == CommandType::DefineTempText
+        || commandType_ == CommandType::DefineTempTextLocation) {
+        return DcbMenu::TempData;
+    }
 
     return DcbMenu::Main;
 }
@@ -1397,7 +1546,10 @@ void Asdex::handleDcbButtonClicked(DcbFunction function) {
         case DcbFunction::StoredGlobalTempData:
         case DcbFunction::DefineClosedArea:
         case DcbFunction::DefineRestrictedArea:
+            return;
         case DcbFunction::DefineTempText:
+            startDefineTempTextCommand();
+            return;
         case DcbFunction::ShowHiddenTempData:
         case DcbFunction::HideTempData:
         case DcbFunction::DeleteGlobalTempData:
@@ -1457,6 +1609,11 @@ void Asdex::toggleDayNite() {
 void Asdex::toggleAllDataBlocks() {
     showDataBlocks_ = !showDataBlocks_;
     datablockVisibility_.clear();
+    dbOffAreaDatablockOverride_.clear();
+    for (TempTextAnnotation& text : tempTexts_) {
+        text.showDataBlockOverride.reset();
+        text.dbOffAreaOverride = false;
+    }
     clearDcbHover();
     update();
 }
@@ -1519,6 +1676,78 @@ void Asdex::startDbEditMenu() {
 
 void Asdex::startTempDataMenu() {
     startDcbSubmenu(CommandType::TempData, DcbMenu::TempData, false);
+}
+
+void Asdex::startDefineTempTextCommand() {
+    commandType_ = CommandType::DefineTempText;
+    dcb_.setMenu(DcbMenu::TempData);
+
+    tempTextEntry_ = TempTextEntryCommand{};
+    pendingTempTextLine1_.clear();
+    pendingTempTextLine2_.clear();
+    suppressNextTempTextPlacementRelease_ = false;
+
+    datablockEdit_.reset();
+    dcbEntryCommand_.reset();
+    editingTrackId_.clear();
+    clearDbAreaDraft();
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Hidden);
+    update();
+}
+
+void Asdex::submitTempTextEntryCommand() {
+    if (!tempTextEntry_) return;
+
+    const QString line1 = tempTextEntry_->line1.trimmed();
+    const QString line2 = tempTextEntry_->line2.trimmed();
+
+    if (line1.size() > 16 || line2.size() > 16) {
+        previewArea_.setSystemResponse(QStringLiteral("ERROR: MAX LIMIT"));
+        update();
+        return;
+    }
+
+    if (line1.isEmpty()) {
+        previewArea_.setSystemResponse(QStringLiteral("INVALID ENTRY"));
+        update();
+        return;
+    }
+
+    pendingTempTextLine1_ = line1;
+    pendingTempTextLine2_ = line2;
+    tempTextEntry_.reset();
+    commandType_ = CommandType::DefineTempTextLocation;
+    dcb_.setMenu(DcbMenu::TempData);
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Scope);
+    update();
+}
+
+void Asdex::placePendingTempTextAt(const QPointF& worldFeet) {
+    TempTextAnnotation text;
+    text.id = QStringLiteral("temp-text-%1")
+                  .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    text.locationFeet = worldFeet;
+    text.line1 = pendingTempTextLine1_;
+    text.line2 = pendingTempTextLine2_;
+
+    if (const DbArea* area = traitAreaForPoint(worldFeet)) {
+        if (area->kind == DbAreaKind::Trait && !area->traits.dataBlocksOff)
+            text.dbTraits = area->traits;
+    }
+
+    tempTexts_.push_back(std::move(text));
+
+    pendingTempTextLine1_.clear();
+    pendingTempTextLine2_.clear();
+    commandType_ = CommandType::TempData;
+    dcb_.setMenu(DcbMenu::TempData);
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Scope);
+    update();
 }
 
 void Asdex::startDefineTraitAreaCommand() {
@@ -1626,6 +1855,7 @@ void Asdex::startDeleteAllDbAreasCommand() {
                 dbOffAreaDatablockOverride_.clear();
                 selectedDbAreaId_.clear();
                 clearDbAreaDraft();
+                refreshTempTextTraits();
             }
         },
         CommandType::DbArea));
@@ -1671,6 +1901,8 @@ bool Asdex::deleteDbAreaAt(const QPointF& logicalPoint) {
     if (commandType_ != CommandType::DeleteOneDbArea) return false;
 
     const QPointF world = screenToWorldFeet(logicalPoint, framebufferRenderSize());
+    const DbArea* hitArea = dbAreaStore_.firstAreaContaining(world);
+    const bool removedTraitArea = hitArea && hitArea->kind == DbAreaKind::Trait;
     if (!dbAreaStore_.removeAreaContaining(world, true)) {
         update();
         return false;
@@ -1678,6 +1910,7 @@ bool Asdex::deleteDbAreaAt(const QPointF& logicalPoint) {
 
     dbOffAreaDatablockOverride_.clear();
     selectedDbAreaId_.clear();
+    if (removedTraitArea) refreshTempTextTraits();
     commandType_ = CommandType::DbArea;
     dcb_.setMenu(DcbMenu::DbArea);
     clearDcbHover();
@@ -1731,15 +1964,20 @@ void Asdex::selectDbArea(const QString& id) {
     selectedDbAreaId_ = id;
 }
 
-const DbArea* Asdex::traitAreaForTarget(const AsdexTarget& target) const {
+const DbArea* Asdex::traitAreaForPoint(const QPointF& worldFeet) const {
     for (const DbArea& area : dbAreaStore_.areas()) {
         if (area.kind == DbAreaKind::Trait
-            && math::pointInPolygon(area.polygonFeet, target.positionFeet)) {
+            && !area.traits.dataBlocksOff
+            && math::pointInPolygon(area.polygonFeet, worldFeet)) {
             return &area;
         }
     }
 
     return nullptr;
+}
+
+const DbArea* Asdex::traitAreaForTarget(const AsdexTarget& target) const {
+    return traitAreaForPoint(target.positionFeet);
 }
 
 bool Asdex::vectorVisibleForTarget(const AsdexTarget& target) const {
@@ -1790,6 +2028,97 @@ DataBlockSettings Asdex::dataBlockSettingsForTarget(
     }
 
     return settings;
+}
+
+TempTextAnnotation* Asdex::clickedTempTextAt(const QPointF& logicalPoint) {
+    const QPointF world = screenToWorldFeet(logicalPoint, framebufferRenderSize());
+
+    TempTextAnnotation* best = nullptr;
+    double bestDistance2 = std::numeric_limits<double>::max();
+
+    for (TempTextAnnotation& text : tempTexts_) {
+        if (text.hidden) continue;
+
+        const QPointF delta = text.locationFeet - world;
+        const double distance2 = delta.x() * delta.x() + delta.y() * delta.y();
+        if (distance2 < bestDistance2) {
+            bestDistance2 = distance2;
+            best = &text;
+        }
+    }
+
+    constexpr double kMaxDistanceFeet = 150.0;
+    return bestDistance2 <= kMaxDistanceFeet * kMaxDistanceFeet ? best : nullptr;
+}
+
+bool Asdex::isTempTextDataBlockVisible(const TempTextAnnotation& text) const {
+    if (text.showDataBlockOverride == true) return true;
+    if (text.showDataBlockOverride.has_value()) return false;
+    if (dbAreaStore_.pointInsideOffArea(text.locationFeet)) return text.dbOffAreaOverride;
+    if (!showDataBlocks_) return false;
+    if (text.dbTraits && text.dbTraits->dataBlocksOff) return false;
+    return true;
+}
+
+DataBlockSettings Asdex::tempTextSettings(const TempTextAnnotation& text) const {
+    DataBlockSettings settings;
+    settings.fontSize = tempDataCharSize_;
+    settings.brightness = tempMapTextBrightness_;
+    settings.leaderLength = currentLeaderLengthValue();
+    settings.leaderDirection = leaderDirection_;
+    settings.showDataBlocks = showDataBlocks_;
+
+    if (text.dbTraits) {
+        settings.fontSize = text.dbTraits->dataBlockCharSize;
+        settings.brightness = text.dbTraits->dataBlockBrightness;
+        settings.leaderLength = text.dbTraits->leaderLength;
+        settings.leaderDirection = text.dbTraits->leaderDirection;
+    }
+
+    if (text.leaderDirectionOverride) settings.leaderDirection = *text.leaderDirectionOverride;
+    if (text.traitLeaderDirectionOverride)
+        settings.leaderDirection = *text.traitLeaderDirectionOverride;
+
+    return settings;
+}
+
+void Asdex::toggleTempTextDataBlock(TempTextAnnotation& text) {
+    const bool currentVisible = isTempTextDataBlockVisible(text);
+
+    if (dbAreaStore_.pointInsideOffArea(text.locationFeet)) {
+        text.dbOffAreaOverride = !currentVisible;
+        text.showDataBlockOverride.reset();
+    } else {
+        text.showDataBlockOverride = !currentVisible;
+    }
+
+    update();
+}
+
+void Asdex::applyLeaderDirectionToTempText(TempTextAnnotation& text, int value) {
+    if (!isValidLeaderDirectionValue(value)) return;
+
+    const LeaderDirection direction = leaderDirectionFromDcbValue(value);
+    if (text.dbTraits && !text.dbTraits->dataBlocksOff)
+        text.traitLeaderDirectionOverride = direction;
+    else
+        text.leaderDirectionOverride = direction;
+
+    update();
+}
+
+void Asdex::refreshTempTextTraits() {
+    for (TempTextAnnotation& text : tempTexts_) {
+        text.dbTraits.reset();
+        text.traitLeaderDirectionOverride.reset();
+
+        if (const DbArea* area = traitAreaForPoint(text.locationFeet)) {
+            if (area->kind == DbAreaKind::Trait && !area->traits.dataBlocksOff)
+                text.dbTraits = area->traits;
+        }
+    }
+
+    update();
 }
 
 const Asdex::TraitAreaProperty*
@@ -1869,6 +2198,7 @@ void Asdex::setSelectedTraitValue(CommandType type, int value) {
     if (!area || area->kind != DbAreaKind::Trait) return;
 
     property->write(*area, value);
+    refreshTempTextTraits();
     update();
 }
 
@@ -1960,6 +2290,7 @@ void Asdex::toggleSelectedTraitDbField(DcbFunction function) {
             return;
     }
 
+    refreshTempTextTraits();
     clearDcbHover();
     update();
 }
@@ -1969,6 +2300,7 @@ void Asdex::toggleSelectedTraitVector() {
     if (!area || area->kind != DbAreaKind::Trait) return;
 
     area->traits.showVector = !area->traits.showVector;
+    refreshTempTextTraits();
     clearDcbHover();
     update();
 }
@@ -1981,6 +2313,9 @@ std::optional<DcbFunction> Asdex::activeDcbFunctionForCommand() const {
             return DcbFunction::CharSize;
         case CommandType::TempData:
             return DcbFunction::TempData;
+        case CommandType::DefineTempText:
+        case CommandType::DefineTempTextLocation:
+            return DcbFunction::DefineTempText;
         case CommandType::DbArea:
             return DcbFunction::DataBlockArea;
         case CommandType::DefineTraitArea:
@@ -2071,6 +2406,7 @@ void Asdex::completeDbAreaPolygon() {
         dcb_.setMenu(DcbMenu::DbArea);
     }
 
+    if (isTrait) refreshTempTextTraits();
     previewArea_.setSystemResponse(QString());
     update();
 }
@@ -2430,6 +2766,10 @@ void Asdex::submitLeaderDirectionForAll() {
 
     leaderDirection_ = leaderDirectionFromDcbValue(value);
     targetLeaderDirectionOverrides_.clear();
+    for (TempTextAnnotation& text : tempTexts_) {
+        text.leaderDirectionOverride.reset();
+        text.traitLeaderDirectionOverride.reset();
+    }
     leaderDirectionCommand_.reset();
     commandType_ = CommandType::None;
     previewArea_.setSystemResponse(QString());
@@ -2445,6 +2785,16 @@ void Asdex::submitLeaderDirectionForTargetAt(const QPointF& logicalPoint) {
         previewArea_.setSystemResponse(QStringLiteral("INVALID ENTRY"));
         leaderDirectionCommand_.reset();
         commandType_ = CommandType::None;
+        setAsdexCursor(CursorMode::Scope);
+        update();
+        return;
+    }
+
+    if (TempTextAnnotation* text = clickedTempTextAt(logicalPoint)) {
+        applyLeaderDirectionToTempText(*text, value);
+        leaderDirectionCommand_.reset();
+        commandType_ = CommandType::None;
+        previewArea_.setSystemResponse(QString());
         setAsdexCursor(CursorMode::Scope);
         update();
         return;
@@ -2558,6 +2908,7 @@ QStringList Asdex::activeCommandLines() const {
     if (datablockEdit_) return datablockEdit_->displayLines();
     if (dcbEntryCommand_) return dcbEntryCommand_->displayLines();
     if (leaderDirectionCommand_) return leaderDirectionCommand_->displayLines();
+    if (tempTextEntry_) return tempTextEntry_->displayLines();
     if (isMapRepositionCommandActive()) return {QStringLiteral("MAP RPOS")};
     if (commandType_ == CommandType::Brightness) return {QStringLiteral("BRITE")};
     if (commandType_ == CommandType::CharSize) return {QStringLiteral("CHAR SIZE")};
@@ -2568,6 +2919,9 @@ QStringList Asdex::activeCommandLines() const {
             return {QStringLiteral("DB AREA")};
         case CommandType::TempData:
             return {QStringLiteral("TEMP DATA")};
+        case CommandType::DefineTempText:
+        case CommandType::DefineTempTextLocation:
+            return {QStringLiteral("TEMP DATA"), QStringLiteral("DEFINE TEXT")};
         case CommandType::LeaderDirection:
             return {QStringLiteral("LDR DIR")};
         case CommandType::DefineTraitArea:
@@ -2682,6 +3036,31 @@ void Asdex::renderScene(const QSize& renderSize) {
         }
     }
 
+    if (fontTexturesReady_) {
+        const double logicalPixelsPerFoot = pixelsPerFoot(renderSize) / devicePixelRatioF();
+        renderer::CommandBuffer& tempTextBuffer = layers.layer(z::TempMapText);
+        prepareLayer(tempTextBuffer, projection);
+        drawTempTextAnnotations(
+            tempTexts_,
+            &tempTextBuffer,
+            projection,
+            [this, &renderSize](QPointF worldFeet) {
+                return worldToScreenLogical(worldFeet, renderSize);
+            },
+            logicalPixelsPerFoot,
+            asdexFont_,
+            [this](int fontSize) {
+                return fontTextureId(fontSize);
+            },
+            [this](const TempTextAnnotation& text) {
+                return isTempTextDataBlockVisible(text);
+            },
+            [this](const TempTextAnnotation& text) {
+                return tempTextSettings(text);
+            },
+            tempMapTextBrightness_);
+    }
+
     renderer::CommandBuffer& targetBuffer = layers.layer(z::Targets);
     prepareLayer(targetBuffer, worldProjection);
     drawTargets(targets_,
@@ -2777,7 +3156,7 @@ void Asdex::renderScene(const QSize& renderSize) {
         textBuilder->generateCommands(&listBuffer);
         renderer::returnTextBuilder(textBuilder);
 
-        if (datablockEdit_ || dcbEntryCommand_ || leaderDirectionCommand_) {
+        if (datablockEdit_ || dcbEntryCommand_ || leaderDirectionCommand_ || tempTextEntry_) {
             renderer::CommandBuffer& cursorBuffer = layers.layer(z::PreviewCursor);
             prepareLayer(cursorBuffer, projection);
             cursorBuffer.setRgba(renderer::RGBA::fromQColor(previewArea_.textColor()));
@@ -2800,6 +3179,12 @@ void Asdex::renderScene(const QSize& renderSize) {
                                                  asdexFont_,
                                                  leaderDirectionCommand_->cursorLine(),
                                                  leaderDirectionCommand_->cursorColumn(),
+                                                 projection);
+            } else if (tempTextEntry_) {
+                previewArea_.renderCommandCursor(*lineBuilder,
+                                                 asdexFont_,
+                                                 tempTextEntry_->cursorLine(),
+                                                 tempTextEntry_->cursorColumn(),
                                                  projection);
             }
             lineBuilder->generateCommands(&cursorBuffer);
