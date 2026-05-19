@@ -1259,6 +1259,7 @@ DcbMenu Asdex::currentDcbMenu() const {
     if (isDbAreaCommand(commandType_)) return DcbMenu::DbArea;
 
     if (commandType_ == CommandType::DbEdit) return DcbMenu::DbEdit;
+    if (commandType_ == CommandType::TempData) return DcbMenu::TempData;
 
     return DcbMenu::Main;
 }
@@ -1389,6 +1390,18 @@ void Asdex::handleDcbButtonClicked(DcbFunction function) {
         case DcbFunction::CharSize:
             startCharSizeMenu();
             return;
+        case DcbFunction::TempData:
+            startTempDataMenu();
+            return;
+        case DcbFunction::ClosedRunway:
+        case DcbFunction::StoredGlobalTempData:
+        case DcbFunction::DefineClosedArea:
+        case DcbFunction::DefineRestrictedArea:
+        case DcbFunction::DefineTempText:
+        case DcbFunction::ShowHiddenTempData:
+        case DcbFunction::HideTempData:
+        case DcbFunction::DeleteGlobalTempData:
+            return;
         case DcbFunction::DefineDbTraitArea:
             startDefineTraitAreaCommand();
             return;
@@ -1502,6 +1515,10 @@ void Asdex::startDbAreaMenu() {
 
 void Asdex::startDbEditMenu() {
     startDcbSubmenu(CommandType::DbEdit, DcbMenu::DbEdit, true);
+}
+
+void Asdex::startTempDataMenu() {
+    startDcbSubmenu(CommandType::TempData, DcbMenu::TempData, false);
 }
 
 void Asdex::startDefineTraitAreaCommand() {
@@ -1962,6 +1979,8 @@ std::optional<DcbFunction> Asdex::activeDcbFunctionForCommand() const {
             return DcbFunction::Brightness;
         case CommandType::CharSize:
             return DcbFunction::CharSize;
+        case CommandType::TempData:
+            return DcbFunction::TempData;
         case CommandType::DbArea:
             return DcbFunction::DataBlockArea;
         case CommandType::DefineTraitArea:
@@ -2547,6 +2566,8 @@ QStringList Asdex::activeCommandLines() const {
     switch (commandType_) {
         case CommandType::DbArea:
             return {QStringLiteral("DB AREA")};
+        case CommandType::TempData:
+            return {QStringLiteral("TEMP DATA")};
         case CommandType::LeaderDirection:
             return {QStringLiteral("LDR DIR")};
         case CommandType::DefineTraitArea:

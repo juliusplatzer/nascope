@@ -133,6 +133,14 @@ bool Dcb::isLargeFunction(DcbFunction function) {
     case DcbFunction::CoastSuspendCharSize:
     case DcbFunction::TempDataCharSize:
     case DcbFunction::PreviewAreaCharSize:
+    case DcbFunction::ClosedRunway:
+    case DcbFunction::StoredGlobalTempData:
+    case DcbFunction::DefineClosedArea:
+    case DcbFunction::DefineRestrictedArea:
+    case DcbFunction::DefineTempText:
+    case DcbFunction::ShowHiddenTempData:
+    case DcbFunction::HideTempData:
+    case DcbFunction::DeleteGlobalTempData:
     case DcbFunction::DefineDbTraitArea:
     case DcbFunction::DefineDbOffArea:
     case DcbFunction::ModifyDbTraitArea:
@@ -532,6 +540,56 @@ QVector<DcbButtonSpec> Dcb::traitAreaButtonSpecs(const DcbState& state) {
     return out;
 }
 
+QVector<DcbButtonSpec> Dcb::tempDataButtonSpecs() {
+    QVector<DcbButtonSpec> out;
+    out.reserve(14);
+
+    auto vacant = [&out]() {
+        DcbButtonSpec button;
+        button.function = DcbFunction::Vacant;
+        button.kind = DcbButtonKind::Vacant;
+        button.large = true;
+        out.push_back(std::move(button));
+    };
+
+    auto menu = [&out](DcbFunction function, QStringList lines) {
+        DcbButtonSpec button;
+        button.function = function;
+        button.kind = DcbButtonKind::Menu;
+        button.lines = std::move(lines);
+        button.large = true;
+        out.push_back(std::move(button));
+    };
+
+    auto normal = [&out](DcbFunction function, QStringList lines) {
+        DcbButtonSpec button;
+        button.function = function;
+        button.kind = DcbButtonKind::Normal;
+        button.lines = std::move(lines);
+        button.large = true;
+        out.push_back(std::move(button));
+    };
+
+    vacant();
+    vacant();
+    vacant();
+
+    menu(DcbFunction::ClosedRunway, {"CLOSED", "RWY"});
+    menu(DcbFunction::StoredGlobalTempData, {"STORED", "GLOBAL", "TEMP", "DATA"});
+    normal(DcbFunction::DefineClosedArea, {"DEFINE", "CLOSED", "AREA"});
+    normal(DcbFunction::DefineRestrictedArea, {"DEFINE", "RESTR", "AREA"});
+    normal(DcbFunction::DefineTempText, {"DEFINE", "TEXT"});
+    normal(DcbFunction::ShowHiddenTempData, {"SHOW", "HIDDEN", "DATA"});
+    normal(DcbFunction::HideTempData, {"HIDE", "DATA"});
+    normal(DcbFunction::DeleteGlobalTempData, {"DELETE", "GLOBAL"});
+    normal(DcbFunction::Done, {"DONE"});
+
+    vacant();
+    vacant();
+
+    return out;
+}
+
 QSize Dcb::buttonSizeForFont(const renderer::BitmapFont& font, int autoSize) {
     const QSize charSize = font.charSize(autoSize);
     const int charHeight = std::max(1, charSize.height());
@@ -596,6 +654,7 @@ DcbLayout Dcb::layout(QSize displaySize,
         : menu_ == DcbMenu::DbEdit ? dbEditButtonSpecs(state)
         : menu_ == DcbMenu::DefineTraitArea ? traitAreaButtonSpecs(state)
         : menu_ == DcbMenu::ModifyTraitArea ? traitAreaButtonSpecs(state)
+        : menu_ == DcbMenu::TempData ? tempDataButtonSpecs()
                                      : offMenu ? offButtonSpecs(state) : mainButtonSpecs(state);
 
     int row = 1;

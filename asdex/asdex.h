@@ -141,6 +141,7 @@ private:
     void startCharSizeValueCommand(DcbFunction function);
     void startDbAreaMenu();
     void startDbEditMenu();
+    void startTempDataMenu();
     void startDefineTraitAreaCommand();
     void startTraitAreaValueCommand(DcbFunction function);
     void startDefineOffAreaCommand();
