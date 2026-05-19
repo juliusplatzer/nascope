@@ -55650,5 +55650,84 @@
         41.9754349
       ]
     }
+  ],
+  "towers": [
+    {
+      "id": "Concourse E/F Control Tower",
+      "position": [
+        -87.9063256,
+        41.9751705
+      ]
+    },
+    {
+      "id": "Concourse G Control Tower",
+      "position": [
+        -87.9032581,
+        41.9741619
+      ]
+    },
+    {
+      "id": "Concourse H/K Contol Tower",
+      "position": [
+        -87.9002007,
+        41.9751701
+      ]
+    },
+    {
+      "id": "Concourse L Control Tower",
+      "position": [
+        -87.8979054,
+        41.9770504
+      ]
+    },
+    {
+      "id": "Concourse M East Contol Tower",
+      "position": [
+        -87.8850517,
+        41.9738927
+      ]
+    },
+    {
+      "id": "Concourse M West Contol Tower",
+      "position": [
+        -87.8910338,
+        41.9744014
+      ]
+    },
+    {
+      "id": "Contol Tower 914",
+      "position": [
+        -87.9157605,
+        41.996288
+      ]
+    },
+    {
+      "id": "Control Tower 876",
+      "position": [
+        -87.9157804,
+        41.9619412
+      ]
+    },
+    {
+      "id": "Control Tower 910",
+      "position": [
+        -87.9032638,
+        41.9759665
+      ]
+    },
+    {
+      "id": "osm:way/167029900",
+      "position": [
+        -87.9103789,
+        41.9787345
+      ]
+    },
+    {
+      "id": "Roman C. Pucinski Tower",
+      "position": [
+        -87.904371,
+        41.9772761
+      ]
+    }
   ]
 }

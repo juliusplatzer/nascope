@@ -23858,5 +23858,42 @@
         38.9518253
       ]
     }
+  ],
+  "towers": [
+    {
+      "id": "Dulles Airport Ramp Tower",
+      "position": [
+        -77.4478682,
+        38.9484367
+      ]
+    },
+    {
+      "id": "IAD Air Traffic Control Tower",
+      "position": [
+        -77.448705,
+        38.9390911
+      ]
+    },
+    {
+      "id": "IAD Historic Air Traffic Control Tower",
+      "position": [
+        -77.447815,
+        38.9519849
+      ]
+    },
+    {
+      "id": "osm:node/764636039",
+      "position": [
+        -77.4487101,
+        38.9390852
+      ]
+    },
+    {
+      "id": "osm:node/3513027439",
+      "position": [
+        -77.447818,
+        38.9519885
+      ]
+    }
   ]
 }

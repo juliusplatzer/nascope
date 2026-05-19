@@ -24551,5 +24551,14 @@
         37.6127469
       ]
     }
+  ],
+  "towers": [
+    {
+      "id": "San Francisco International Airport Control Tower",
+      "position": [
+        -122.3838058,
+        37.6159002
+      ]
+    }
   ]
 }
