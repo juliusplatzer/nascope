@@ -1,5 +1,5 @@
-#ifndef ASDEX_ATISCACHE_H_
-#define ASDEX_ATISCACHE_H_
+#ifndef IO_ATIS_H_
+#define IO_ATIS_H_
 
 #include <QDateTime>
 #include <QNetworkAccessManager>
@@ -8,7 +8,7 @@
 #include <QStringList>
 #include <QTimer>
 
-namespace asdex {
+namespace io {
 
 struct AtisRunwayState {
     QString airport;
@@ -19,11 +19,11 @@ struct AtisRunwayState {
     bool valid = false;
 };
 
-class AtisCache : public QObject {
+class AtisFeed : public QObject {
     Q_OBJECT
 
 public:
-    explicit AtisCache(QString airport, QObject* parent = nullptr);
+    explicit AtisFeed(QString airport, QObject* parent = nullptr);
 
     const AtisRunwayState& state() const { return state_; }
     QString airport() const { return airport_; }
@@ -44,6 +44,6 @@ private:
     bool inFlight_ = false;
 };
 
-} // namespace asdex
+} // namespace io
 
-#endif  // ASDEX_ATISCACHE_H_
+#endif  // IO_ATIS_H_

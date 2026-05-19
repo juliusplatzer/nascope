@@ -1,7 +1,7 @@
-#ifndef ASDEX_DATABLOCKS_H_
-#define ASDEX_DATABLOCKS_H_
+#ifndef ASDEX_DATABLOCK_H_
+#define ASDEX_DATABLOCK_H_
 
-#include "asdex/targetcache.h"
+#include "asdex/target.h"
 
 #include <QMatrix4x4>
 #include <QPointF>
@@ -65,4 +65,4 @@ void drawDatablocks(const QVector<AsdexTarget>& targets,
 
 } // namespace asdex
 
-#endif  // ASDEX_DATABLOCKS_H_
+#endif  // ASDEX_DATABLOCK_H_

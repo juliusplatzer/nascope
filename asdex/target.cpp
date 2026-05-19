@@ -1,6 +1,7 @@
-#include "asdex/targets.h"
+#include "asdex/target.h"
 
-#include "utils/math.h"
+#include "math/core.h"
+#include "math/geom.h"
 #include "renderer/builders.h"
 #include "renderer/cmdbuffer.h"
 #include "renderer/tessellator.h"
@@ -22,26 +23,13 @@ QColor unknownTargetColor(int brightness) { return applyBrightness(QColor(0, 255
 QColor vectorColor(int brightness) { return applyBrightness(QColor(140, 140, 140), brightness); }
 QColor highlightColor(int brightness) { return applyBrightness(QColor(255, 255, 255), brightness); }
 
-QPointF transformPoint(const QPointF& point,
-                       const QPointF& translate,
-                       double rotationDegrees,
-                       double scale) {
-    const double radians = rotationDegrees * M_PI / 180.0;
-    const double c = std::cos(radians);
-    const double s = std::sin(radians);
-    const double x = point.x() * scale;
-    const double y = point.y() * scale;
-    return QPointF(translate.x() + x * c - y * s,
-                   translate.y() + x * s + y * c);
-}
-
 QPointF vectorEndFeet(const QPointF& start,
                       double groundSpeedKnots,
                       double trackDegrees,
                       double vectorSeconds) {
     const double distanceNm = groundSpeedKnots * vectorSeconds / 3600.0;
-    const double distanceFeet = distanceNm * utils::kFeetPerNm;
-    const double rad = trackDegrees * M_PI / 180.0;
+    const double distanceFeet = distanceNm * math::kFeetPerNm;
+    const double rad = math::degreesToRadians(trackDegrees);
     return QPointF(start.x() + distanceFeet * std::sin(rad),
                    start.y() + distanceFeet * std::cos(rad));
 }
@@ -101,7 +89,7 @@ QVector<QPointF> circleShapeFeet(double radiusFeet, int segments) {
     vertices.reserve(segments + 1);
     vertices.push_back(QPointF(0.0, 0.0));
     for (int i = 0; i <= segments; ++i) {
-        const double a = 2.0 * M_PI * double(i) / double(segments);
+        const double a = 2.0 * math::kPi * double(i) / double(segments);
         vertices.push_back(QPointF(radiusFeet * std::cos(a), radiusFeet * std::sin(a)));
     }
     return vertices;
@@ -121,7 +109,7 @@ QVector<QPointF> regularRingFeet(int sides, double radiusFeet) {
     QVector<QPointF> points;
     points.reserve(sides + 1);
     for (int i = 0; i <= sides; ++i) {
-        const double a = 2.0 * M_PI * double(i) / double(sides);
+        const double a = 2.0 * math::kPi * double(i) / double(sides);
         points.push_back(QPointF(radiusFeet * std::cos(a), radiusFeet * std::sin(a)));
     }
     return points;
@@ -136,7 +124,7 @@ void addTransformedIndexed(renderer::TrianglesBuilder& builder,
     QVector<QPointF> transformed;
     transformed.reserve(points.size());
     for (const QPointF& point : points) {
-        transformed.push_back(transformPoint(point, position, 90.0 - heading, scale));
+        transformed.push_back(math::rotateScaleTranslate(point, position, 90.0 - heading, scale));
     }
     builder.addIndexed(transformed, indices);
 }
@@ -209,7 +197,7 @@ void drawTargets(const QVector<AsdexTarget>& targets,
     vectorSeconds = clampedTargetVectorSeconds(vectorSeconds);
 
     constexpr int kHistoryColorCount = int(sizeof(kHistoryColors) / sizeof(kHistoryColors[0]));
-    const QVector<QPointF> dotPoints = circleShapeFeet(0.003 * utils::kFeetPerNm, 12);
+    const QVector<QPointF> dotPoints = circleShapeFeet(0.003 * math::kFeetPerNm, 12);
     const QVector<std::uint32_t> dotIndices = circleFanIndices(12);
 
     for (int colorIndex = 0; colorIndex < kHistoryColorCount; ++colorIndex) {
@@ -235,7 +223,7 @@ void drawTargets(const QVector<AsdexTarget>& targets,
     }
 
     renderer::LinesBuilder* ringBuilder = renderer::getLinesBuilder();
-    const QVector<QPointF> ring = regularRingFeet(20, 0.012 * utils::kFeetPerNm);
+    const QVector<QPointF> ring = regularRingFeet(20, 0.012 * math::kFeetPerNm);
     for (const AsdexTarget& target : targets) {
         if (!target.highlighted) continue;
 

@@ -1,9 +1,8 @@
-find_package(Qt6 REQUIRED COMPONENTS Widgets Network OpenGLWidgets WebSockets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGLWidgets)
 find_package(ZLIB REQUIRED)
 
 add_library(nascope_asdex STATIC
     window.cpp
-    atiscache.cpp
     notamcache.cpp
     cmdsetup.cpp
     cmdslew.cpp
@@ -12,11 +11,10 @@ add_library(nascope_asdex STATIC
     dbareas.cpp
     videomaps.cpp
     tempdata.cpp
-    targets.cpp
-    datablocks.cpp
-    scope.cpp
+    target.cpp
+    datablock.cpp
+    asdex.cpp
     lists.cpp
-    targetcache.cpp
 )
 
 target_include_directories(nascope_asdex
@@ -27,11 +25,13 @@ target_include_directories(nascope_asdex
 target_link_libraries(nascope_asdex
     PUBLIC
         Qt6::Widgets
-        Qt6::Network
         Qt6::OpenGLWidgets
-        Qt6::WebSockets
         nascope_renderer
-        nascope_utils
+        nascope_panes
+        nascope_io
+        nascope_math
+        nascope_radar
+        nascope_util
     PRIVATE
         ZLIB::ZLIB
 )

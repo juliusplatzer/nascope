@@ -1,7 +1,7 @@
 #ifndef ASDEX_DBAREAS_H_
 #define ASDEX_DBAREAS_H_
 
-#include "asdex/datablocks.h"
+#include "asdex/datablock.h"
 
 #include <QPointF>
 #include <QString>
@@ -67,8 +67,6 @@ public:
 private:
     QVector<DbArea> areas_;
 };
-
-bool pointInPolygon(const QVector<QPointF>& polygon, const QPointF& point);
 
 void drawDbAreas(const DbAreaStore& store, renderer::CommandBuffer* commandBuffer);
 

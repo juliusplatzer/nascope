@@ -1,15 +1,18 @@
-#include "asdex/scope.h"
+#include "asdex/asdex.h"
 
-#include "asdex/datablocks.h"
+#include "asdex/datablock.h"
 #include "asdex/tempdata.h"
-#include "asdex/targets.h"
+#include "asdex/target.h"
 #include "asdex/videomaps.h"
-#include "utils/math.h"
-#include "utils/resources.h"
+#include "math/core.h"
+#include "math/geom.h"
+#include "math/latlong.h"
+#include "radar/tools.h"
 #include "renderer/builders.h"
 #include "renderer/cmdbuffer.h"
 #include "renderer/renderlayers.h"
 #include "renderer/renderer.h"
+#include "util/resources.h"
 
 #include <QCursor>
 #include <QDebug>
@@ -31,7 +34,6 @@ constexpr double kWheelStepFeet = 400.0;
 constexpr double kCtrlWheelStepFeet = 1600.0;
 constexpr double kMaxHoverRangeFeet = 150.0;
 constexpr double kRightClickDragTolerancePx = 3.0;
-constexpr double kPi = 3.14159265358979323846;
 
 namespace z {
 
@@ -53,14 +55,6 @@ constexpr int DcbButtons = -99;
 constexpr int DcbText = -98;
 
 }  // namespace z
-
-int normalizedDegrees(int degrees) {
-    return ((degrees % 360) + 360) % 360;
-}
-
-double radiansFromDegrees(int degrees) {
-    return double(normalizedDegrees(degrees)) * kPi / 180.0;
-}
 
 bool isHeavyWake(QStringView wake) {
     if (wake.size() != 1) return false;
@@ -116,40 +110,16 @@ LeaderDirection leaderDirectionFromDcbValueRaw(int value) {
     }
 }
 
-bool isTraitAreaValueCommand(CommandType type) {
-    switch (type) {
-        case CommandType::DefineTraitAreaDbCharSize:
-        case CommandType::DefineTraitAreaDbBrightness:
-        case CommandType::DefineTraitAreaLeaderLength:
-        case CommandType::DefineTraitAreaLeaderDirection:
-            return true;
-        default:
-            return false;
-    }
-}
-
-bool isModifyTraitAreaValueCommand(CommandType type) {
-    switch (type) {
-        case CommandType::ModifyTraitAreaDbCharSize:
-        case CommandType::ModifyTraitAreaDbBrightness:
-        case CommandType::ModifyTraitAreaLeaderLength:
-        case CommandType::ModifyTraitAreaLeaderDirection:
-            return true;
-        default:
-            return false;
-    }
-}
-
 } // namespace
 
-AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
-    : QOpenGLWidget(parent),
+Asdex::Asdex(QString airport, QWidget* parent)
+    : panes::Display(parent),
       airport_(std::move(airport)),
       map_(asdex::VideoMap::load(airport_)),
-      targetCache_(airport_),
-      atisCache_(airport_),
+      smes_(airport_),
+      atis_(airport_),
       runwayClosureCache_(airport_,
-                           utils::findProjectRelativeFile(QStringLiteral("asdex/notams.py"))) {
+                           util::findProjectRelativeFile(QStringLiteral("asdex/notams.py"))) {
     QSurfaceFormat fmt = format();
     fmt.setSamples(0);
     setFormat(fmt);
@@ -171,7 +141,7 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
     });
     coastClockTimer_.start();
 
-    const QString assetsDir = utils::findProjectRelativeDir(QStringLiteral("asdex/assets"));
+    const QString assetsDir = util::findProjectRelativeDir(QStringLiteral("asdex/assets"));
     QString cursorError;
     if (cursors_.loadFromAssetsDir(assetsDir, &cursorError)) {
         setAsdexCursor(CursorMode::Scope);
@@ -181,7 +151,7 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
 
     QString fontError;
     fontLoaded_ =
-        asdexFont_.loadFromFile(utils::findProjectRelativeFile(QStringLiteral("asdex/assets/font.bin")),
+        asdexFont_.loadFromFile(util::findProjectRelativeFile(QStringLiteral("asdex/assets/font.bin")),
                                 &fontError);
     if (!fontLoaded_) {
         qWarning().noquote() << "[renderer] font load failed:" << fontError;
@@ -189,14 +159,14 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
 
     QString listError;
     if (!previewArea_.loadDefaultStateFromConfigFile(
-            utils::findProjectRelativeFile(
+            util::findProjectRelativeFile(
                 QStringLiteral("resources/configs/asdex/%1.json").arg(airport_.toUpper())),
             &listError)) {
         qWarning().noquote() << "[renderer] preview area config load failed:" << listError;
     }
 
     QString runwayClosureError;
-    const QString surfacePath = utils::findProjectRelativeFile(
+    const QString surfacePath = util::findProjectRelativeFile(
         QStringLiteral("asdex/surface/%1.json").arg(airport_.toUpper()));
     if (!runwayClosureGeometry_.loadSurfaceFile(surfacePath,
                                                 map_.anchorLonLat(),
@@ -210,12 +180,12 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
                              << closedAreaError;
     }
 
-    connect(&targetCache_, &::asdex::TargetCache::changed, this, [this] {
-        updateTargetsFromCache();
+    connect(&smes_, &io::SmesClient::changed, this, [this] {
+        updateTargetsFromSmes();
         update();
     });
-    connect(&atisCache_, &::asdex::AtisCache::changed, this, [this] {
-        const ::asdex::AtisRunwayState& atis = atisCache_.state();
+    connect(&atis_, &io::AtisFeed::changed, this, [this] {
+        const io::AtisRunwayState& atis = atis_.state();
         previewArea_.updateRunwayConfigFromRunways(atis.landingRunways, atis.departureRunways);
         update();
     });
@@ -249,7 +219,7 @@ AsdexScopeWidget::AsdexScopeWidget(QString airport, QWidget* parent)
     fitMapToView();
 }
 
-AsdexScopeWidget::~AsdexScopeWidget() {
+Asdex::~Asdex() {
     if (context()) {
         makeCurrent();
         if (renderer_) {
@@ -263,7 +233,7 @@ AsdexScopeWidget::~AsdexScopeWidget() {
     }
 }
 
-void AsdexScopeWidget::initializeGL() {
+void Asdex::initializeGL() {
     renderer_ = renderer::makeOpenGLRenderer();
     QString rendererError;
     if (!renderer_->initialize(&rendererError)) {
@@ -289,17 +259,17 @@ void AsdexScopeWidget::initializeGL() {
     }
 }
 
-void AsdexScopeWidget::resizeGL(int width, int height) {
+void Asdex::resizeGL(int width, int height) {
     Q_UNUSED(width);
     Q_UNUSED(height);
 }
 
-void AsdexScopeWidget::paintGL() {
+void Asdex::paintGL() {
     const QSize renderSize = framebufferRenderSize();
     renderScene(renderSize);
 }
 
-void AsdexScopeWidget::fitMapToView() {
+void Asdex::fitMapToView() {
     if (!map_.isValid()) return;
 
     const QRectF bounds = map_.boundsFeet();
@@ -309,7 +279,7 @@ void AsdexScopeWidget::fitMapToView() {
     if (halfRangeFeet_ <= 0.0) halfRangeFeet_ = 1.0;
 }
 
-void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
+void Asdex::mousePressEvent(QMouseEvent* event) {
     setFocus(Qt::MouseFocusReason);
 
     if (isMapRepositionCommandActive()) {
@@ -387,7 +357,7 @@ void AsdexScopeWidget::mousePressEvent(QMouseEvent* event) {
     QOpenGLWidget::mousePressEvent(event);
 }
 
-void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
+void Asdex::mouseMoveEvent(QMouseEvent* event) {
     if (isMapRepositionCommandActive()) {
         clearHighlightedTarget();
         clearDcbHover();
@@ -482,7 +452,7 @@ void AsdexScopeWidget::mouseMoveEvent(QMouseEvent* event) {
     QOpenGLWidget::mouseMoveEvent(event);
 }
 
-void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
+void Asdex::mouseReleaseEvent(QMouseEvent* event) {
     if (suppressNextDbAreaSelectionRelease_ && event->button() != Qt::RightButton) {
         suppressNextDbAreaSelectionRelease_ = false;
         event->accept();
@@ -617,7 +587,7 @@ void AsdexScopeWidget::mouseReleaseEvent(QMouseEvent* event) {
     QOpenGLWidget::mouseReleaseEvent(event);
 }
 
-void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
+void Asdex::wheelEvent(QWheelEvent* event) {
     const QPoint angleDelta = event->angleDelta();
     const QPoint pixelDelta = event->pixelDelta();
 
@@ -656,11 +626,11 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
             int value = 0;
             const int current = dcbEntryCommand_->valueInt(&value)
                 ? value
-                : selectedTraitLeaderDirectionValue();
+                : selectedTraitValue(dcbEntryCommand_->type());
             const int next = nextLeaderDirectionValue(current, wheelY > 0 ? 1 : -1);
 
             dcbEntryCommand_->setEntryValue(next);
-            setSelectedTraitLeaderDirectionValue(next);
+            dcbEntryCommand_->apply(next);
 
             clearDcbHover();
             setAsdexCursor(CursorMode::Hidden);
@@ -674,26 +644,6 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
             case CommandType::Rotate:
             case CommandType::VectorLength:
             case CommandType::LeaderLength:
-            case CommandType::HoldBarsBrightness:
-            case CommandType::MovementAreasBrightness:
-            case CommandType::BackgroundBrightness:
-            case CommandType::TrackBrightness:
-            case CommandType::DataBlocksBrightness:
-            case CommandType::ListsBrightness:
-            case CommandType::TempMapAreasBrightness:
-            case CommandType::TempMapTextBrightness:
-            case CommandType::DcbBrightness:
-            case CommandType::DataBlockCharSize:
-            case CommandType::DcbCharSize:
-            case CommandType::CoastSuspendCharSize:
-            case CommandType::TempDataCharSize:
-            case CommandType::PreviewAreaCharSize:
-            case CommandType::DefineTraitAreaDbCharSize:
-            case CommandType::ModifyTraitAreaDbCharSize:
-            case CommandType::DefineTraitAreaDbBrightness:
-            case CommandType::ModifyTraitAreaDbBrightness:
-            case CommandType::DefineTraitAreaLeaderLength:
-            case CommandType::ModifyTraitAreaLeaderLength:
                 steps = wheelY > 0 ? 1 : -1;
                 break;
             case CommandType::Range:
@@ -703,7 +653,13 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
             case CommandType::EditDatablockFields:
             case CommandType::MapReposition:
             default:
-                steps = wheelY > 0 ? -1 : 1;
+                if (isBrightnessValueCommand(dcbEntryCommand_->type())
+                    || isCharSizeValueCommand(dcbEntryCommand_->type())
+                    || traitAreaPropertyFor(dcbEntryCommand_->type())) {
+                    steps = wheelY > 0 ? 1 : -1;
+                } else {
+                    steps = wheelY > 0 ? -1 : 1;
+                }
                 break;
         }
 
@@ -711,49 +667,7 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
 
         int value = 0;
         if (dcbEntryCommand_->valueInt(&value)) {
-            switch (dcbEntryCommand_->type()) {
-                case CommandType::Rotate:
-                    setRotationValue(value);
-                    break;
-                case CommandType::VectorLength:
-                    setVectorLengthValue(value);
-                    break;
-                case CommandType::LeaderLength:
-                    setLeaderLengthValue(value);
-                    break;
-                case CommandType::HoldBarsBrightness:
-                case CommandType::MovementAreasBrightness:
-                case CommandType::BackgroundBrightness:
-                case CommandType::TrackBrightness:
-                case CommandType::DataBlocksBrightness:
-                case CommandType::ListsBrightness:
-                case CommandType::TempMapAreasBrightness:
-                case CommandType::TempMapTextBrightness:
-                case CommandType::DcbBrightness:
-                    setBrightnessValue(dcbEntryCommand_->type(), value);
-                    break;
-                case CommandType::DataBlockCharSize:
-                case CommandType::DcbCharSize:
-                case CommandType::CoastSuspendCharSize:
-                case CommandType::TempDataCharSize:
-                case CommandType::PreviewAreaCharSize:
-                    setCharSizeValue(dcbEntryCommand_->type(), value);
-                    break;
-                case CommandType::DefineTraitAreaDbCharSize:
-                case CommandType::ModifyTraitAreaDbCharSize:
-                    setSelectedTraitDbCharSizeValue(value);
-                    break;
-                case CommandType::DefineTraitAreaDbBrightness:
-                case CommandType::ModifyTraitAreaDbBrightness:
-                    setSelectedTraitDbBrightnessValue(value);
-                    break;
-                case CommandType::DefineTraitAreaLeaderLength:
-                case CommandType::ModifyTraitAreaLeaderLength:
-                    setSelectedTraitLeaderLengthValue(value);
-                    break;
-                default:
-                    break;
-            }
+            dcbEntryCommand_->apply(value);
         }
 
         clearDcbHover();
@@ -800,7 +714,7 @@ void AsdexScopeWidget::wheelEvent(QWheelEvent* event) {
     event->accept();
 }
 
-void AsdexScopeWidget::keyPressEvent(QKeyEvent* event) {
+void Asdex::keyPressEvent(QKeyEvent* event) {
     if (isMapRepositionCommandActive()) {
         if (event->key() == Qt::Key_Escape || event->key() == Qt::Key_Backspace) {
             cancelCommand();
@@ -899,7 +813,7 @@ void AsdexScopeWidget::keyPressEvent(QKeyEvent* event) {
     QOpenGLWidget::keyPressEvent(event);
 }
 
-void AsdexScopeWidget::leaveEvent(QEvent* event) {
+void Asdex::leaveEvent(QEvent* event) {
     if (!commandActive() && !panning_) {
         dcbMouseCaptured_ = false;
         clearHighlightedTarget();
@@ -911,7 +825,7 @@ void AsdexScopeWidget::leaveEvent(QEvent* event) {
     QOpenGLWidget::leaveEvent(event);
 }
 
-bool AsdexScopeWidget::handleDatablockEditKey(QKeyEvent* event) {
+bool Asdex::handleDatablockEditKey(QKeyEvent* event) {
     switch (event->key()) {
         case Qt::Key_Escape:
             cancelCommand();
@@ -977,7 +891,7 @@ bool AsdexScopeWidget::handleDatablockEditKey(QKeyEvent* event) {
     return true;
 }
 
-bool AsdexScopeWidget::handleDcbEntryCommandKey(QKeyEvent* event) {
+bool Asdex::handleDcbEntryCommandKey(QKeyEvent* event) {
     if (!dcbEntryCommand_) return false;
 
     switch (event->key()) {
@@ -1032,16 +946,16 @@ bool AsdexScopeWidget::handleDcbEntryCommandKey(QKeyEvent* event) {
     return true;
 }
 
-void AsdexScopeWidget::updateTargetsFromCache() {
+void Asdex::updateTargetsFromSmes() {
     targets_.clear();
     if (!map_.isValid()) return;
 
-    const QTransform toFeet = utils::lonLatToFeet(map_.anchorLonLat());
-    const QHash<QString, ::asdex::TargetCache::Target>& cachedTargets = targetCache_.targets();
+    const QTransform toFeet = math::lonLatToFeet(map_.anchorLonLat());
+    const QHash<QString, io::SmesTarget>& cachedTargets = smes_.targets();
     targets_.reserve(cachedTargets.size());
 
     for (auto it = cachedTargets.constBegin(); it != cachedTargets.constEnd(); ++it) {
-        const ::asdex::TargetCache::Target& cached = it.value();
+        const io::SmesTarget& cached = it.value();
         if (!cached.lat || !cached.lon) continue;
 
         asdex::AsdexTarget target;
@@ -1084,7 +998,7 @@ void AsdexScopeWidget::updateTargetsFromCache() {
         highlightedTargetId_.clear();
 }
 
-void AsdexScopeWidget::updateHighlightedTarget(const QPointF& mouseLogical) {
+void Asdex::updateHighlightedTarget(const QPointF& mouseLogical) {
     const QSize renderSize = framebufferRenderSize();
     const QPointF mouseWorld = screenToWorldFeet(mouseLogical, renderSize);
     const double maxDistance2 = kMaxHoverRangeFeet * kMaxHoverRangeFeet;
@@ -1110,18 +1024,18 @@ void AsdexScopeWidget::updateHighlightedTarget(const QPointF& mouseLogical) {
     }
 }
 
-void AsdexScopeWidget::clearHighlightedTarget() {
+void Asdex::clearHighlightedTarget() {
     highlightedTargetId_.clear();
     for (AsdexTarget& target : targets_) target.highlighted = false;
 }
 
-AsdexTarget* AsdexScopeWidget::highlightedTarget() {
+AsdexTarget* Asdex::highlightedTarget() {
     if (highlightedTargetId_.isEmpty()) return nullptr;
 
     return targetById(highlightedTargetId_);
 }
 
-AsdexTarget* AsdexScopeWidget::targetById(const QString& targetId) {
+AsdexTarget* Asdex::targetById(const QString& targetId) {
     if (targetId.isEmpty()) return nullptr;
 
     for (AsdexTarget& target : targets_) {
@@ -1131,7 +1045,7 @@ AsdexTarget* AsdexScopeWidget::targetById(const QString& targetId) {
     return nullptr;
 }
 
-void AsdexScopeWidget::startDatablockEdit(const AsdexTarget& target) {
+void Asdex::startDatablockEdit(const AsdexTarget& target) {
     if (commandType_ != CommandType::None) return;
     if (!target.correlated || target.coasting) {
         setAsdexCursor(CursorMode::Scope);
@@ -1148,7 +1062,7 @@ void AsdexScopeWidget::startDatablockEdit(const AsdexTarget& target) {
     update();
 }
 
-void AsdexScopeWidget::cancelCommand() {
+void Asdex::cancelCommand() {
     if (commandType_ == CommandType::MapReposition) {
         cancelMapRepositionCommand();
         return;
@@ -1156,6 +1070,19 @@ void AsdexScopeWidget::cancelCommand() {
 
     if (leaderDirectionCommand_) {
         cancelLeaderDirectionKeyboardCommand();
+        return;
+    }
+
+    if (dcbEntryCommand_) {
+        commandType_ = dcbEntryCommand_->nextCommandType();
+        dcbEntryCommand_.reset();
+        editingTrackId_.clear();
+        previewArea_.setSystemResponse({});
+        dcb_.setMenu(currentDcbMenu());
+        clearDcbHover();
+        setAsdexCursor(CursorMode::Scope);
+        clearHighlightedTarget();
+        update();
         return;
     }
 
@@ -1181,8 +1108,7 @@ void AsdexScopeWidget::cancelCommand() {
         return;
     }
 
-    if (isBrightnessValueCommand(commandType_)
-        || (dcbEntryCommand_ && isBrightnessValueCommand(dcbEntryCommand_->type()))) {
+    if (isBrightnessValueCommand(commandType_)) {
         commandType_ = CommandType::Brightness;
         dcbEntryCommand_.reset();
         editingTrackId_.clear();
@@ -1195,8 +1121,7 @@ void AsdexScopeWidget::cancelCommand() {
         return;
     }
 
-    if (isCharSizeValueCommand(commandType_)
-        || (dcbEntryCommand_ && isCharSizeValueCommand(dcbEntryCommand_->type()))) {
+    if (isCharSizeValueCommand(commandType_)) {
         commandType_ = CommandType::CharSize;
         dcbEntryCommand_.reset();
         editingTrackId_.clear();
@@ -1225,7 +1150,7 @@ void AsdexScopeWidget::cancelCommand() {
     update();
 }
 
-void AsdexScopeWidget::submitDatablockEdit() {
+void Asdex::submitDatablockEdit() {
     if (!datablockEdit_) return;
 
     AsdexTarget* target = targetById(editingTrackId_);
@@ -1241,165 +1166,52 @@ void AsdexScopeWidget::submitDatablockEdit() {
     }
 
     const EditedDbFields fields = datablockEdit_->values();
-    targetCache_.sendDatablockEdit(airport_,
-                                   editingTrackId_,
-                                   fields.callsign,
-                                   fields.beaconCode,
-                                   fields.category,
-                                   fields.aircraftType,
-                                   fields.fix,
-                                   fields.scratchpad1,
-                                   fields.scratchpad2);
+    smes_.sendDatablockEdit(airport_,
+                            editingTrackId_,
+                            fields.callsign,
+                            fields.beaconCode,
+                            fields.category,
+                            fields.aircraftType,
+                            fields.fix,
+                            fields.scratchpad1,
+                            fields.scratchpad2);
 
     pendingDatablockEdits_.insert(editingTrackId_, fields);
     applyEditedFields(*target, fields);
     cancelCommand();
 }
 
-void AsdexScopeWidget::submitDcbEntryCommand() {
+void Asdex::submitDcbEntryCommand() {
     if (!dcbEntryCommand_) return;
 
     int value = 0;
     if (!dcbEntryCommand_->valueInt(&value)) {
         previewArea_.setSystemResponse(dcbEntryCommand_->invalidMessage());
-        if (isBrightnessValueCommand(dcbEntryCommand_->type())) {
-            commandType_ = CommandType::Brightness;
-        } else if (isCharSizeValueCommand(dcbEntryCommand_->type())) {
-            commandType_ = CommandType::CharSize;
-        } else if (dcbEntryCommand_->type() == CommandType::DeleteAllDbAreas) {
-            commandType_ = CommandType::DbArea;
-        } else if (isTraitAreaValueCommand(dcbEntryCommand_->type())) {
-            commandType_ = CommandType::DefineTraitAreaTraits;
-        } else if (isModifyTraitAreaValueCommand(dcbEntryCommand_->type())) {
-            commandType_ = CommandType::ModifyTraitAreaTraits;
-        } else {
-            commandType_ = CommandType::None;
-        }
-        dcb_.setMenu(currentDcbMenu());
-        dcbEntryCommand_.reset();
-        clearDcbHover();
-        setAsdexCursor(CursorMode::Scope);
-        update();
+        commandType_ = dcbEntryCommand_->nextCommandType();
+        finalizeDcbEntryCommand();
         return;
     }
 
-    switch (dcbEntryCommand_->type()) {
-        case CommandType::Range:
-            setRangeValue(value);
-            commandType_ = CommandType::None;
-            break;
-        case CommandType::Rotate:
-            setRotationValue(value);
-            commandType_ = CommandType::None;
-            break;
-        case CommandType::VectorLength:
-            setVectorLengthValue(value);
-            commandType_ = CommandType::None;
-            break;
-        case CommandType::LeaderLength:
-            setLeaderLengthValue(value);
-            commandType_ = CommandType::None;
-            break;
-        case CommandType::HoldBarsBrightness:
-        case CommandType::MovementAreasBrightness:
-        case CommandType::BackgroundBrightness:
-        case CommandType::TrackBrightness:
-        case CommandType::DataBlocksBrightness:
-        case CommandType::ListsBrightness:
-        case CommandType::TempMapAreasBrightness:
-        case CommandType::TempMapTextBrightness:
-        case CommandType::DcbBrightness:
-            setBrightnessValue(dcbEntryCommand_->type(), value);
-            commandType_ = CommandType::Brightness;
-            break;
-        case CommandType::DataBlockCharSize:
-        case CommandType::DcbCharSize:
-        case CommandType::CoastSuspendCharSize:
-        case CommandType::TempDataCharSize:
-        case CommandType::PreviewAreaCharSize:
-            setCharSizeValue(dcbEntryCommand_->type(), value);
-            commandType_ = CommandType::CharSize;
-            break;
-        case CommandType::DeleteAllDbAreas:
-            if (value == 2) {
-                dbAreaStore_.clear();
-                dbOffAreaDatablockOverride_.clear();
-                selectedDbAreaId_.clear();
-                clearDbAreaDraft();
-            }
-            commandType_ = CommandType::DbArea;
-            break;
-        case CommandType::DefineTraitAreaDbCharSize:
-            setSelectedTraitDbCharSizeValue(value);
-            commandType_ = CommandType::DefineTraitAreaTraits;
-            break;
-        case CommandType::ModifyTraitAreaDbCharSize:
-            setSelectedTraitDbCharSizeValue(value);
-            commandType_ = CommandType::ModifyTraitAreaTraits;
-            break;
-        case CommandType::DefineTraitAreaDbBrightness:
-            setSelectedTraitDbBrightnessValue(value);
-            commandType_ = CommandType::DefineTraitAreaTraits;
-            break;
-        case CommandType::ModifyTraitAreaDbBrightness:
-            setSelectedTraitDbBrightnessValue(value);
-            commandType_ = CommandType::ModifyTraitAreaTraits;
-            break;
-        case CommandType::DefineTraitAreaLeaderLength:
-            setSelectedTraitLeaderLengthValue(value);
-            commandType_ = CommandType::DefineTraitAreaTraits;
-            break;
-        case CommandType::ModifyTraitAreaLeaderLength:
-            setSelectedTraitLeaderLengthValue(value);
-            commandType_ = CommandType::ModifyTraitAreaTraits;
-            break;
-        case CommandType::DefineTraitAreaLeaderDirection:
-            if (value == 5) {
-                previewArea_.setSystemResponse(QStringLiteral("INVALID ENTRY"));
-                commandType_ = CommandType::DefineTraitAreaTraits;
-                dcb_.setMenu(currentDcbMenu());
-                dcbEntryCommand_.reset();
-                clearDcbHover();
-                setAsdexCursor(CursorMode::Scope);
-                update();
-                return;
-            }
-            setSelectedTraitLeaderDirectionValue(value);
-            commandType_ = CommandType::DefineTraitAreaTraits;
-            break;
-        case CommandType::ModifyTraitAreaLeaderDirection:
-            if (value == 5) {
-                previewArea_.setSystemResponse(QStringLiteral("INVALID ENTRY"));
-                commandType_ = CommandType::ModifyTraitAreaTraits;
-                dcb_.setMenu(currentDcbMenu());
-                dcbEntryCommand_.reset();
-                clearDcbHover();
-                setAsdexCursor(CursorMode::Scope);
-                update();
-                return;
-            }
-            setSelectedTraitLeaderDirectionValue(value);
-            commandType_ = CommandType::ModifyTraitAreaTraits;
-            break;
-        case CommandType::None:
-        case CommandType::EditDatablockFields:
-        case CommandType::MapReposition:
-        case CommandType::Brightness:
-        case CommandType::CharSize:
-        case CommandType::LeaderDirection:
-        case CommandType::DbArea:
-        case CommandType::DefineTraitArea:
-        case CommandType::DefineTraitAreaTraits:
-        case CommandType::DefineOffArea:
-        case CommandType::ModifyTraitArea:
-        case CommandType::ModifyTraitAreaTraits:
-        case CommandType::DeleteOneDbArea:
-        default:
-            commandType_ = CommandType::None;
-            break;
-    }
-
+    dcbEntryCommand_->apply(value);
+    commandType_ = dcbEntryCommand_->nextCommandType();
     previewArea_.setSystemResponse(QString());
+    finalizeDcbEntryCommand();
+}
+
+void Asdex::beginDcbEntryCommand(DcbEntryCommand command) {
+    commandType_ = command.type();
+    dcbEntryCommand_ = std::move(command);
+    dcb_.setMenu(currentDcbMenu());
+    datablockEdit_.reset();
+    editingTrackId_.clear();
+    clearHighlightedTarget();
+    clearDcbHover();
+    previewArea_.setSystemResponse(QString());
+    setAsdexCursor(CursorMode::Hidden);
+    update();
+}
+
+void Asdex::finalizeDcbEntryCommand() {
     dcb_.setMenu(currentDcbMenu());
     dcbEntryCommand_.reset();
     clearDcbHover();
@@ -1407,7 +1219,7 @@ void AsdexScopeWidget::submitDcbEntryCommand() {
     update();
 }
 
-void AsdexScopeWidget::applyEditedFields(AsdexTarget& target,
+void Asdex::applyEditedFields(AsdexTarget& target,
                                          const EditedDbFields& fields) const {
     target.callsign = fields.callsign;
     target.beaconCode = fields.beaconCode;
@@ -1418,13 +1230,13 @@ void AsdexScopeWidget::applyEditedFields(AsdexTarget& target,
     target.scratchpad2 = fields.scratchpad2;
 }
 
-bool AsdexScopeWidget::commandActive() const {
+bool Asdex::commandActive() const {
     return datablockEdit_.has_value()
         || dcbEntryCommand_.has_value()
         || isMapRepositionCommandActive();
 }
 
-DcbMenu AsdexScopeWidget::currentDcbMenu() const {
+DcbMenu Asdex::currentDcbMenu() const {
     if (dcbOff_) return DcbMenu::Off;
 
     if (commandType_ == CommandType::Brightness || isBrightnessValueCommand(commandType_))
@@ -1433,19 +1245,14 @@ DcbMenu AsdexScopeWidget::currentDcbMenu() const {
     if (commandType_ == CommandType::CharSize || isCharSizeValueCommand(commandType_))
         return DcbMenu::CharSize;
 
+    const TraitAreaProperty* traitProperty = traitAreaPropertyFor(commandType_);
     if (commandType_ == CommandType::DefineTraitAreaTraits
-        || commandType_ == CommandType::DefineTraitAreaDbCharSize
-        || commandType_ == CommandType::DefineTraitAreaDbBrightness
-        || commandType_ == CommandType::DefineTraitAreaLeaderLength
-        || commandType_ == CommandType::DefineTraitAreaLeaderDirection) {
+        || (traitProperty && traitProperty->defineCommand == commandType_)) {
         return DcbMenu::DefineTraitArea;
     }
 
     if (commandType_ == CommandType::ModifyTraitAreaTraits
-        || commandType_ == CommandType::ModifyTraitAreaDbCharSize
-        || commandType_ == CommandType::ModifyTraitAreaDbBrightness
-        || commandType_ == CommandType::ModifyTraitAreaLeaderLength
-        || commandType_ == CommandType::ModifyTraitAreaLeaderDirection) {
+        || (traitProperty && traitProperty->modifyCommand == commandType_)) {
         return DcbMenu::ModifyTraitArea;
     }
 
@@ -1456,16 +1263,16 @@ DcbMenu AsdexScopeWidget::currentDcbMenu() const {
     return DcbMenu::Main;
 }
 
-bool AsdexScopeWidget::defaultDataBlockVisibleForTarget(const AsdexTarget& target) const {
+bool Asdex::defaultDataBlockVisibleForTarget(const AsdexTarget& target) const {
     Q_UNUSED(target);
     return showDataBlocks_;
 }
 
-bool AsdexScopeWidget::targetInsideDbOffArea(const AsdexTarget& target) const {
+bool Asdex::targetInsideDbOffArea(const AsdexTarget& target) const {
     return dbAreaStore_.pointInsideOffArea(target.positionFeet);
 }
 
-bool AsdexScopeWidget::isDataBlockVisible(const AsdexTarget& target) const {
+bool Asdex::isDataBlockVisible(const AsdexTarget& target) const {
     if (targetInsideDbOffArea(target)) {
         return dbOffAreaDatablockOverride_.value(target.id, false);
     }
@@ -1485,7 +1292,7 @@ bool AsdexScopeWidget::isDataBlockVisible(const AsdexTarget& target) const {
     return defaultDataBlockVisibleForTarget(target);
 }
 
-void AsdexScopeWidget::toggleDataBlockForTarget(const AsdexTarget& target) {
+void Asdex::toggleDataBlockForTarget(const AsdexTarget& target) {
     if (targetInsideDbOffArea(target)) {
         const bool current = dbOffAreaDatablockOverride_.value(target.id, false);
         dbOffAreaDatablockOverride_[target.id] = !current;
@@ -1507,7 +1314,7 @@ void AsdexScopeWidget::toggleDataBlockForTarget(const AsdexTarget& target) {
         : DataBlockVisibility::ForceOn;
 }
 
-void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
+void Asdex::handleDcbButtonClicked(DcbFunction function) {
     if (currentDcbMenu() == DcbMenu::DefineTraitArea
         || currentDcbMenu() == DcbMenu::ModifyTraitArea) {
         switch (function) {
@@ -1525,16 +1332,10 @@ void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
                 toggleSelectedTraitVector();
                 return;
             case DcbFunction::DataBlockCharSize:
-                startTraitAreaDbCharSizeCommand();
-                return;
             case DcbFunction::DataBlocksBrightness:
-                startTraitAreaDbBrightnessCommand();
-                return;
             case DcbFunction::DbAreaLeaderLength:
-                startTraitAreaLeaderLengthCommand();
-                return;
             case DcbFunction::DbAreaLeaderDirection:
-                startTraitAreaLeaderDirectionCommand();
+                startTraitAreaValueCommand(function);
                 return;
             case DcbFunction::Done:
                 handleDcbDone();
@@ -1542,6 +1343,16 @@ void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
             default:
                 break;
         }
+    }
+
+    if (brightnessPropertyFor(function)) {
+        startBrightnessValueCommand(function);
+        return;
+    }
+
+    if (charSizePropertyFor(function)) {
+        startCharSizeValueCommand(function);
+        return;
     }
 
     switch (function) {
@@ -1577,24 +1388,6 @@ void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
             return;
         case DcbFunction::CharSize:
             startCharSizeMenu();
-            return;
-        case DcbFunction::HoldBarsBrightness:
-        case DcbFunction::MovementAreasBrightness:
-        case DcbFunction::BackgroundBrightness:
-        case DcbFunction::TrackBrightness:
-        case DcbFunction::DataBlocksBrightness:
-        case DcbFunction::ListsBrightness:
-        case DcbFunction::TempMapAreasBrightness:
-        case DcbFunction::TempMapTextBrightness:
-        case DcbFunction::DcbBrightness:
-            startBrightnessValueCommand(function);
-            return;
-        case DcbFunction::DataBlockCharSize:
-        case DcbFunction::DcbCharSize:
-        case DcbFunction::CoastSuspendCharSize:
-        case DcbFunction::TempDataCharSize:
-        case DcbFunction::PreviewAreaCharSize:
-            startCharSizeValueCommand(function);
             return;
         case DcbFunction::DefineDbTraitArea:
             startDefineTraitAreaCommand();
@@ -1635,34 +1428,35 @@ void AsdexScopeWidget::handleDcbButtonClicked(DcbFunction function) {
     }
 }
 
-void AsdexScopeWidget::toggleDcbOnOff() {
+void Asdex::toggleDcbOnOff() {
     dcbOff_ = !dcbOff_;
     dcb_.setMenu(dcbOff_ ? DcbMenu::Off : DcbMenu::Main);
     clearDcbHover();
     update();
 }
 
-void AsdexScopeWidget::toggleDayNite() {
+void Asdex::toggleDayNite() {
     mode_ = (mode_ == Mode::Day) ? Mode::Night : Mode::Day;
     clearDcbHover();
     update();
 }
 
-void AsdexScopeWidget::toggleAllDataBlocks() {
+void Asdex::toggleAllDataBlocks() {
     showDataBlocks_ = !showDataBlocks_;
     datablockVisibility_.clear();
     clearDcbHover();
     update();
 }
 
-void AsdexScopeWidget::startBrightnessMenu() {
+void Asdex::startDcbSubmenu(CommandType command, DcbMenu menu, bool clearDraft) {
     if (commandType_ != CommandType::None) return;
 
-    commandType_ = CommandType::Brightness;
-    dcb_.setMenu(DcbMenu::Brightness);
+    commandType_ = command;
+    dcb_.setMenu(menu);
     datablockEdit_.reset();
     dcbEntryCommand_.reset();
     editingTrackId_.clear();
+    if (clearDraft) clearDbAreaDraft();
     clearHighlightedTarget();
     clearDcbHover();
     previewArea_.setSystemResponse(QString());
@@ -1670,88 +1464,47 @@ void AsdexScopeWidget::startBrightnessMenu() {
     update();
 }
 
-void AsdexScopeWidget::startBrightnessValueCommand(DcbFunction function) {
-    const CommandType type = commandForBrightnessFunction(function);
-    if (type == CommandType::None) return;
-
-    commandType_ = type;
-    dcb_.setMenu(DcbMenu::Brightness);
-    dcbEntryCommand_ =
-        DcbEntryCommand::brightness(type, brightnessCommandLabel(type), brightnessValue(type));
-    datablockEdit_.reset();
-    editingTrackId_.clear();
-    clearHighlightedTarget();
-    clearDcbHover();
-    previewArea_.setSystemResponse(QString());
-    setAsdexCursor(CursorMode::Hidden);
-    update();
+void Asdex::startBrightnessMenu() {
+    startDcbSubmenu(CommandType::Brightness, DcbMenu::Brightness, false);
 }
 
-void AsdexScopeWidget::startCharSizeMenu() {
-    if (commandType_ != CommandType::None) return;
+void Asdex::startBrightnessValueCommand(DcbFunction function) {
+    const BrightnessProperty* property = brightnessPropertyFor(function);
+    if (!property) return;
 
-    commandType_ = CommandType::CharSize;
-    dcb_.setMenu(DcbMenu::CharSize);
-    datablockEdit_.reset();
-    dcbEntryCommand_.reset();
-    editingTrackId_.clear();
-    clearHighlightedTarget();
-    clearDcbHover();
-    previewArea_.setSystemResponse(QString());
-    setAsdexCursor(CursorMode::Scope);
-    update();
+    beginDcbEntryCommand(DcbEntryCommand::brightness(
+        property->command,
+        QString::fromLatin1(property->label),
+        this->*(property->field),
+        [this, command = property->command](int value) { setBrightnessValue(command, value); },
+        CommandType::Brightness));
 }
 
-void AsdexScopeWidget::startCharSizeValueCommand(DcbFunction function) {
-    const CommandType type = commandForCharSizeFunction(function);
-    if (type == CommandType::None) return;
-
-    commandType_ = type;
-    dcb_.setMenu(DcbMenu::CharSize);
-    dcbEntryCommand_ =
-        DcbEntryCommand::charSize(type, charSizeCommandLabel(type), charSizeValue(type));
-    datablockEdit_.reset();
-    editingTrackId_.clear();
-    clearHighlightedTarget();
-    clearDcbHover();
-    previewArea_.setSystemResponse(QString());
-    setAsdexCursor(CursorMode::Hidden);
-    update();
+void Asdex::startCharSizeMenu() {
+    startDcbSubmenu(CommandType::CharSize, DcbMenu::CharSize, false);
 }
 
-void AsdexScopeWidget::startDbAreaMenu() {
-    if (commandType_ != CommandType::None) return;
+void Asdex::startCharSizeValueCommand(DcbFunction function) {
+    const CharSizeProperty* property = charSizePropertyFor(function);
+    if (!property) return;
 
-    commandType_ = CommandType::DbArea;
-    dcb_.setMenu(DcbMenu::DbArea);
-    datablockEdit_.reset();
-    dcbEntryCommand_.reset();
-    editingTrackId_.clear();
-    clearDbAreaDraft();
-    clearHighlightedTarget();
-    clearDcbHover();
-    previewArea_.setSystemResponse(QString());
-    setAsdexCursor(CursorMode::Scope);
-    update();
+    beginDcbEntryCommand(DcbEntryCommand::charSize(
+        property->command,
+        QString::fromLatin1(property->label),
+        this->*(property->field),
+        [this, command = property->command](int value) { setCharSizeValue(command, value); },
+        CommandType::CharSize));
 }
 
-void AsdexScopeWidget::startDbEditMenu() {
-    if (commandType_ != CommandType::None) return;
-
-    commandType_ = CommandType::DbEdit;
-    dcb_.setMenu(DcbMenu::DbEdit);
-    datablockEdit_.reset();
-    dcbEntryCommand_.reset();
-    editingTrackId_.clear();
-    clearDbAreaDraft();
-    clearHighlightedTarget();
-    clearDcbHover();
-    previewArea_.setSystemResponse(QString());
-    setAsdexCursor(CursorMode::Scope);
-    update();
+void Asdex::startDbAreaMenu() {
+    startDcbSubmenu(CommandType::DbArea, DcbMenu::DbArea, true);
 }
 
-void AsdexScopeWidget::startDefineTraitAreaCommand() {
+void Asdex::startDbEditMenu() {
+    startDcbSubmenu(CommandType::DbEdit, DcbMenu::DbEdit, true);
+}
+
+void Asdex::startDefineTraitAreaCommand() {
     commandType_ = CommandType::DefineTraitArea;
     dcb_.setMenu(DcbMenu::DbArea);
     selectedDbAreaId_.clear();
@@ -1763,83 +1516,65 @@ void AsdexScopeWidget::startDefineTraitAreaCommand() {
     update();
 }
 
-void AsdexScopeWidget::startTraitAreaDbCharSizeCommand() {
+void Asdex::startTraitAreaValueCommand(DcbFunction function) {
     const DbArea* area = selectedDbArea();
     if (!area || area->kind != DbAreaKind::Trait) return;
 
-    const bool modify = currentDcbMenu() == DcbMenu::ModifyTraitArea;
-    commandType_ = modify ? CommandType::ModifyTraitAreaDbCharSize
-                          : CommandType::DefineTraitAreaDbCharSize;
-    dcb_.setMenu(modify ? DcbMenu::ModifyTraitArea : DcbMenu::DefineTraitArea);
-    dcbEntryCommand_ = modify
-        ? DcbEntryCommand::modifyTraitAreaDbCharSize(selectedTraitDbCharSizeValue())
-        : DcbEntryCommand::traitAreaDbCharSize(selectedTraitDbCharSizeValue());
-    datablockEdit_.reset();
-    clearHighlightedTarget();
-    clearDcbHover();
-    previewArea_.setSystemResponse(QString());
-    setAsdexCursor(CursorMode::Hidden);
-    update();
-}
-
-void AsdexScopeWidget::startTraitAreaDbBrightnessCommand() {
-    const DbArea* area = selectedDbArea();
-    if (!area || area->kind != DbAreaKind::Trait) return;
+    const TraitAreaProperty* property = traitAreaPropertyFor(function);
+    if (!property) return;
 
     const bool modify = currentDcbMenu() == DcbMenu::ModifyTraitArea;
-    commandType_ = modify ? CommandType::ModifyTraitAreaDbBrightness
-                          : CommandType::DefineTraitAreaDbBrightness;
-    dcb_.setMenu(modify ? DcbMenu::ModifyTraitArea : DcbMenu::DefineTraitArea);
-    dcbEntryCommand_ = modify
-        ? DcbEntryCommand::modifyTraitAreaDbBrightness(selectedTraitDbBrightnessValue())
-        : DcbEntryCommand::traitAreaDbBrightness(selectedTraitDbBrightnessValue());
-    datablockEdit_.reset();
-    clearHighlightedTarget();
-    clearDcbHover();
-    previewArea_.setSystemResponse(QString());
-    setAsdexCursor(CursorMode::Hidden);
-    update();
+    const CommandType command = modify ? property->modifyCommand : property->defineCommand;
+    const CommandType nextCommand =
+        modify ? CommandType::ModifyTraitAreaTraits : CommandType::DefineTraitAreaTraits;
+    const int currentValue = selectedTraitValue(command);
+    auto apply = [this, command](int value) {
+        setSelectedTraitValue(command, value);
+    };
+
+    switch (function) {
+        case DcbFunction::DataBlockCharSize:
+            beginDcbEntryCommand(modify
+                ? DcbEntryCommand::modifyTraitAreaDbCharSize(currentValue,
+                                                             std::move(apply),
+                                                             nextCommand)
+                : DcbEntryCommand::traitAreaDbCharSize(currentValue,
+                                                       std::move(apply),
+                                                       nextCommand));
+            return;
+        case DcbFunction::DataBlocksBrightness:
+            beginDcbEntryCommand(modify
+                ? DcbEntryCommand::modifyTraitAreaDbBrightness(currentValue,
+                                                               std::move(apply),
+                                                               nextCommand)
+                : DcbEntryCommand::traitAreaDbBrightness(currentValue,
+                                                         std::move(apply),
+                                                         nextCommand));
+            return;
+        case DcbFunction::DbAreaLeaderLength:
+            beginDcbEntryCommand(modify
+                ? DcbEntryCommand::modifyTraitAreaLeaderLength(currentValue,
+                                                               std::move(apply),
+                                                               nextCommand)
+                : DcbEntryCommand::traitAreaLeaderLength(currentValue,
+                                                         std::move(apply),
+                                                         nextCommand));
+            return;
+        case DcbFunction::DbAreaLeaderDirection:
+            beginDcbEntryCommand(modify
+                ? DcbEntryCommand::modifyTraitAreaLeaderDirection(currentValue,
+                                                                  std::move(apply),
+                                                                  nextCommand)
+                : DcbEntryCommand::traitAreaLeaderDirection(currentValue,
+                                                            std::move(apply),
+                                                            nextCommand));
+            return;
+        default:
+            return;
+    }
 }
 
-void AsdexScopeWidget::startTraitAreaLeaderLengthCommand() {
-    const DbArea* area = selectedDbArea();
-    if (!area || area->kind != DbAreaKind::Trait) return;
-
-    const bool modify = currentDcbMenu() == DcbMenu::ModifyTraitArea;
-    commandType_ = modify ? CommandType::ModifyTraitAreaLeaderLength
-                          : CommandType::DefineTraitAreaLeaderLength;
-    dcb_.setMenu(modify ? DcbMenu::ModifyTraitArea : DcbMenu::DefineTraitArea);
-    dcbEntryCommand_ = modify
-        ? DcbEntryCommand::modifyTraitAreaLeaderLength(selectedTraitLeaderLengthValue())
-        : DcbEntryCommand::traitAreaLeaderLength(selectedTraitLeaderLengthValue());
-    datablockEdit_.reset();
-    clearHighlightedTarget();
-    clearDcbHover();
-    previewArea_.setSystemResponse(QString());
-    setAsdexCursor(CursorMode::Hidden);
-    update();
-}
-
-void AsdexScopeWidget::startTraitAreaLeaderDirectionCommand() {
-    const DbArea* area = selectedDbArea();
-    if (!area || area->kind != DbAreaKind::Trait) return;
-
-    const bool modify = currentDcbMenu() == DcbMenu::ModifyTraitArea;
-    commandType_ = modify ? CommandType::ModifyTraitAreaLeaderDirection
-                          : CommandType::DefineTraitAreaLeaderDirection;
-    dcb_.setMenu(modify ? DcbMenu::ModifyTraitArea : DcbMenu::DefineTraitArea);
-    dcbEntryCommand_ = modify
-        ? DcbEntryCommand::modifyTraitAreaLeaderDirection(selectedTraitLeaderDirectionValue())
-        : DcbEntryCommand::traitAreaLeaderDirection(selectedTraitLeaderDirectionValue());
-    datablockEdit_.reset();
-    clearHighlightedTarget();
-    clearDcbHover();
-    previewArea_.setSystemResponse(QString());
-    setAsdexCursor(CursorMode::Hidden);
-    update();
-}
-
-void AsdexScopeWidget::startDefineOffAreaCommand() {
+void Asdex::startDefineOffAreaCommand() {
     commandType_ = CommandType::DefineOffArea;
     dcb_.setMenu(DcbMenu::DbArea);
     clearDbAreaDraft();
@@ -1850,7 +1585,7 @@ void AsdexScopeWidget::startDefineOffAreaCommand() {
     update();
 }
 
-void AsdexScopeWidget::startModifyTraitAreaCommand() {
+void Asdex::startModifyTraitAreaCommand() {
     commandType_ = CommandType::ModifyTraitArea;
     dcb_.setMenu(DcbMenu::DbArea);
     selectedDbAreaId_.clear();
@@ -1865,20 +1600,21 @@ void AsdexScopeWidget::startModifyTraitAreaCommand() {
     update();
 }
 
-void AsdexScopeWidget::startDeleteAllDbAreasCommand() {
-    commandType_ = CommandType::DeleteAllDbAreas;
-    dcb_.setMenu(DcbMenu::DbArea);
-    dcbEntryCommand_ = DcbEntryCommand::deleteAllDbAreas();
-    datablockEdit_.reset();
+void Asdex::startDeleteAllDbAreasCommand() {
     clearDbAreaDraft();
-    clearHighlightedTarget();
-    clearDcbHover();
-    previewArea_.setSystemResponse(QString());
-    setAsdexCursor(CursorMode::Hidden);
-    update();
+    beginDcbEntryCommand(DcbEntryCommand::deleteAllDbAreas(
+        [this](int value) {
+            if (value == 2) {
+                dbAreaStore_.clear();
+                dbOffAreaDatablockOverride_.clear();
+                selectedDbAreaId_.clear();
+                clearDbAreaDraft();
+            }
+        },
+        CommandType::DbArea));
 }
 
-void AsdexScopeWidget::startDeleteOneDbAreaCommand() {
+void Asdex::startDeleteOneDbAreaCommand() {
     commandType_ = CommandType::DeleteOneDbArea;
     dcb_.setMenu(DcbMenu::DbArea);
     clearDbAreaDraft();
@@ -1889,17 +1625,17 @@ void AsdexScopeWidget::startDeleteOneDbAreaCommand() {
     update();
 }
 
-bool AsdexScopeWidget::isDrawingDbArea() const {
+bool Asdex::isDrawingDbArea() const {
     return commandType_ == CommandType::DefineOffArea
         || commandType_ == CommandType::DefineTraitArea;
 }
 
-bool AsdexScopeWidget::isSelectingDbArea() const {
+bool Asdex::isSelectingDbArea() const {
     return commandType_ == CommandType::DeleteOneDbArea
         || commandType_ == CommandType::ModifyTraitArea;
 }
 
-bool AsdexScopeWidget::dbAreaSelectableAt(const QPointF& logicalPoint) const {
+bool Asdex::dbAreaSelectableAt(const QPointF& logicalPoint) const {
     if (!isSelectingDbArea()) return false;
 
     const QPointF world = screenToWorldFeet(logicalPoint, framebufferRenderSize());
@@ -1914,7 +1650,7 @@ bool AsdexScopeWidget::dbAreaSelectableAt(const QPointF& logicalPoint) const {
     return false;
 }
 
-bool AsdexScopeWidget::deleteDbAreaAt(const QPointF& logicalPoint) {
+bool Asdex::deleteDbAreaAt(const QPointF& logicalPoint) {
     if (commandType_ != CommandType::DeleteOneDbArea) return false;
 
     const QPointF world = screenToWorldFeet(logicalPoint, framebufferRenderSize());
@@ -1934,7 +1670,7 @@ bool AsdexScopeWidget::deleteDbAreaAt(const QPointF& logicalPoint) {
     return true;
 }
 
-bool AsdexScopeWidget::selectTraitAreaAt(const QPointF& logicalPoint) {
+bool Asdex::selectTraitAreaAt(const QPointF& logicalPoint) {
     if (commandType_ != CommandType::ModifyTraitArea) return false;
 
     const QPointF world = screenToWorldFeet(logicalPoint, framebufferRenderSize());
@@ -1960,28 +1696,28 @@ bool AsdexScopeWidget::selectTraitAreaAt(const QPointF& logicalPoint) {
     return true;
 }
 
-bool AsdexScopeWidget::showsDbAreas() const {
+bool Asdex::showsDbAreas() const {
     return isDbAreaCommand(commandType_);
 }
 
-DbArea* AsdexScopeWidget::selectedDbArea() {
+DbArea* Asdex::selectedDbArea() {
     if (selectedDbAreaId_.isEmpty()) return nullptr;
     return dbAreaStore_.areaById(selectedDbAreaId_);
 }
 
-const DbArea* AsdexScopeWidget::selectedDbArea() const {
+const DbArea* Asdex::selectedDbArea() const {
     if (selectedDbAreaId_.isEmpty()) return nullptr;
     return dbAreaStore_.areaById(selectedDbAreaId_);
 }
 
-void AsdexScopeWidget::selectDbArea(const QString& id) {
+void Asdex::selectDbArea(const QString& id) {
     selectedDbAreaId_ = id;
 }
 
-const DbArea* AsdexScopeWidget::traitAreaForTarget(const AsdexTarget& target) const {
+const DbArea* Asdex::traitAreaForTarget(const AsdexTarget& target) const {
     for (const DbArea& area : dbAreaStore_.areas()) {
         if (area.kind == DbAreaKind::Trait
-            && pointInPolygon(area.polygonFeet, target.positionFeet)) {
+            && math::pointInPolygon(area.polygonFeet, target.positionFeet)) {
             return &area;
         }
     }
@@ -1989,7 +1725,7 @@ const DbArea* AsdexScopeWidget::traitAreaForTarget(const AsdexTarget& target) co
     return nullptr;
 }
 
-bool AsdexScopeWidget::vectorVisibleForTarget(const AsdexTarget& target) const {
+bool Asdex::vectorVisibleForTarget(const AsdexTarget& target) const {
     if (const DbArea* area = traitAreaForTarget(target)) {
         return area->traits.showVector;
     }
@@ -1997,7 +1733,7 @@ bool AsdexScopeWidget::vectorVisibleForTarget(const AsdexTarget& target) const {
     return showVectorLine_;
 }
 
-DataBlockSettings AsdexScopeWidget::dataBlockSettingsForTarget(
+DataBlockSettings Asdex::dataBlockSettingsForTarget(
     const AsdexTarget& target) const {
     DataBlockSettings settings;
     settings.showDataBlocks = showDataBlocks_;
@@ -2039,69 +1775,91 @@ DataBlockSettings AsdexScopeWidget::dataBlockSettingsForTarget(
     return settings;
 }
 
-int AsdexScopeWidget::selectedTraitDbCharSizeValue() const {
-    const DbArea* area = selectedDbArea();
-    if (!area || area->kind != DbAreaKind::Trait) return 2;
-    return std::clamp(area->traits.dataBlockCharSize, 1, 6);
+const Asdex::TraitAreaProperty*
+Asdex::traitAreaProperties(std::size_t* count) {
+    static const TraitAreaProperty kTable[] = {
+        {CommandType::DefineTraitAreaDbCharSize,
+         CommandType::ModifyTraitAreaDbCharSize,
+         DcbFunction::DataBlockCharSize,
+         2,
+         [](const DbArea& area) { return std::clamp(area.traits.dataBlockCharSize, 1, 6); },
+         [](DbArea& area, int value) { area.traits.dataBlockCharSize = std::clamp(value, 1, 6); }},
+        {CommandType::DefineTraitAreaDbBrightness,
+         CommandType::ModifyTraitAreaDbBrightness,
+         DcbFunction::DataBlocksBrightness,
+         95,
+         [](const DbArea& area) { return std::clamp(area.traits.dataBlockBrightness, 1, 99); },
+         [](DbArea& area, int value) { area.traits.dataBlockBrightness = std::clamp(value, 1, 99); }},
+        {CommandType::DefineTraitAreaLeaderLength,
+         CommandType::ModifyTraitAreaLeaderLength,
+         DcbFunction::DbAreaLeaderLength,
+         2,
+         [](const DbArea& area) { return std::clamp(area.traits.leaderLength, 0, 15); },
+         [](DbArea& area, int value) { area.traits.leaderLength = std::clamp(value, 0, 15); }},
+        {CommandType::DefineTraitAreaLeaderDirection,
+         CommandType::ModifyTraitAreaLeaderDirection,
+         DcbFunction::DbAreaLeaderDirection,
+         9,
+         [](const DbArea& area) { return leaderDirectionDcbValue(area.traits.leaderDirection); },
+         [](DbArea& area, int value) {
+             if (value >= 1 && value <= 9 && value != 5) {
+                 area.traits.leaderDirection = leaderDirectionFromDcbValueRaw(value);
+             }
+         }},
+    };
+
+    if (count) *count = sizeof(kTable) / sizeof(kTable[0]);
+    return kTable;
 }
 
-int AsdexScopeWidget::selectedTraitDbBrightnessValue() const {
-    const DbArea* area = selectedDbArea();
-    if (!area || area->kind != DbAreaKind::Trait) return 95;
-    return std::clamp(area->traits.dataBlockBrightness, 1, 99);
+const Asdex::TraitAreaProperty*
+Asdex::traitAreaPropertyFor(CommandType type) {
+    std::size_t count = 0;
+    const TraitAreaProperty* table = traitAreaProperties(&count);
+
+    for (std::size_t i = 0; i < count; ++i) {
+        if (table[i].defineCommand == type || table[i].modifyCommand == type) return &table[i];
+    }
+    return nullptr;
 }
 
-int AsdexScopeWidget::selectedTraitLeaderLengthValue() const {
-    const DbArea* area = selectedDbArea();
-    if (!area || area->kind != DbAreaKind::Trait) return 2;
-    return std::clamp(area->traits.leaderLength, 0, 15);
+const Asdex::TraitAreaProperty*
+Asdex::traitAreaPropertyFor(DcbFunction function) {
+    std::size_t count = 0;
+    const TraitAreaProperty* table = traitAreaProperties(&count);
+
+    for (std::size_t i = 0; i < count; ++i) {
+        if (table[i].function == function) return &table[i];
+    }
+    return nullptr;
 }
 
-int AsdexScopeWidget::selectedTraitLeaderDirectionValue() const {
+int Asdex::selectedTraitValue(CommandType type) const {
+    const TraitAreaProperty* property = traitAreaPropertyFor(type);
+    if (!property) return 0;
+
     const DbArea* area = selectedDbArea();
-    if (!area || area->kind != DbAreaKind::Trait) return 9;
-    return leaderDirectionDcbValue(area->traits.leaderDirection);
+    if (!area || area->kind != DbAreaKind::Trait) return property->defaultValue;
+
+    return property->read(*area);
 }
 
-void AsdexScopeWidget::setSelectedTraitDbCharSizeValue(int value) {
+void Asdex::setSelectedTraitValue(CommandType type, int value) {
+    const TraitAreaProperty* property = traitAreaPropertyFor(type);
+    if (!property) return;
+
     DbArea* area = selectedDbArea();
     if (!area || area->kind != DbAreaKind::Trait) return;
 
-    area->traits.dataBlockCharSize = std::clamp(value, 1, 6);
+    property->write(*area, value);
     update();
 }
 
-void AsdexScopeWidget::setSelectedTraitDbBrightnessValue(int value) {
-    DbArea* area = selectedDbArea();
-    if (!area || area->kind != DbAreaKind::Trait) return;
-
-    area->traits.dataBlockBrightness = std::clamp(value, 1, 99);
-    update();
-}
-
-void AsdexScopeWidget::setSelectedTraitLeaderLengthValue(int value) {
-    DbArea* area = selectedDbArea();
-    if (!area || area->kind != DbAreaKind::Trait) return;
-
-    area->traits.leaderLength = std::clamp(value, 0, 15);
-    update();
-}
-
-void AsdexScopeWidget::setSelectedTraitLeaderDirectionValue(int value) {
-    if (value < 1 || value > 9 || value == 5) return;
-
-    DbArea* area = selectedDbArea();
-    if (!area || area->kind != DbAreaKind::Trait) return;
-
-    area->traits.leaderDirection = leaderDirectionFromDcbValue(value);
-    update();
-}
-
-LeaderDirection AsdexScopeWidget::leaderDirectionFromDcbValue(int value) const {
+LeaderDirection Asdex::leaderDirectionFromDcbValue(int value) const {
     return leaderDirectionFromDcbValueRaw(value);
 }
 
-int AsdexScopeWidget::nextLeaderDirectionValue(int current, int step) const {
+int Asdex::nextLeaderDirectionValue(int current, int step) const {
     static constexpr int values[] = {1, 2, 3, 4, 6, 7, 8, 9};
     constexpr int n = sizeof(values) / sizeof(values[0]);
     int index = n - 1;
@@ -2118,7 +1876,7 @@ int AsdexScopeWidget::nextLeaderDirectionValue(int current, int step) const {
     return values[index];
 }
 
-void AsdexScopeWidget::toggleGlobalDbEditField(DcbFunction function) {
+void Asdex::toggleGlobalDbEditField(DcbFunction function) {
     switch (function) {
         case DcbFunction::DbFullPart:
             fullDataBlocks_ = !fullDataBlocks_;
@@ -2152,7 +1910,7 @@ void AsdexScopeWidget::toggleGlobalDbEditField(DcbFunction function) {
     update();
 }
 
-void AsdexScopeWidget::toggleSelectedTraitDbField(DcbFunction function) {
+void Asdex::toggleSelectedTraitDbField(DcbFunction function) {
     DbArea* area = selectedDbArea();
     if (!area || area->kind != DbAreaKind::Trait) return;
 
@@ -2189,7 +1947,7 @@ void AsdexScopeWidget::toggleSelectedTraitDbField(DcbFunction function) {
     update();
 }
 
-void AsdexScopeWidget::toggleSelectedTraitVector() {
+void Asdex::toggleSelectedTraitVector() {
     DbArea* area = selectedDbArea();
     if (!area || area->kind != DbAreaKind::Trait) return;
 
@@ -2198,7 +1956,7 @@ void AsdexScopeWidget::toggleSelectedTraitVector() {
     update();
 }
 
-std::optional<DcbFunction> AsdexScopeWidget::activeDcbFunctionForCommand() const {
+std::optional<DcbFunction> Asdex::activeDcbFunctionForCommand() const {
     switch (commandType_) {
         case CommandType::Brightness:
             return DcbFunction::Brightness;
@@ -2219,7 +1977,7 @@ std::optional<DcbFunction> AsdexScopeWidget::activeDcbFunctionForCommand() const
     }
 }
 
-void AsdexScopeWidget::addDbAreaPoint(const QPointF& worldFeet) {
+void Asdex::addDbAreaPoint(const QPointF& worldFeet) {
     if (dbAreaDraftWouldSelfIntersect(worldFeet)
         || dbAreaDraftWouldOverlapExisting(worldFeet)) {
         update();
@@ -2237,7 +1995,7 @@ void AsdexScopeWidget::addDbAreaPoint(const QPointF& worldFeet) {
     update();
 }
 
-void AsdexScopeWidget::completeDbAreaPolygon() {
+void Asdex::completeDbAreaPolygon() {
     if (dbAreaDraftPoints_.size() < 3) {
         clearDbAreaDraft();
         previewArea_.setSystemResponse(QStringLiteral("BAD POLYGON,REDRAW POINT"));
@@ -2298,19 +2056,19 @@ void AsdexScopeWidget::completeDbAreaPolygon() {
     update();
 }
 
-void AsdexScopeWidget::clearDbAreaDraft() {
+void Asdex::clearDbAreaDraft() {
     dbAreaDraftPoints_.clear();
     dbAreaDraftMouse_.reset();
 }
 
-bool AsdexScopeWidget::dbAreaDraftWouldSelfIntersect(const QPointF& nextPoint) const {
+bool Asdex::dbAreaDraftWouldSelfIntersect(const QPointF& nextPoint) const {
     if (dbAreaDraftPoints_.size() < 2) return false;
 
     const QPointF a = dbAreaDraftPoints_.last();
     const QPointF b = nextPoint;
 
     for (int i = 0; i + 1 < dbAreaDraftPoints_.size() - 1; ++i) {
-        if (utils::lineSegmentsIntersect(a, b, dbAreaDraftPoints_[i], dbAreaDraftPoints_[i + 1])) {
+        if (math::lineSegmentsIntersect(a, b, dbAreaDraftPoints_[i], dbAreaDraftPoints_[i + 1])) {
             return true;
         }
     }
@@ -2318,7 +2076,7 @@ bool AsdexScopeWidget::dbAreaDraftWouldSelfIntersect(const QPointF& nextPoint) c
     return false;
 }
 
-bool AsdexScopeWidget::dbAreaDraftWouldOverlapExisting(const QPointF& nextPoint) const {
+bool Asdex::dbAreaDraftWouldOverlapExisting(const QPointF& nextPoint) const {
     if (dbAreaStore_.firstAreaContaining(nextPoint)) return true;
     if (dbAreaDraftPoints_.isEmpty()) return false;
 
@@ -2328,7 +2086,7 @@ bool AsdexScopeWidget::dbAreaDraftWouldOverlapExisting(const QPointF& nextPoint)
     for (const DbArea& area : dbAreaStore_.areas()) {
         const QVector<QPointF>& polygon = area.polygonFeet;
         for (int i = 0; i + 1 < polygon.size(); ++i) {
-            if (utils::lineSegmentsIntersect(a, b, polygon[i], polygon[i + 1])) {
+            if (math::lineSegmentsIntersect(a, b, polygon[i], polygon[i + 1])) {
                 return true;
             }
         }
@@ -2337,7 +2095,7 @@ bool AsdexScopeWidget::dbAreaDraftWouldOverlapExisting(const QPointF& nextPoint)
     return false;
 }
 
-bool AsdexScopeWidget::dbAreaPolygonIsValidOnClose() const {
+bool Asdex::dbAreaPolygonIsValidOnClose() const {
     if (dbAreaDraftPoints_.size() < 3) return false;
 
     const QPointF a = dbAreaDraftPoints_.last();
@@ -2345,7 +2103,7 @@ bool AsdexScopeWidget::dbAreaPolygonIsValidOnClose() const {
 
     for (int i = 0; i + 1 < dbAreaDraftPoints_.size() - 1; ++i) {
         if (i == 0) continue;
-        if (utils::lineSegmentsIntersect(a, b, dbAreaDraftPoints_[i], dbAreaDraftPoints_[i + 1])) {
+        if (math::lineSegmentsIntersect(a, b, dbAreaDraftPoints_[i], dbAreaDraftPoints_[i + 1])) {
             return false;
         }
     }
@@ -2353,7 +2111,7 @@ bool AsdexScopeWidget::dbAreaPolygonIsValidOnClose() const {
     for (const DbArea& area : dbAreaStore_.areas()) {
         const QVector<QPointF>& polygon = area.polygonFeet;
         for (int i = 0; i + 1 < polygon.size(); ++i) {
-            if (utils::lineSegmentsIntersect(a, b, polygon[i], polygon[i + 1])) {
+            if (math::lineSegmentsIntersect(a, b, polygon[i], polygon[i + 1])) {
                 return false;
             }
         }
@@ -2364,24 +2122,16 @@ bool AsdexScopeWidget::dbAreaPolygonIsValidOnClose() const {
 
     for (const DbArea& area : dbAreaStore_.areas()) {
         for (const QPointF& point : area.polygonFeet) {
-            if (pointInPolygon(closed, point)) return false;
+            if (math::pointInPolygon(closed, point)) return false;
         }
     }
 
     return true;
 }
 
-void AsdexScopeWidget::handleDcbDone() {
-    if (commandType_ == CommandType::DefineTraitAreaTraits
-        || commandType_ == CommandType::DefineTraitAreaDbCharSize
-        || commandType_ == CommandType::DefineTraitAreaDbBrightness
-        || commandType_ == CommandType::DefineTraitAreaLeaderLength
-        || commandType_ == CommandType::DefineTraitAreaLeaderDirection
-        || commandType_ == CommandType::ModifyTraitAreaTraits
-        || commandType_ == CommandType::ModifyTraitAreaDbCharSize
-        || commandType_ == CommandType::ModifyTraitAreaDbBrightness
-        || commandType_ == CommandType::ModifyTraitAreaLeaderLength
-        || commandType_ == CommandType::ModifyTraitAreaLeaderDirection) {
+void Asdex::handleDcbDone() {
+    const DcbMenu menu = currentDcbMenu();
+    if (menu == DcbMenu::DefineTraitArea || menu == DcbMenu::ModifyTraitArea) {
         commandType_ = CommandType::DbArea;
         dcb_.setMenu(DcbMenu::DbArea);
         dcbEntryCommand_.reset();
@@ -2407,204 +2157,123 @@ void AsdexScopeWidget::handleDcbDone() {
     update();
 }
 
-CommandType AsdexScopeWidget::commandForBrightnessFunction(DcbFunction function) const {
-    switch (function) {
-        case DcbFunction::HoldBarsBrightness:
-            return CommandType::HoldBarsBrightness;
-        case DcbFunction::MovementAreasBrightness:
-            return CommandType::MovementAreasBrightness;
-        case DcbFunction::BackgroundBrightness:
-            return CommandType::BackgroundBrightness;
-        case DcbFunction::TrackBrightness:
-            return CommandType::TrackBrightness;
-        case DcbFunction::DataBlocksBrightness:
-            return CommandType::DataBlocksBrightness;
-        case DcbFunction::ListsBrightness:
-            return CommandType::ListsBrightness;
-        case DcbFunction::TempMapAreasBrightness:
-            return CommandType::TempMapAreasBrightness;
-        case DcbFunction::TempMapTextBrightness:
-            return CommandType::TempMapTextBrightness;
-        case DcbFunction::DcbBrightness:
-            return CommandType::DcbBrightness;
-        default:
-            return CommandType::None;
-    }
+const Asdex::BrightnessProperty*
+Asdex::brightnessProperties(std::size_t* count) {
+    using W = Asdex;
+    static constexpr BrightnessProperty kTable[] = {
+        {CommandType::HoldBarsBrightness, DcbFunction::HoldBarsBrightness,
+         "HOLD BARS", &W::holdBarsBrightness_, false},
+        {CommandType::MovementAreasBrightness, DcbFunction::MovementAreasBrightness,
+         "MVMENT AREA", &W::movementAreasBrightness_, false},
+        {CommandType::BackgroundBrightness, DcbFunction::BackgroundBrightness,
+         "BAKGND", &W::backgroundBrightness_, false},
+        {CommandType::TrackBrightness, DcbFunction::TrackBrightness,
+         "TRACK", &W::trackBrightness_, false},
+        {CommandType::DataBlocksBrightness, DcbFunction::DataBlocksBrightness,
+         "DATA BLOCKS", &W::dataBlocksBrightness_, false},
+        {CommandType::ListsBrightness, DcbFunction::ListsBrightness,
+         "LISTS", &W::listsBrightness_, false},
+        {CommandType::TempMapAreasBrightness, DcbFunction::TempMapAreasBrightness,
+         "TEMP MAP AREAS", &W::tempMapAreasBrightness_, false},
+        {CommandType::TempMapTextBrightness, DcbFunction::TempMapTextBrightness,
+         "TEMP MAP TEXT", &W::tempMapTextBrightness_, false},
+        {CommandType::DcbBrightness, DcbFunction::DcbBrightness,
+         "DCB", &W::dcbBrightness_, true},
+    };
+
+    if (count) *count = sizeof(kTable) / sizeof(kTable[0]);
+    return kTable;
 }
 
-QString AsdexScopeWidget::brightnessCommandLabel(CommandType type) const {
-    switch (type) {
-        case CommandType::HoldBarsBrightness:
-            return QStringLiteral("HOLD BARS");
-        case CommandType::MovementAreasBrightness:
-            return QStringLiteral("MVMENT AREA");
-        case CommandType::BackgroundBrightness:
-            return QStringLiteral("BAKGND");
-        case CommandType::TrackBrightness:
-            return QStringLiteral("TRACK");
-        case CommandType::DataBlocksBrightness:
-            return QStringLiteral("DATA BLOCKS");
-        case CommandType::ListsBrightness:
-            return QStringLiteral("LISTS");
-        case CommandType::TempMapAreasBrightness:
-            return QStringLiteral("TEMP MAP AREAS");
-        case CommandType::TempMapTextBrightness:
-            return QStringLiteral("TEMP MAP TEXT");
-        case CommandType::DcbBrightness:
-            return QStringLiteral("DCB");
-        default:
-            return {};
+const Asdex::BrightnessProperty*
+Asdex::brightnessPropertyFor(CommandType type) {
+    std::size_t count = 0;
+    const BrightnessProperty* table = brightnessProperties(&count);
+
+    for (std::size_t i = 0; i < count; ++i) {
+        if (table[i].command == type) return &table[i];
     }
+    return nullptr;
 }
 
-int AsdexScopeWidget::brightnessValue(CommandType type) const {
-    switch (type) {
-        case CommandType::HoldBarsBrightness:
-            return holdBarsBrightness_;
-        case CommandType::MovementAreasBrightness:
-            return movementAreasBrightness_;
-        case CommandType::BackgroundBrightness:
-            return backgroundBrightness_;
-        case CommandType::TrackBrightness:
-            return trackBrightness_;
-        case CommandType::DataBlocksBrightness:
-            return dataBlocksBrightness_;
-        case CommandType::ListsBrightness:
-            return listsBrightness_;
-        case CommandType::TempMapAreasBrightness:
-            return tempMapAreasBrightness_;
-        case CommandType::TempMapTextBrightness:
-            return tempMapTextBrightness_;
-        case CommandType::DcbBrightness:
-            return dcbBrightness_;
-        default:
-            return 95;
+const Asdex::BrightnessProperty*
+Asdex::brightnessPropertyFor(DcbFunction function) {
+    std::size_t count = 0;
+    const BrightnessProperty* table = brightnessProperties(&count);
+
+    for (std::size_t i = 0; i < count; ++i) {
+        if (table[i].function == function) return &table[i];
     }
+    return nullptr;
 }
 
-void AsdexScopeWidget::setBrightnessValue(CommandType type, int value) {
+const Asdex::CharSizeProperty*
+Asdex::charSizeProperties(std::size_t* count) {
+    using W = Asdex;
+    static constexpr CharSizeProperty kTable[] = {
+        {CommandType::DataBlockCharSize, DcbFunction::DataBlockCharSize,
+         "DATA BLOCK", &W::dataBlockCharSize_, 6, false},
+        {CommandType::DcbCharSize, DcbFunction::DcbCharSize,
+         "DCB", &W::dcbCharSize_, 3, true},
+        {CommandType::CoastSuspendCharSize, DcbFunction::CoastSuspendCharSize,
+         "CS LIST", &W::coastSuspendCharSize_, 6, false},
+        {CommandType::TempDataCharSize, DcbFunction::TempDataCharSize,
+         "TEMP DATA", &W::tempDataCharSize_, 6, false},
+        {CommandType::PreviewAreaCharSize, DcbFunction::PreviewAreaCharSize,
+         "PREVIEW", &W::previewAreaCharSize_, 6, false},
+    };
+
+    if (count) *count = sizeof(kTable) / sizeof(kTable[0]);
+    return kTable;
+}
+
+const Asdex::CharSizeProperty*
+Asdex::charSizePropertyFor(CommandType type) {
+    std::size_t count = 0;
+    const CharSizeProperty* table = charSizeProperties(&count);
+
+    for (std::size_t i = 0; i < count; ++i) {
+        if (table[i].command == type) return &table[i];
+    }
+    return nullptr;
+}
+
+const Asdex::CharSizeProperty*
+Asdex::charSizePropertyFor(DcbFunction function) {
+    std::size_t count = 0;
+    const CharSizeProperty* table = charSizeProperties(&count);
+
+    for (std::size_t i = 0; i < count; ++i) {
+        if (table[i].function == function) return &table[i];
+    }
+    return nullptr;
+}
+
+void Asdex::setBrightnessValue(CommandType type, int value) {
+    const BrightnessProperty* property = brightnessPropertyFor(type);
+    if (!property) return;
+
     value = std::clamp(value, 1, 99);
-
-    switch (type) {
-        case CommandType::HoldBarsBrightness:
-            holdBarsBrightness_ = value;
-            break;
-        case CommandType::MovementAreasBrightness:
-            movementAreasBrightness_ = value;
-            break;
-        case CommandType::BackgroundBrightness:
-            backgroundBrightness_ = value;
-            break;
-        case CommandType::TrackBrightness:
-            trackBrightness_ = value;
-            break;
-        case CommandType::DataBlocksBrightness:
-            dataBlocksBrightness_ = value;
-            break;
-        case CommandType::ListsBrightness:
-            listsBrightness_ = value;
-            break;
-        case CommandType::TempMapAreasBrightness:
-            tempMapAreasBrightness_ = value;
-            break;
-        case CommandType::TempMapTextBrightness:
-            tempMapTextBrightness_ = value;
-            break;
-        case CommandType::DcbBrightness:
-            dcbBrightness_ = value;
-            dcb_.setBrightness(value);
-            break;
-        default:
-            return;
-    }
-
+    this->*(property->field) = value;
+    if (property->affectsDcb) dcb_.setBrightness(value);
     update();
 }
 
-CommandType AsdexScopeWidget::commandForCharSizeFunction(DcbFunction function) const {
-    switch (function) {
-        case DcbFunction::DataBlockCharSize:
-            return CommandType::DataBlockCharSize;
-        case DcbFunction::DcbCharSize:
-            return CommandType::DcbCharSize;
-        case DcbFunction::CoastSuspendCharSize:
-            return CommandType::CoastSuspendCharSize;
-        case DcbFunction::TempDataCharSize:
-            return CommandType::TempDataCharSize;
-        case DcbFunction::PreviewAreaCharSize:
-            return CommandType::PreviewAreaCharSize;
-        default:
-            return CommandType::None;
-    }
-}
+void Asdex::setCharSizeValue(CommandType type, int value) {
+    const CharSizeProperty* property = charSizePropertyFor(type);
+    if (!property) return;
 
-QString AsdexScopeWidget::charSizeCommandLabel(CommandType type) const {
-    switch (type) {
-        case CommandType::DataBlockCharSize:
-            return QStringLiteral("DATA BLOCK");
-        case CommandType::DcbCharSize:
-            return QStringLiteral("DCB");
-        case CommandType::CoastSuspendCharSize:
-            return QStringLiteral("CS LIST");
-        case CommandType::TempDataCharSize:
-            return QStringLiteral("TEMP DATA");
-        case CommandType::PreviewAreaCharSize:
-            return QStringLiteral("PREVIEW");
-        default:
-            return {};
-    }
-}
-
-int AsdexScopeWidget::charSizeValue(CommandType type) const {
-    switch (type) {
-        case CommandType::DataBlockCharSize:
-            return dataBlockCharSize_;
-        case CommandType::DcbCharSize:
-            return dcbCharSize_;
-        case CommandType::CoastSuspendCharSize:
-            return coastSuspendCharSize_;
-        case CommandType::TempDataCharSize:
-            return tempDataCharSize_;
-        case CommandType::PreviewAreaCharSize:
-            return previewAreaCharSize_;
-        default:
-            return 2;
-    }
-}
-
-void AsdexScopeWidget::setCharSizeValue(CommandType type, int value) {
-    const int maxValue = type == CommandType::DcbCharSize ? 3 : 6;
-    value = std::clamp(value, 1, maxValue);
-
-    switch (type) {
-        case CommandType::DataBlockCharSize:
-            dataBlockCharSize_ = value;
-            break;
-        case CommandType::DcbCharSize:
-            dcbCharSize_ = value;
-            dcb_.setCharSize(value);
-            break;
-        case CommandType::CoastSuspendCharSize:
-            coastSuspendCharSize_ = value;
-            break;
-        case CommandType::TempDataCharSize:
-            tempDataCharSize_ = value;
-            break;
-        case CommandType::PreviewAreaCharSize:
-            previewAreaCharSize_ = value;
-            break;
-        default:
-            return;
-    }
-
+    value = std::clamp(value, 1, property->maxValue);
+    this->*(property->field) = value;
+    if (property->affectsDcb) dcb_.setCharSize(value);
     update();
 }
 
-int AsdexScopeWidget::currentRangeValue() const {
+int Asdex::currentRangeValue() const {
     return std::clamp(int(std::round(halfRangeFeet_ / 100.0)), 6, 300);
 }
 
-void AsdexScopeWidget::setRangeValue(int range) {
+void Asdex::setRangeValue(int range) {
     range = std::clamp(range, 6, 300);
     halfRangeFeet_ = std::clamp(double(range) * 100.0,
                                 kMinHalfRangeFeet,
@@ -2612,119 +2281,99 @@ void AsdexScopeWidget::setRangeValue(int range) {
     update();
 }
 
-void AsdexScopeWidget::startRangeCommand() {
+void Asdex::startRangeCommand() {
     if (commandType_ != CommandType::None) return;
 
-    commandType_ = CommandType::Range;
-    dcbEntryCommand_ = DcbEntryCommand::range(currentRangeValue());
-    datablockEdit_.reset();
-    editingTrackId_.clear();
-    clearHighlightedTarget();
-    clearDcbHover();
-    previewArea_.setSystemResponse(QString());
-    setAsdexCursor(CursorMode::Hidden);
+    beginDcbEntryCommand(DcbEntryCommand::range(
+        currentRangeValue(),
+        [this](int value) { setRangeValue(value); },
+        CommandType::None));
+}
+
+int Asdex::currentRotationValue() const {
+    return math::normalizedDegrees(rotationDegrees_);
+}
+
+void Asdex::setRotationValue(int degrees) {
+    rotationDegrees_ = math::normalizedDegrees(degrees);
     update();
 }
 
-int AsdexScopeWidget::currentRotationValue() const {
-    return normalizedDegrees(rotationDegrees_);
-}
-
-void AsdexScopeWidget::setRotationValue(int degrees) {
-    rotationDegrees_ = normalizedDegrees(degrees);
-    update();
-}
-
-void AsdexScopeWidget::rotateByDegrees(int deltaDegrees) {
+void Asdex::rotateByDegrees(int deltaDegrees) {
     setRotationValue(rotationDegrees_ + deltaDegrees);
 }
 
-void AsdexScopeWidget::startRotateCommand() {
+void Asdex::startRotateCommand() {
     if (commandType_ != CommandType::None) return;
 
-    commandType_ = CommandType::Rotate;
-    dcbEntryCommand_ = DcbEntryCommand::rotate(currentRotationValue());
-    datablockEdit_.reset();
-    editingTrackId_.clear();
-    clearHighlightedTarget();
-    clearDcbHover();
-    previewArea_.setSystemResponse(QString());
-    setAsdexCursor(CursorMode::Hidden);
-    update();
+    beginDcbEntryCommand(DcbEntryCommand::rotate(
+        currentRotationValue(),
+        [this](int value) { setRotationValue(value); },
+        CommandType::None));
 }
 
-void AsdexScopeWidget::toggleVectorLine() {
+void Asdex::toggleVectorLine() {
     showVectorLine_ = !showVectorLine_;
     clearDcbHover();
     update();
 }
 
-int AsdexScopeWidget::currentVectorLengthValue() const {
+int Asdex::currentVectorLengthValue() const {
     return clampedTargetVectorSeconds(targetVectorSeconds_);
 }
 
-void AsdexScopeWidget::setVectorLengthValue(int seconds) {
+void Asdex::setVectorLengthValue(int seconds) {
     targetVectorSeconds_ = clampedTargetVectorSeconds(seconds);
     update();
 }
 
-void AsdexScopeWidget::startVectorLengthCommand() {
+void Asdex::startVectorLengthCommand() {
     if (commandType_ != CommandType::None) return;
 
-    commandType_ = CommandType::VectorLength;
-    dcbEntryCommand_ = DcbEntryCommand::vectorLength(currentVectorLengthValue());
-    datablockEdit_.reset();
-    editingTrackId_.clear();
-    clearHighlightedTarget();
-    clearDcbHover();
-    previewArea_.setSystemResponse(QString());
-    setAsdexCursor(CursorMode::Hidden);
-    update();
+    beginDcbEntryCommand(DcbEntryCommand::vectorLength(
+        currentVectorLengthValue(),
+        [this](int value) { setVectorLengthValue(value); },
+        CommandType::None));
 }
 
-int AsdexScopeWidget::currentLeaderLengthValue() const {
+int Asdex::currentLeaderLengthValue() const {
     return std::clamp(leaderLength_, 0, 15);
 }
 
-void AsdexScopeWidget::setLeaderLengthValue(int leaderLength) {
+void Asdex::setLeaderLengthValue(int leaderLength) {
     leaderLength_ = std::clamp(leaderLength, 0, 15);
     update();
 }
 
-void AsdexScopeWidget::startLeaderLengthCommand() {
+void Asdex::startLeaderLengthCommand() {
     if (commandType_ != CommandType::None) return;
 
-    commandType_ = CommandType::LeaderLength;
-    dcbEntryCommand_ = DcbEntryCommand::leaderLength(currentLeaderLengthValue());
-    datablockEdit_.reset();
-    editingTrackId_.clear();
-    clearHighlightedTarget();
-    clearDcbHover();
-    previewArea_.setSystemResponse(QString());
-    setAsdexCursor(CursorMode::Hidden);
-    update();
+    beginDcbEntryCommand(DcbEntryCommand::leaderLength(
+        currentLeaderLengthValue(),
+        [this](int value) { setLeaderLengthValue(value); },
+        CommandType::None));
 }
 
-int AsdexScopeWidget::currentLeaderDirectionValue() const {
+int Asdex::currentLeaderDirectionValue() const {
     return leaderDirectionDcbValue(leaderDirection_);
 }
 
-void AsdexScopeWidget::setLeaderDirectionValue(int value) {
+void Asdex::setLeaderDirectionValue(int value) {
     if (!isValidLeaderDirectionValue(value)) return;
 
     leaderDirection_ = leaderDirectionFromDcbValue(value);
     update();
 }
 
-bool AsdexScopeWidget::leaderDirectionCommandActive() const {
+bool Asdex::leaderDirectionCommandActive() const {
     return leaderDirectionCommand_.has_value();
 }
 
-bool AsdexScopeWidget::isValidLeaderDirectionValue(int value) const {
+bool Asdex::isValidLeaderDirectionValue(int value) const {
     return value >= 1 && value <= 9 && value != 5;
 }
 
-void AsdexScopeWidget::startLeaderDirectionKeyboardCommand(int value) {
+void Asdex::startLeaderDirectionKeyboardCommand(int value) {
     if (datablockEdit_ || dcbEntryCommand_ || isMapRepositionCommandActive()) return;
     if (commandType_ != CommandType::None) return;
 
@@ -2739,7 +2388,7 @@ void AsdexScopeWidget::startLeaderDirectionKeyboardCommand(int value) {
     update();
 }
 
-void AsdexScopeWidget::cancelLeaderDirectionKeyboardCommand() {
+void Asdex::cancelLeaderDirectionKeyboardCommand() {
     leaderDirectionCommand_.reset();
     commandType_ = CommandType::None;
     clearDcbHover();
@@ -2747,7 +2396,7 @@ void AsdexScopeWidget::cancelLeaderDirectionKeyboardCommand() {
     update();
 }
 
-void AsdexScopeWidget::submitLeaderDirectionForAll() {
+void Asdex::submitLeaderDirectionForAll() {
     if (!leaderDirectionCommand_) return;
 
     int value = 0;
@@ -2769,7 +2418,7 @@ void AsdexScopeWidget::submitLeaderDirectionForAll() {
     update();
 }
 
-void AsdexScopeWidget::submitLeaderDirectionForTargetAt(const QPointF& logicalPoint) {
+void Asdex::submitLeaderDirectionForTargetAt(const QPointF& logicalPoint) {
     if (!leaderDirectionCommand_) return;
 
     int value = 0;
@@ -2798,7 +2447,7 @@ void AsdexScopeWidget::submitLeaderDirectionForTargetAt(const QPointF& logicalPo
     update();
 }
 
-void AsdexScopeWidget::startMapRepositionCommand() {
+void Asdex::startMapRepositionCommand() {
     if (commandType_ != CommandType::None) return;
 
     commandType_ = CommandType::MapReposition;
@@ -2819,7 +2468,7 @@ void AsdexScopeWidget::startMapRepositionCommand() {
     update();
 }
 
-void AsdexScopeWidget::commitMapRepositionCommand() {
+void Asdex::commitMapRepositionCommand() {
     commandType_ = CommandType::None;
     mapRepositionOriginalCenter_.reset();
     suppressNextMapRepositionMove_ = false;
@@ -2830,7 +2479,7 @@ void AsdexScopeWidget::commitMapRepositionCommand() {
     update();
 }
 
-void AsdexScopeWidget::cancelMapRepositionCommand() {
+void Asdex::cancelMapRepositionCommand() {
     if (mapRepositionOriginalCenter_) centerFeet_ = *mapRepositionOriginalCenter_;
 
     commandType_ = CommandType::None;
@@ -2844,22 +2493,22 @@ void AsdexScopeWidget::cancelMapRepositionCommand() {
     update();
 }
 
-bool AsdexScopeWidget::isMapRepositionCommandActive() const {
+bool Asdex::isMapRepositionCommandActive() const {
     return commandType_ == CommandType::MapReposition;
 }
 
-QPointF AsdexScopeWidget::mapRepositionBoxCenterLogical() const {
+QPointF Asdex::mapRepositionBoxCenterLogical() const {
     return QPointF(std::min(50.0, std::max(0.0, width() * 0.5)),
                    std::min(50.0, std::max(0.0, height() * 0.5)));
 }
 
-void AsdexScopeWidget::moveMapRepositionCursorToBoxCenter() {
+void Asdex::moveMapRepositionCursorToBoxCenter() {
     const QPointF point = mapRepositionBoxCenterLogical();
     QCursor::setPos(mapToGlobal(QPoint(int(std::round(point.x())),
                                       int(std::round(point.y())))));
 }
 
-void AsdexScopeWidget::handleMapRepositionMouseMove(const QPointF& logicalPoint) {
+void Asdex::handleMapRepositionMouseMove(const QPointF& logicalPoint) {
     const QSize renderSize = framebufferRenderSize();
     if (renderSize.isEmpty()) return;
 
@@ -2886,7 +2535,7 @@ void AsdexScopeWidget::handleMapRepositionMouseMove(const QPointF& logicalPoint)
     update();
 }
 
-QStringList AsdexScopeWidget::activeCommandLines() const {
+QStringList Asdex::activeCommandLines() const {
     if (datablockEdit_) return datablockEdit_->displayLines();
     if (dcbEntryCommand_) return dcbEntryCommand_->displayLines();
     if (leaderDirectionCommand_) return leaderDirectionCommand_->displayLines();
@@ -2959,7 +2608,7 @@ QStringList AsdexScopeWidget::activeCommandLines() const {
     return {};
 }
 
-void AsdexScopeWidget::renderScene(const QSize& renderSize) {
+void Asdex::renderScene(const QSize& renderSize) {
     if (!renderer_ || renderSize.isEmpty()) return;
 
     renderer::LayeredCommandBuffer layers;
@@ -3140,7 +2789,7 @@ void AsdexScopeWidget::renderScene(const QSize& renderSize) {
     layers.flushTo(renderer_.get());
 }
 
-DcbState AsdexScopeWidget::makeDcbState() const {
+DcbState Asdex::makeDcbState() const {
     DcbState state;
     state.range = currentRangeValue();
     state.rotation = currentRotationValue();
@@ -3194,16 +2843,16 @@ DcbState AsdexScopeWidget::makeDcbState() const {
     return state;
 }
 
-QSize AsdexScopeWidget::framebufferRenderSize() const {
+QSize Asdex::framebufferRenderSize() const {
     const qreal ratio = devicePixelRatioF();
     return QSize(qRound(width() * ratio), qRound(height() * ratio));
 }
 
-std::uint32_t AsdexScopeWidget::fontTextureId(int fontSize) const {
+std::uint32_t Asdex::fontTextureId(int fontSize) const {
     return fontTextureIds_.value(fontSize, 0);
 }
 
-QMatrix4x4 AsdexScopeWidget::screenProjection() const {
+QMatrix4x4 Asdex::screenProjection() const {
     QMatrix4x4 projection;
     projection.setToIdentity();
     projection.ortho(0.0f,
@@ -3215,93 +2864,47 @@ QMatrix4x4 AsdexScopeWidget::screenProjection() const {
     return projection;
 }
 
-QPointF AsdexScopeWidget::worldToScreenLogical(const QPointF& worldFeet,
+QPointF Asdex::worldToScreenLogical(const QPointF& worldFeet,
                                                const QSize& renderSize) const {
-    const double ppf = pixelsPerFoot(renderSize);
-    const double theta = radiansFromDegrees(currentRotationValue());
-    const double c = std::cos(theta);
-    const double s = std::sin(theta);
-
-    const double dx = worldFeet.x() - centerFeet_.x();
-    const double dy = worldFeet.y() - centerFeet_.y();
-    const double rx = c * dx - s * dy;
-    const double ry = s * dx + c * dy;
-
-    const double framebufferX = renderSize.width() * 0.5 + rx * ppf;
-    const double framebufferY = renderSize.height() * 0.5 - ry * ppf;
-
-    const qreal dpr = devicePixelRatioF();
-    return QPointF(framebufferX / dpr, framebufferY / dpr);
+    return radar::ScopeTransform({centerFeet_, halfRangeFeet_, currentRotationValue()},
+                                 {renderSize, devicePixelRatioF()})
+        .worldToLogicalScreen(worldFeet);
 }
 
-QPointF AsdexScopeWidget::worldToFramebufferTopLeft(const QPointF& worldFeet,
+QPointF Asdex::worldToFramebufferTopLeft(const QPointF& worldFeet,
                                                     const QSize& renderSize) const {
-    const double ppf = pixelsPerFoot(renderSize);
-    const double theta = radiansFromDegrees(currentRotationValue());
-    const double c = std::cos(theta);
-    const double s = std::sin(theta);
-
-    const double dx = worldFeet.x() - centerFeet_.x();
-    const double dy = worldFeet.y() - centerFeet_.y();
-    const double rx = c * dx - s * dy;
-    const double ry = s * dx + c * dy;
-
-    return QPointF(renderSize.width() * 0.5 + rx * ppf,
-                   renderSize.height() * 0.5 - ry * ppf);
+    return radar::ScopeTransform({centerFeet_, halfRangeFeet_, currentRotationValue()},
+                                 {renderSize, devicePixelRatioF()})
+        .worldToFramebufferTopLeft(worldFeet);
 }
 
-QPointF AsdexScopeWidget::framebufferPoint(const QPointF& logicalPoint) const {
-    const qreal ratio = devicePixelRatioF();
-    return QPointF(logicalPoint.x() * ratio, logicalPoint.y() * ratio);
+QPointF Asdex::framebufferPoint(const QPointF& logicalPoint) const {
+    return radar::ScopeTransform({centerFeet_, halfRangeFeet_, currentRotationValue()},
+                                 {framebufferRenderSize(), devicePixelRatioF()})
+        .logicalToFramebuffer(logicalPoint);
 }
 
-double AsdexScopeWidget::pixelsPerFoot(const QSize& renderSize) const {
-    if (renderSize.isEmpty() || halfRangeFeet_ <= 0.0) return 1.0;
-
-    const double availW = renderSize.width() * (1.0 - 2.0 * utils::kViewportMargin);
-    const double availH = renderSize.height() * (1.0 - 2.0 * utils::kViewportMargin);
-    const double radiusPx = 0.5 * std::min(availW, availH);
-    return radiusPx / halfRangeFeet_;
+double Asdex::pixelsPerFoot(const QSize& renderSize) const {
+    return radar::ScopeTransform({centerFeet_, halfRangeFeet_, currentRotationValue()},
+                                 {renderSize, devicePixelRatioF()})
+        .pixelsPerFoot();
 }
 
-QPointF AsdexScopeWidget::screenToWorldFeet(const QPointF& logicalPoint,
+QPointF Asdex::screenToWorldFeet(const QPointF& logicalPoint,
                                             const QSize& renderSize) const {
-    const QPointF point = framebufferPoint(logicalPoint);
-    const double ppf = pixelsPerFoot(renderSize);
-
-    if (ppf <= 0.0) return centerFeet_;
-
-    const double rx = (point.x() - renderSize.width() * 0.5) / ppf;
-    const double ry = (renderSize.height() * 0.5 - point.y()) / ppf;
-
-    const double theta = radiansFromDegrees(currentRotationValue());
-    const double c = std::cos(theta);
-    const double s = std::sin(theta);
-
-    const double dx = c * rx + s * ry;
-    const double dy = -s * rx + c * ry;
-
-    return QPointF(centerFeet_.x() + dx, centerFeet_.y() + dy);
+    return radar::ScopeTransform({centerFeet_, halfRangeFeet_, currentRotationValue()},
+                                 {renderSize, devicePixelRatioF()})
+        .logicalScreenToWorld(logicalPoint);
 }
 
-QPointF AsdexScopeWidget::screenDeltaToWorldDelta(const QPointF& framebufferDelta,
+QPointF Asdex::screenDeltaToWorldDelta(const QPointF& framebufferDelta,
                                                   const QSize& renderSize) const {
-    const double ppf = pixelsPerFoot(renderSize);
-    if (ppf <= 0.0) return QPointF();
-
-    const double rx = framebufferDelta.x() / ppf;
-    const double ry = -framebufferDelta.y() / ppf;
-
-    const double theta = radiansFromDegrees(currentRotationValue());
-    const double c = std::cos(theta);
-    const double s = std::sin(theta);
-
-    const double dx = c * rx + s * ry;
-    const double dy = -s * rx + c * ry;
-    return QPointF(dx, dy);
+    return radar::ScopeTransform({centerFeet_, halfRangeFeet_, currentRotationValue()},
+                                 {renderSize, devicePixelRatioF()})
+        .framebufferDeltaToWorldDelta(framebufferDelta);
 }
 
-void AsdexScopeWidget::zoomByFeet(double deltaFeet) {
+void Asdex::zoomByFeet(double deltaFeet) {
     const double nextRange = std::clamp(halfRangeFeet_ + deltaFeet,
                                         kMinHalfRangeFeet,
                                         kMaxHalfRangeFeet);
@@ -3311,7 +2914,7 @@ void AsdexScopeWidget::zoomByFeet(double deltaFeet) {
     update();
 }
 
-void AsdexScopeWidget::zoomToCursorByFeet(double deltaFeet, const QPointF& cursorLogicalPoint) {
+void Asdex::zoomToCursorByFeet(double deltaFeet, const QPointF& cursorLogicalPoint) {
     const QSize renderSize = framebufferRenderSize();
     const QPointF worldBefore = screenToWorldFeet(cursorLogicalPoint, renderSize);
     const double oldRange = halfRangeFeet_;
@@ -3327,46 +2930,38 @@ void AsdexScopeWidget::zoomToCursorByFeet(double deltaFeet, const QPointF& curso
     update();
 }
 
-bool AsdexScopeWidget::isPointOverDcb(const QPointF& logicalPoint) const {
+bool Asdex::isPointOverDcb(const QPointF& logicalPoint) const {
     if (!fontLoaded_) return false;
 
     return dcb_.contains(logicalPoint, size(), asdexFont_, makeDcbState());
 }
 
-bool AsdexScopeWidget::handleDcbWheel(DcbFunction function, int wheelY) {
+bool Asdex::handleDcbWheel(DcbFunction function, int wheelY) {
     const int step = wheelY > 0 ? 1 : -1;
 
     if (currentDcbMenu() == DcbMenu::DefineTraitArea
         || currentDcbMenu() == DcbMenu::ModifyTraitArea) {
-        switch (function) {
-            case DcbFunction::DataBlockCharSize:
-                setSelectedTraitDbCharSizeValue(selectedTraitDbCharSizeValue() + step);
-                return true;
-            case DcbFunction::DataBlocksBrightness:
-                setSelectedTraitDbBrightnessValue(selectedTraitDbBrightnessValue() + step);
-                return true;
-            case DcbFunction::DbAreaLeaderLength:
-                setSelectedTraitLeaderLengthValue(selectedTraitLeaderLengthValue() + step);
-                return true;
-            case DcbFunction::DbAreaLeaderDirection:
-                setSelectedTraitLeaderDirectionValue(
-                    nextLeaderDirectionValue(selectedTraitLeaderDirectionValue(), step));
-                return true;
-            default:
-                return false;
-        }
-    }
+        const TraitAreaProperty* property = traitAreaPropertyFor(function);
+        if (!property) return false;
 
-    const CommandType brightnessType = commandForBrightnessFunction(function);
-
-    if (brightnessType != CommandType::None) {
-        setBrightnessValue(brightnessType, brightnessValue(brightnessType) + step);
+        const CommandType command = currentDcbMenu() == DcbMenu::ModifyTraitArea
+            ? property->modifyCommand
+            : property->defineCommand;
+        const int current = selectedTraitValue(command);
+        const int next = function == DcbFunction::DbAreaLeaderDirection
+            ? nextLeaderDirectionValue(current, step)
+            : current + step;
+        setSelectedTraitValue(command, next);
         return true;
     }
 
-    const CommandType charSizeType = commandForCharSizeFunction(function);
-    if (charSizeType != CommandType::None) {
-        setCharSizeValue(charSizeType, charSizeValue(charSizeType) + step);
+    if (const BrightnessProperty* property = brightnessPropertyFor(function)) {
+        setBrightnessValue(property->command, this->*(property->field) + step);
+        return true;
+    }
+
+    if (const CharSizeProperty* property = charSizePropertyFor(function)) {
+        setCharSizeValue(property->command, this->*(property->field) + step);
         return true;
     }
 
@@ -3385,7 +2980,7 @@ bool AsdexScopeWidget::handleDcbWheel(DcbFunction function, int wheelY) {
     }
 }
 
-void AsdexScopeWidget::clearDcbHover() {
+void Asdex::clearDcbHover() {
     if (hoveredDcbButtonIndex_ == -1 && !hoveredDcbFunction_.has_value()) return;
 
     hoveredDcbButtonIndex_ = -1;
@@ -3393,7 +2988,7 @@ void AsdexScopeWidget::clearDcbHover() {
     update();
 }
 
-void AsdexScopeWidget::updateDcbHover(const QPointF& logicalPoint) {
+void Asdex::updateDcbHover(const QPointF& logicalPoint) {
     if (!fontLoaded_) {
         clearDcbHover();
         return;
@@ -3414,7 +3009,7 @@ void AsdexScopeWidget::updateDcbHover(const QPointF& logicalPoint) {
     if (hoveredDcbButtonIndex_ != oldIndex || hoveredDcbFunction_ != oldFunction) update();
 }
 
-void AsdexScopeWidget::updateHoverCursor(const QPointF& logicalPoint) {
+void Asdex::updateHoverCursor(const QPointF& logicalPoint) {
     if (commandActive() || panning_) {
         setAsdexCursor(CursorMode::Hidden);
         return;
@@ -3444,11 +3039,11 @@ void AsdexScopeWidget::updateHoverCursor(const QPointF& logicalPoint) {
     setAsdexCursor(CursorMode::Scope);
 }
 
-void AsdexScopeWidget::setAsdexCursor(asdex::CursorType type) {
+void Asdex::setAsdexCursor(asdex::CursorType type) {
     if (cursors_.has(type)) setCursor(cursors_.cursor(type));
 }
 
-void AsdexScopeWidget::setAsdexCursor(CursorMode mode) {
+void Asdex::setAsdexCursor(CursorMode mode) {
     if (currentCursorMode_ == mode) return;
 
     currentCursorMode_ = mode;
@@ -3492,31 +3087,10 @@ void AsdexScopeWidget::setAsdexCursor(CursorMode mode) {
     }
 }
 
-QMatrix4x4 AsdexScopeWidget::viewProjection(const QSize& renderSize) const {
-    QMatrix4x4 matrix;
-    matrix.setToIdentity();
-    if (renderSize.isEmpty() || halfRangeFeet_ <= 0.0) return matrix;
-
-    const double availW = renderSize.width() * (1.0 - 2.0 * utils::kViewportMargin);
-    const double availH = renderSize.height() * (1.0 - 2.0 * utils::kViewportMargin);
-    const double radiusPx = 0.5 * std::min(availW, availH);
-    const double pxPerFoot = radiusPx / halfRangeFeet_;
-    const double sx = 2.0 * pxPerFoot / renderSize.width();
-    const double sy = 2.0 * pxPerFoot / renderSize.height();
-
-    const double theta = radiansFromDegrees(currentRotationValue());
-    const double c = std::cos(theta);
-    const double s = std::sin(theta);
-    const double cx = centerFeet_.x();
-    const double cy = centerFeet_.y();
-
-    matrix(0, 0) = static_cast<float>(sx * c);
-    matrix(0, 1) = static_cast<float>(-sx * s);
-    matrix(0, 3) = static_cast<float>(sx * (-c * cx + s * cy));
-    matrix(1, 0) = static_cast<float>(sy * s);
-    matrix(1, 1) = static_cast<float>(sy * c);
-    matrix(1, 3) = static_cast<float>(sy * (-s * cx - c * cy));
-    return matrix;
+QMatrix4x4 Asdex::viewProjection(const QSize& renderSize) const {
+    return radar::ScopeTransform({centerFeet_, halfRangeFeet_, currentRotationValue()},
+                                 {renderSize, devicePixelRatioF()})
+        .worldProjection();
 }
 
 } // namespace asdex

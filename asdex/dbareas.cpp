@@ -1,5 +1,6 @@
 #include "asdex/dbareas.h"
 
+#include "math/geom.h"
 #include "renderer/builders.h"
 #include "renderer/cmdbuffer.h"
 
@@ -34,7 +35,7 @@ void DbAreaStore::clear() {
 
 bool DbAreaStore::pointInsideOffArea(const QPointF& pointFeet) const {
     for (const DbArea& area : areas_) {
-        if (area.kind == DbAreaKind::Off && pointInPolygon(area.polygonFeet, pointFeet)) {
+        if (area.kind == DbAreaKind::Off && math::pointInPolygon(area.polygonFeet, pointFeet)) {
             return true;
         }
     }
@@ -44,7 +45,7 @@ bool DbAreaStore::pointInsideOffArea(const QPointF& pointFeet) const {
 
 const DbArea* DbAreaStore::firstAreaContaining(const QPointF& pointFeet) const {
     for (const DbArea& area : areas_) {
-        if (pointInPolygon(area.polygonFeet, pointFeet)) return &area;
+        if (math::pointInPolygon(area.polygonFeet, pointFeet)) return &area;
     }
 
     return nullptr;
@@ -82,7 +83,7 @@ int DbAreaStore::indexOfAreaContaining(const QPointF& pointFeet,
         const DbArea& area = areas_[i];
         if (!includeOffAreas && area.kind == DbAreaKind::Off) continue;
 
-        if (pointInPolygon(area.polygonFeet, pointFeet)) return i;
+        if (math::pointInPolygon(area.polygonFeet, pointFeet)) return i;
     }
 
     return -1;
@@ -95,27 +96,6 @@ bool DbAreaStore::removeAreaContaining(const QPointF& pointFeet,
 
     areas_.removeAt(index);
     return true;
-}
-
-bool pointInPolygon(const QVector<QPointF>& polygon, const QPointF& point) {
-    if (polygon.size() < 3) return false;
-
-    bool inside = false;
-    const int n = polygon.size();
-
-    for (int i = 0, j = n - 1; i < n; j = i++) {
-        const QPointF& a = polygon[i];
-        const QPointF& b = polygon[j];
-        const bool crosses =
-            ((a.y() > point.y()) != (b.y() > point.y()))
-            && (point.x() < (b.x() - a.x()) * (point.y() - a.y())
-                         / ((b.y() - a.y()) + 1e-12)
-                         + a.x());
-
-        if (crosses) inside = !inside;
-    }
-
-    return inside;
 }
 
 void drawDbAreas(const DbAreaStore& store, renderer::CommandBuffer* commandBuffer) {

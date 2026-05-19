@@ -10,7 +10,7 @@ if [[ -f .env ]]; then
     set +o allexport
 fi
 
-JAR="target/faascope-stdds-1.0-SNAPSHOT.jar"
+JAR="swim/smes/target/faascope-stdds-1.0-SNAPSHOT.jar"
 MENU_BIN="build/ui/menu"
 SCOPE_BIN="build/asdex/asdex_scope"
 WS_PORT="${WS_PORT:-8080}"
@@ -30,7 +30,7 @@ cmake "${CMAKE_ARGS[@]}" >&2
 cmake --build build >&2
 
 echo "[build] Building SMES reader..." >&2
-mvn -q package
+mvn -q -f swim/smes/pom.xml package
 
 STALE_PIDS="$(lsof -ti "tcp:${WS_PORT}" -sTCP:LISTEN 2>/dev/null || true)"
 if [[ -n "$STALE_PIDS" ]]; then

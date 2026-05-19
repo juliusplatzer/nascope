@@ -16,6 +16,8 @@ class CommandBuffer;
 
 namespace asdex {
 
+QString videomapPath(const QString& icao);
+
 class VideoMap {
 public:
     enum class Kind { Apron = 0, Structure = 1, Taxiway = 2, Runway = 3 };

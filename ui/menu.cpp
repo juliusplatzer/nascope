@@ -15,7 +15,7 @@
 #include <QStyleFactory>
 #include <QVBoxLayout>
 
-#include "utils/resources.h"
+#include "util/resources.h"
 
 #include <iostream>
 
@@ -33,7 +33,7 @@ constexpr char kStateCurrent[] = "current";
 [[maybe_unused]] constexpr char kStateFuture[]  = "future";
 
 QStringList loadAsdexAirports() {
-    const QDir dir(utils::findProjectRelativeDir(QStringLiteral("resources/videomaps/asdex")));
+    const QDir dir(util::findProjectRelativeDir(QStringLiteral("resources/videomaps/asdex")));
     QStringList icaos;
     for (const QString& name : dir.entryList(QStringList{QStringLiteral("*.geojson.gz")},
                                              QDir::Files,

@@ -59,7 +59,9 @@ bool isDbAreaCommand(CommandType type) {
     }
 }
 
-DcbEntryCommand DcbEntryCommand::range(int currentRange) {
+DcbEntryCommand DcbEntryCommand::range(int currentRange,
+                                       std::function<void(int)> apply,
+                                       CommandType nextCommandType) {
     Spec spec;
     spec.type = CommandType::Range;
     spec.headingLines = {QStringLiteral("RANGE")};
@@ -70,10 +72,14 @@ DcbEntryCommand DcbEntryCommand::range(int currentRange) {
     spec.numericOnly = true;
     spec.initialEntry = QString();
     spec.wheelBaseValue = currentRange;
+    spec.apply = std::move(apply);
+    spec.nextCommandType = nextCommandType;
     return DcbEntryCommand(spec);
 }
 
-DcbEntryCommand DcbEntryCommand::rotate(int currentRotation) {
+DcbEntryCommand DcbEntryCommand::rotate(int currentRotation,
+                                        std::function<void(int)> apply,
+                                        CommandType nextCommandType) {
     Spec spec;
     spec.type = CommandType::Rotate;
     spec.headingLines = {QStringLiteral("ROTATE")};
@@ -85,10 +91,14 @@ DcbEntryCommand DcbEntryCommand::rotate(int currentRotation) {
     spec.wrapWheel = true;
     spec.initialEntry = QString();
     spec.wheelBaseValue = currentRotation;
+    spec.apply = std::move(apply);
+    spec.nextCommandType = nextCommandType;
     return DcbEntryCommand(spec);
 }
 
-DcbEntryCommand DcbEntryCommand::vectorLength(int currentVectorLength) {
+DcbEntryCommand DcbEntryCommand::vectorLength(int currentVectorLength,
+                                              std::function<void(int)> apply,
+                                              CommandType nextCommandType) {
     Spec spec;
     spec.type = CommandType::VectorLength;
     spec.headingLines = {QStringLiteral("VECTOR LENGTH")};
@@ -99,10 +109,14 @@ DcbEntryCommand DcbEntryCommand::vectorLength(int currentVectorLength) {
     spec.numericOnly = true;
     spec.initialEntry = QString();
     spec.wheelBaseValue = currentVectorLength;
+    spec.apply = std::move(apply);
+    spec.nextCommandType = nextCommandType;
     return DcbEntryCommand(spec);
 }
 
-DcbEntryCommand DcbEntryCommand::leaderLength(int currentLeaderLength) {
+DcbEntryCommand DcbEntryCommand::leaderLength(int currentLeaderLength,
+                                              std::function<void(int)> apply,
+                                              CommandType nextCommandType) {
     Spec spec;
     spec.type = CommandType::LeaderLength;
     spec.headingLines = {QStringLiteral("LDR LNG")};
@@ -113,12 +127,16 @@ DcbEntryCommand DcbEntryCommand::leaderLength(int currentLeaderLength) {
     spec.numericOnly = true;
     spec.initialEntry = QString();
     spec.wheelBaseValue = currentLeaderLength;
+    spec.apply = std::move(apply);
+    spec.nextCommandType = nextCommandType;
     return DcbEntryCommand(spec);
 }
 
 DcbEntryCommand DcbEntryCommand::brightness(CommandType type,
                                             QString label,
-                                            int currentValue) {
+                                            int currentValue,
+                                            std::function<void(int)> apply,
+                                            CommandType nextCommandType) {
     Spec spec;
     spec.type = type;
     spec.headingLines = {QStringLiteral("BRITE"), std::move(label)};
@@ -129,12 +147,16 @@ DcbEntryCommand DcbEntryCommand::brightness(CommandType type,
     spec.numericOnly = true;
     spec.initialEntry = QString();
     spec.wheelBaseValue = currentValue;
+    spec.apply = std::move(apply);
+    spec.nextCommandType = nextCommandType;
     return DcbEntryCommand(spec);
 }
 
 DcbEntryCommand DcbEntryCommand::charSize(CommandType type,
                                           QString label,
-                                          int currentValue) {
+                                          int currentValue,
+                                          std::function<void(int)> apply,
+                                          CommandType nextCommandType) {
     Spec spec;
     spec.type = type;
     spec.headingLines = {QStringLiteral("CHAR SIZE"), std::move(label)};
@@ -145,10 +167,13 @@ DcbEntryCommand DcbEntryCommand::charSize(CommandType type,
     spec.numericOnly = true;
     spec.initialEntry = QString();
     spec.wheelBaseValue = currentValue;
+    spec.apply = std::move(apply);
+    spec.nextCommandType = nextCommandType;
     return DcbEntryCommand(spec);
 }
 
-DcbEntryCommand DcbEntryCommand::deleteAllDbAreas() {
+DcbEntryCommand DcbEntryCommand::deleteAllDbAreas(std::function<void(int)> apply,
+                                                  CommandType nextCommandType) {
     Spec spec;
     spec.type = CommandType::DeleteAllDbAreas;
     spec.headingLines = {
@@ -166,10 +191,14 @@ DcbEntryCommand DcbEntryCommand::deleteAllDbAreas() {
     spec.wheelBaseValue = 1;
     spec.entryPrefix = QStringLiteral("(1 OR 2):");
     spec.entryColumnOffset = 10;
+    spec.apply = std::move(apply);
+    spec.nextCommandType = nextCommandType;
     return DcbEntryCommand(spec);
 }
 
-DcbEntryCommand DcbEntryCommand::traitAreaDbCharSize(int currentValue) {
+DcbEntryCommand DcbEntryCommand::traitAreaDbCharSize(int currentValue,
+                                                     std::function<void(int)> apply,
+                                                     CommandType nextCommandType) {
     Spec spec;
     spec.type = CommandType::DefineTraitAreaDbCharSize;
     spec.headingLines = {
@@ -185,10 +214,14 @@ DcbEntryCommand DcbEntryCommand::traitAreaDbCharSize(int currentValue) {
     spec.numericOnly = true;
     spec.initialEntry = QString();
     spec.wheelBaseValue = currentValue;
+    spec.apply = std::move(apply);
+    spec.nextCommandType = nextCommandType;
     return DcbEntryCommand(spec);
 }
 
-DcbEntryCommand DcbEntryCommand::traitAreaDbBrightness(int currentValue) {
+DcbEntryCommand DcbEntryCommand::traitAreaDbBrightness(int currentValue,
+                                                       std::function<void(int)> apply,
+                                                       CommandType nextCommandType) {
     Spec spec;
     spec.type = CommandType::DefineTraitAreaDbBrightness;
     spec.headingLines = {
@@ -204,10 +237,14 @@ DcbEntryCommand DcbEntryCommand::traitAreaDbBrightness(int currentValue) {
     spec.numericOnly = true;
     spec.initialEntry = QString();
     spec.wheelBaseValue = currentValue;
+    spec.apply = std::move(apply);
+    spec.nextCommandType = nextCommandType;
     return DcbEntryCommand(spec);
 }
 
-DcbEntryCommand DcbEntryCommand::traitAreaLeaderLength(int currentValue) {
+DcbEntryCommand DcbEntryCommand::traitAreaLeaderLength(int currentValue,
+                                                       std::function<void(int)> apply,
+                                                       CommandType nextCommandType) {
     Spec spec;
     spec.type = CommandType::DefineTraitAreaLeaderLength;
     spec.headingLines = {
@@ -222,10 +259,14 @@ DcbEntryCommand DcbEntryCommand::traitAreaLeaderLength(int currentValue) {
     spec.numericOnly = true;
     spec.initialEntry = QString();
     spec.wheelBaseValue = currentValue;
+    spec.apply = std::move(apply);
+    spec.nextCommandType = nextCommandType;
     return DcbEntryCommand(spec);
 }
 
-DcbEntryCommand DcbEntryCommand::traitAreaLeaderDirection(int currentValue) {
+DcbEntryCommand DcbEntryCommand::traitAreaLeaderDirection(int currentValue,
+                                                          std::function<void(int)> apply,
+                                                          CommandType nextCommandType) {
     Spec spec;
     spec.type = CommandType::DefineTraitAreaLeaderDirection;
     spec.headingLines = {
@@ -240,10 +281,17 @@ DcbEntryCommand DcbEntryCommand::traitAreaLeaderDirection(int currentValue) {
     spec.numericOnly = true;
     spec.initialEntry = QString();
     spec.wheelBaseValue = currentValue;
+    spec.apply = std::move(apply);
+    spec.validate = [](int value, QString*) {
+        return value != 5;
+    };
+    spec.nextCommandType = nextCommandType;
     return DcbEntryCommand(spec);
 }
 
-DcbEntryCommand DcbEntryCommand::modifyTraitAreaDbCharSize(int currentValue) {
+DcbEntryCommand DcbEntryCommand::modifyTraitAreaDbCharSize(int currentValue,
+                                                           std::function<void(int)> apply,
+                                                           CommandType nextCommandType) {
     Spec spec;
     spec.type = CommandType::ModifyTraitAreaDbCharSize;
     spec.headingLines = {
@@ -259,10 +307,14 @@ DcbEntryCommand DcbEntryCommand::modifyTraitAreaDbCharSize(int currentValue) {
     spec.numericOnly = true;
     spec.initialEntry = QString();
     spec.wheelBaseValue = currentValue;
+    spec.apply = std::move(apply);
+    spec.nextCommandType = nextCommandType;
     return DcbEntryCommand(spec);
 }
 
-DcbEntryCommand DcbEntryCommand::modifyTraitAreaDbBrightness(int currentValue) {
+DcbEntryCommand DcbEntryCommand::modifyTraitAreaDbBrightness(int currentValue,
+                                                             std::function<void(int)> apply,
+                                                             CommandType nextCommandType) {
     Spec spec;
     spec.type = CommandType::ModifyTraitAreaDbBrightness;
     spec.headingLines = {
@@ -278,10 +330,14 @@ DcbEntryCommand DcbEntryCommand::modifyTraitAreaDbBrightness(int currentValue) {
     spec.numericOnly = true;
     spec.initialEntry = QString();
     spec.wheelBaseValue = currentValue;
+    spec.apply = std::move(apply);
+    spec.nextCommandType = nextCommandType;
     return DcbEntryCommand(spec);
 }
 
-DcbEntryCommand DcbEntryCommand::modifyTraitAreaLeaderLength(int currentValue) {
+DcbEntryCommand DcbEntryCommand::modifyTraitAreaLeaderLength(int currentValue,
+                                                             std::function<void(int)> apply,
+                                                             CommandType nextCommandType) {
     Spec spec;
     spec.type = CommandType::ModifyTraitAreaLeaderLength;
     spec.headingLines = {
@@ -296,10 +352,14 @@ DcbEntryCommand DcbEntryCommand::modifyTraitAreaLeaderLength(int currentValue) {
     spec.numericOnly = true;
     spec.initialEntry = QString();
     spec.wheelBaseValue = currentValue;
+    spec.apply = std::move(apply);
+    spec.nextCommandType = nextCommandType;
     return DcbEntryCommand(spec);
 }
 
-DcbEntryCommand DcbEntryCommand::modifyTraitAreaLeaderDirection(int currentValue) {
+DcbEntryCommand DcbEntryCommand::modifyTraitAreaLeaderDirection(int currentValue,
+                                                                std::function<void(int)> apply,
+                                                                CommandType nextCommandType) {
     Spec spec;
     spec.type = CommandType::ModifyTraitAreaLeaderDirection;
     spec.headingLines = {
@@ -314,6 +374,11 @@ DcbEntryCommand DcbEntryCommand::modifyTraitAreaLeaderDirection(int currentValue
     spec.numericOnly = true;
     spec.initialEntry = QString();
     spec.wheelBaseValue = currentValue;
+    spec.apply = std::move(apply);
+    spec.validate = [](int value, QString*) {
+        return value != 5;
+    };
+    spec.nextCommandType = nextCommandType;
     return DcbEntryCommand(spec);
 }
 
@@ -339,8 +404,16 @@ CommandType DcbEntryCommand::type() const {
     return spec_.type;
 }
 
+CommandType DcbEntryCommand::nextCommandType() const {
+    return spec_.nextCommandType;
+}
+
 QString DcbEntryCommand::invalidMessage() const {
     return spec_.invalidMessage;
+}
+
+void DcbEntryCommand::apply(int value) const {
+    if (spec_.apply) spec_.apply(value);
 }
 
 void DcbEntryCommand::insert(QChar c) {
@@ -407,6 +480,7 @@ bool DcbEntryCommand::valueInt(int* out) const {
     const int value = value_.trimmed().toInt(&ok);
     if (!ok) return false;
     if (value < spec_.minValue || value > spec_.maxValue) return false;
+    if (spec_.validate && !spec_.validate(value, nullptr)) return false;
 
     if (out) *out = value;
     return true;

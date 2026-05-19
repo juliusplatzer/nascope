@@ -1,20 +1,21 @@
-#ifndef ASDEX_SCOPE_H_
-#define ASDEX_SCOPE_H_
+#ifndef ASDEX_ASDEX_H_
+#define ASDEX_ASDEX_H_
 
-#include "asdex/atiscache.h"
 #include "asdex/cmdsetup.h"
 #include "asdex/cmdslew.h"
 #include "asdex/lists.h"
 #include "asdex/notamcache.h"
-#include "asdex/targetcache.h"
 #include "asdex/colors.h"
 #include "asdex/cursors.h"
 #include "asdex/dcb.h"
-#include "asdex/datablocks.h"
+#include "asdex/datablock.h"
 #include "asdex/dbareas.h"
 #include "asdex/tempdata.h"
-#include "asdex/targets.h"
+#include "asdex/target.h"
+#include "io/smes.h"
+#include "io/atis.h"
 #include "renderer/font.h"
+#include "panes/display.h"
 #include "asdex/videomaps.h"
 
 #include <QEvent>
@@ -40,10 +41,10 @@ class Renderer;
 
 namespace asdex {
 
-class AsdexScopeWidget : public QOpenGLWidget {
+class Asdex : public panes::Display {
 public:
-    explicit AsdexScopeWidget(QString airport, QWidget* parent = nullptr);
-    ~AsdexScopeWidget() override;
+    explicit Asdex(QString airport, QWidget* parent = nullptr);
+    ~Asdex() override;
 
     QString airport() const { return airport_; }
 
@@ -86,8 +87,34 @@ private:
         Hidden,
     };
 
+    struct BrightnessProperty {
+        CommandType command;
+        DcbFunction function;
+        const char* label;
+        int Asdex::*field;
+        bool affectsDcb;
+    };
+
+    struct CharSizeProperty {
+        CommandType command;
+        DcbFunction function;
+        const char* label;
+        int Asdex::*field;
+        int maxValue;
+        bool affectsDcb;
+    };
+
+    struct TraitAreaProperty {
+        CommandType defineCommand;
+        CommandType modifyCommand;
+        DcbFunction function;
+        int defaultValue;
+        int (*read)(const DbArea&);
+        void (*write)(DbArea&, int);
+    };
+
     void fitMapToView();
-    void updateTargetsFromCache();
+    void updateTargetsFromSmes();
     void updateHighlightedTarget(const QPointF& mouseLogical);
     void clearHighlightedTarget();
     bool handleDatablockEditKey(QKeyEvent* event);
@@ -107,6 +134,7 @@ private:
     void toggleDcbOnOff();
     void toggleDayNite();
     void toggleAllDataBlocks();
+    void startDcbSubmenu(CommandType command, DcbMenu menu, bool clearDraft);
     void startBrightnessMenu();
     void startBrightnessValueCommand(DcbFunction function);
     void startCharSizeMenu();
@@ -114,10 +142,7 @@ private:
     void startDbAreaMenu();
     void startDbEditMenu();
     void startDefineTraitAreaCommand();
-    void startTraitAreaDbCharSizeCommand();
-    void startTraitAreaDbBrightnessCommand();
-    void startTraitAreaLeaderLengthCommand();
-    void startTraitAreaLeaderDirectionCommand();
+    void startTraitAreaValueCommand(DcbFunction function);
     void startDefineOffAreaCommand();
     void startModifyTraitAreaCommand();
     void startDeleteAllDbAreasCommand();
@@ -139,14 +164,8 @@ private:
     const DbArea* traitAreaForTarget(const AsdexTarget& target) const;
     bool vectorVisibleForTarget(const AsdexTarget& target) const;
     DataBlockSettings dataBlockSettingsForTarget(const AsdexTarget& target) const;
-    int selectedTraitDbCharSizeValue() const;
-    int selectedTraitDbBrightnessValue() const;
-    int selectedTraitLeaderLengthValue() const;
-    int selectedTraitLeaderDirectionValue() const;
-    void setSelectedTraitDbCharSizeValue(int value);
-    void setSelectedTraitDbBrightnessValue(int value);
-    void setSelectedTraitLeaderLengthValue(int value);
-    void setSelectedTraitLeaderDirectionValue(int value);
+    int selectedTraitValue(CommandType type) const;
+    void setSelectedTraitValue(CommandType type, int value);
     LeaderDirection leaderDirectionFromDcbValue(int value) const;
     int nextLeaderDirectionValue(int current, int step) const;
     bool targetInsideDbOffArea(const AsdexTarget& target) const;
@@ -156,13 +175,7 @@ private:
     bool dbAreaDraftWouldSelfIntersect(const QPointF& nextPoint) const;
     bool dbAreaDraftWouldOverlapExisting(const QPointF& nextPoint) const;
     bool dbAreaPolygonIsValidOnClose() const;
-    CommandType commandForBrightnessFunction(DcbFunction function) const;
-    QString brightnessCommandLabel(CommandType type) const;
-    int brightnessValue(CommandType type) const;
     void setBrightnessValue(CommandType type, int value);
-    CommandType commandForCharSizeFunction(DcbFunction function) const;
-    QString charSizeCommandLabel(CommandType type) const;
-    int charSizeValue(CommandType type) const;
     void setCharSizeValue(CommandType type, int value);
     int currentRangeValue() const;
     void setRangeValue(int range);
@@ -186,6 +199,17 @@ private:
     void cancelLeaderDirectionKeyboardCommand();
     void submitLeaderDirectionForAll();
     void submitLeaderDirectionForTargetAt(const QPointF& logicalPoint);
+    void beginDcbEntryCommand(DcbEntryCommand command);
+    void finalizeDcbEntryCommand();
+    static const BrightnessProperty* brightnessProperties(std::size_t* count);
+    static const BrightnessProperty* brightnessPropertyFor(CommandType type);
+    static const BrightnessProperty* brightnessPropertyFor(DcbFunction function);
+    static const CharSizeProperty* charSizeProperties(std::size_t* count);
+    static const CharSizeProperty* charSizePropertyFor(CommandType type);
+    static const CharSizeProperty* charSizePropertyFor(DcbFunction function);
+    static const TraitAreaProperty* traitAreaProperties(std::size_t* count);
+    static const TraitAreaProperty* traitAreaPropertyFor(CommandType type);
+    static const TraitAreaProperty* traitAreaPropertyFor(DcbFunction function);
     void startMapRepositionCommand();
     void commitMapRepositionCommand();
     void cancelMapRepositionCommand();
@@ -220,8 +244,8 @@ private:
 
     QString airport_;
     asdex::VideoMap map_;
-    ::asdex::TargetCache targetCache_;
-    ::asdex::AtisCache atisCache_;
+    io::SmesClient smes_;
+    io::AtisFeed atis_;
     ::asdex::RunwayClosureCache runwayClosureCache_;
     asdex::CursorSet cursors_;
     Dcb dcb_;
@@ -303,4 +327,4 @@ private:
 
 } // namespace asdex
 
-#endif  // ASDEX_SCOPE_H_
+#endif  // ASDEX_ASDEX_H_

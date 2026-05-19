@@ -1,4 +1,4 @@
-#include "asdex/targetcache.h"
+#include "io/smes.h"
 
 #include <QAbstractSocket>
 #include <QDateTime>
@@ -12,7 +12,7 @@
 
 #include <utility>
 
-namespace asdex {
+namespace io {
 namespace {
 
 constexpr int kReconnectDelayMs = 2000;
@@ -56,16 +56,16 @@ void setTargetType(QString& dst, const QJsonValue& value) {
 
 } // namespace
 
-TargetCache::TargetCache(QString icao, QObject* parent)
+SmesClient::SmesClient(QString icao, QObject* parent)
     : QObject(parent),
       icao_(std::move(icao)) {
     reconnect_.setSingleShot(true);
     reconnect_.setInterval(kReconnectDelayMs);
 
-    connect(&reconnect_, &QTimer::timeout, this, &TargetCache::openSocket);
-    connect(&socket_, &QWebSocket::connected, this, &TargetCache::onConnected);
-    connect(&socket_, &QWebSocket::disconnected, this, &TargetCache::onDisconnected);
-    connect(&socket_, &QWebSocket::textMessageReceived, this, &TargetCache::onTextMessage);
+    connect(&reconnect_, &QTimer::timeout, this, &SmesClient::openSocket);
+    connect(&socket_, &QWebSocket::connected, this, &SmesClient::onConnected);
+    connect(&socket_, &QWebSocket::disconnected, this, &SmesClient::onDisconnected);
+    connect(&socket_, &QWebSocket::textMessageReceived, this, &SmesClient::onTextMessage);
     connect(&socket_, &QWebSocket::errorOccurred, this, [](QAbstractSocket::SocketError) {
         qWarning().noquote() << "[asdex] target websocket error";
     });
@@ -73,21 +73,21 @@ TargetCache::TargetCache(QString icao, QObject* parent)
     openSocket();
 }
 
-TargetCache::~TargetCache() {
+SmesClient::~SmesClient() {
     reconnect_.stop();
     socket_.close();
 }
 
-void TargetCache::openSocket() {
+void SmesClient::openSocket() {
     if (socket_.state() != QAbstractSocket::UnconnectedState) return;
     socket_.open(QUrl(websocketUrl()));
 }
 
-void TargetCache::onConnected() {
+void SmesClient::onConnected() {
     sendAirportFilter();
 }
 
-void TargetCache::onDisconnected() {
+void SmesClient::onDisconnected() {
     if (!targets_.isEmpty()) {
         targets_.clear();
         emit changed();
@@ -95,7 +95,7 @@ void TargetCache::onDisconnected() {
     reconnect_.start();
 }
 
-void TargetCache::sendAirportFilter() {
+void SmesClient::sendAirportFilter() {
     QJsonObject message;
     message.insert(QStringLiteral("type"), QStringLiteral("setAirports"));
 
@@ -106,7 +106,7 @@ void TargetCache::sendAirportFilter() {
     socket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
 }
 
-void TargetCache::onTextMessage(const QString& text) {
+void SmesClient::onTextMessage(const QString& text) {
     const QJsonDocument document = QJsonDocument::fromJson(text.toUtf8());
     if (!document.isObject()) return;
 
@@ -124,7 +124,7 @@ void TargetCache::onTextMessage(const QString& text) {
     const QJsonObject changedObject = message.value(QStringLiteral("changed")).toObject();
     if (changedObject.isEmpty()) return;
 
-    Target& target = targets_[key];
+    SmesTarget& target = targets_[key];
     if (target.airport.isEmpty())
         target.airport = message.value(QStringLiteral("airport")).toString();
 
@@ -173,7 +173,7 @@ void TargetCache::onTextMessage(const QString& text) {
     emit changed();
 }
 
-void TargetCache::setAirport(const QString& icao) {
+void SmesClient::setAirport(const QString& icao) {
     const QString next = icao.toUpper();
     if (next.isEmpty() || next == icao_) return;
 
@@ -186,15 +186,15 @@ void TargetCache::setAirport(const QString& icao) {
     if (socket_.state() == QAbstractSocket::ConnectedState) sendAirportFilter();
 }
 
-void TargetCache::sendDatablockEdit(const QString& facilityId,
-                                    const QString& trackId,
-                                    const QString& callsign,
-                                    const QString& beaconCode,
-                                    const QString& category,
-                                    const QString& aircraftType,
-                                    const QString& fix,
-                                    const QString& scratchpad1,
-                                    const QString& scratchpad2) {
+void SmesClient::sendDatablockEdit(const QString& facilityId,
+                                   const QString& trackId,
+                                   const QString& callsign,
+                                   const QString& beaconCode,
+                                   const QString& category,
+                                   const QString& aircraftType,
+                                   const QString& fix,
+                                   const QString& scratchpad1,
+                                   const QString& scratchpad2) {
     if (socket_.state() != QAbstractSocket::ConnectedState) {
         qWarning().noquote() << "[asdex] cannot send datablock edit: websocket disconnected";
         return;
@@ -215,4 +215,4 @@ void TargetCache::sendDatablockEdit(const QString& facilityId,
     socket_.sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
 }
 
-} // namespace asdex
+} // namespace io
